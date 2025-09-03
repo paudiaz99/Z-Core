@@ -227,9 +227,7 @@ always @(posedge clk) begin
 
     if(reset) begin 
         state <= STATE_FETCH;
-        mem_addr <= PC_INIT;
         PC <= PC_INIT;
-        mem_write_en <= 0;
     end
     else begin
         if (state[STATE_FETCH_b]) begin
