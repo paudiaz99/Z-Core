@@ -28,15 +28,15 @@ localparam S_INST = 7'b0100011;
 localparam B_INST = 7'b1100011;
 
 // J/U-Type Instructions
-localparam JAL_INST = 7'b0111111;
+localparam JAL_INST = 7'b1101111;
 localparam LUI_INST = 7'b0110111;
-localparam AUIPC = 7'b0010111;
+localparam AUIPC_INST = 7'b0010111;
 
 // **************************************************
 //                Memory Addressing
 // **************************************************
 
-assign mem_addr = state[STATE_MEM_b] ? PC : ALUOut_r;
+assign mem_addr = state[STATE_MEM_b] ? ALUOut_r : PC;
 
 assign mem_write_en = state[STATE_MEM_b] ? isStore : 0;
 
@@ -131,7 +131,8 @@ reg [31:0] Imm_r;
 wire [31:0] rd_in_mux = isLoad   ? MDR :
                         isJAL    ? PC_plus4 :
                         isJALR   ? PC_plus4 :
-                        isUimm   ? Imm_r :
+                        isLUI    ? Imm_r :
+                        isAUIPC  ? PC_plus_Imm :
                         ALUOut_r;
 
 // Outputs
@@ -178,7 +179,7 @@ z_core_alu alu (
 // ALU Input 2 Mux
 wire [31:0] alu_in2_mux = isIimm ? Iimm :
                           isSimm ? Simm :
-                          isBimm ? Bimm :
+                          isBimm ? rs2_out :
                           isJAL  ? Jimm :
                           isUimm ? Uimm :
                           rs2_out;
@@ -192,7 +193,9 @@ wire [31:0] alu_in2_mux = isIimm ? Iimm :
 wire isIimm = (op == I_INST) || (op == I_LOAD_INST) || (op == JALR_INST);
 wire isSimm = (op == S_INST);
 wire isBimm = (op == B_INST);
-wire isUimm = (op == LUI_INST) || (op == AUIPC);
+wire isUimm = (op == LUI_INST) || (op == AUIPC_INST);
+wire isLUI = (op == LUI_INST);
+wire isAUIPC = (op == AUIPC_INST);
 wire isJAL = (op == JAL_INST);
 wire isJALR = (op == JALR_INST);
 
