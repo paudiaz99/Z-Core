@@ -16,21 +16,21 @@ module z_core_control_u
 // **************************************************
 
 // R-Type Instructions
-localparam R_INST = 7'0110011;
+localparam R_INST = 7'b0110011;
 
 // I-Type Instructions
-localparam I_INST = 7'0010011;
-localparam I_LOAD_INST = 7'0000011;
-localparam JALR_INST = 7'1100111;
+localparam I_INST = 7'b0010011;
+localparam I_LOAD_INST = 7'b0000011;
+localparam JALR_INST = 7'b1100111;
 
 // S/B-Type Instructions
-localparam S_INST = 7'0100011;
-localparam B_INST = 7'1100011;
+localparam S_INST = 7'b0100011;
+localparam B_INST = 7'b1100011;
 
 // J/U-Type Instructions
-localparam JAL_INST = 7'0111111;
-localparam LUI_INST = 7'0110111;
-localparam AUIPC = 7'0010111;
+localparam JAL_INST = 7'b0111111;
+localparam LUI_INST = 7'b0110111;
+localparam AUIPC = 7'b0010111;
 
 // **************************************************
 //                Memory Addressing
@@ -71,17 +71,17 @@ wire [31:0] PC_mux = (isIimm & op[3]) ? alu_out :
 // **************************************************
 
 // Outputs
-wire [6:0] op,
-wire [4:0] rs1,
-wire [4:0] rs2,
-wire [4:0] rd,
-wire [31:0] Iimm,
-wire [31:0] Simm,
-wire [31:0] Uimm,
-wire [31:0] Bimm,
-wire [31:0] Jimm,
-wire [2:0] funct3,
-wire [6:0] funct7
+wire [6:0] op;
+wire [4:0] rs1;
+wire [4:0] rs2;
+wire [4:0] rd;
+wire [31:0] Iimm;
+wire [31:0] Simm;
+wire [31:0] Uimm;
+wire [31:0] Bimm;
+wire [31:0] Jimm;
+wire [2:0] funct3;
+wire [6:0] funct7;
 
 z_core_decoder decoder (
     .inst(IR)
@@ -186,17 +186,17 @@ wire isWB = ~(isSimm | isBimm);
 
 localparam N_STATES = 5;
 
-localparam STATE_FETCH_b = 0
-localparam STATE_DECODE_b = 1
-localparam STATE_EXECUTE_b = 2
-localparam STATE_MEM_b = 3
-localparam STATE_WRITE_b = 4;
+localparam STATE_FETCH_b   = 0;
+localparam STATE_DECODE_b  = 1;
+localparam STATE_EXECUTE_b = 2;
+localparam STATE_MEM_b     = 3;
+localparam STATE_WRITE_b   = 4;
 
-localparam STATE_FETCH = 1 << STATE_FETCH_b;
-localparam STATE_DECODE = 1 << STATE_DECODE_b;
-localparam STATE_EXECUTE = 1 << STATE_EXECUTE_b;
-localparam STATE_MEM = 1 << STATE_MEM_b;
-localparam STATE_WRITE = 1 << STATE_WRITE_b;
+localparam STATE_FETCH =    1 << STATE_FETCH_b;
+localparam STATE_DECODE =   1 << STATE_DECODE_b;
+localparam STATE_EXECUTE =  1 << STATE_EXECUTE_b;
+localparam STATE_MEM =      1 << STATE_MEM_b;
+localparam STATE_WRITE =    1 << STATE_WRITE_b;
 
 reg [N_STATES-1:0] state;
 
@@ -209,41 +209,34 @@ always @(posedge clk) begin
         mem_write_en <= 0;
     end
     else begin
-        case (1'b1);
-        state[STATE_FETCH_b]: begin
+        if (state[STATE_FETCH_b]) begin
             // Update Instruction Register
             IR <= mem_data_in;
             state <= STATE_DECODE;
         end
-
-        state[STATE_DECODE_b]: begin
+        else if (state[STATE_DECODE_b]) begin
             // Update ALU Registers
             alu_in1_r <= rs1_out;
             alu_in2_r <= alu_in2_mux;
             alu_op_r <= op;
             alu_funct3_r <= funct3;
             alu_funct7_r <= funct7;
-
             state <= STATE_EXECUTE;
         end
-
-        state[STATE_EXECUTE_b]: begin
+        else if (state[STATE_EXECUTE_b]) begin
             // Update Program Counter
             PC <= PC_mux;
             state <= (isLoad || isStore) ? STATE_MEM : (isWB ? STATE_WRITE : STATE_FETCH);
         end
-
-        state[STATE_MEM_b]: begin
+        else if (state[STATE_MEM_b]) begin
             // Read or Write Memory
             state <= isWB ? STATE_WRITE : STATE_FETCH;
         end
-
-        state[STATE_WRITE_b]: begin
+        else if (state[STATE_WRITE_b]) begin
             // Update Register File
             rd_in_r <= rd_in_mux;
             state <= STATE_FETCH;
         end
-        endcase
     end
 
 end
