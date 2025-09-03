@@ -36,9 +36,14 @@ localparam AUIPC = 7'b0010111;
 //                Memory Addressing
 // **************************************************
 
-assign mem_addr = (state == STATE_FETCH) ? PC : alu_out;
+assign mem_addr = state[STATE_MEM_b] ? PC : ALUOut_r;
 
-assign mem_write_en = (state == STATE_MEM) ? isStore : 0;
+assign mem_write_en = state[STATE_MEM_b] ? isStore : 0;
+
+assign mem_data_out = state[STATE_MEM_b] ? mem_data_out_r : 32'h0;
+
+reg [31:0] MDR;
+reg [31:0] mem_data_out_r;
 
 // **************************************************
 //              Instruction Register
@@ -57,13 +62,12 @@ reg [31:0] PC;
 
 // Program Counter Plus 
 wire [31:0] PC_plus4     = PC + 4;
-wire [31:0] PC_plus_Bimm = PC + Bimm;
-wire [31:0] PC_plus_Jimm = PC + Jimm;
+wire [31:0] PC_plus_Imm = PC + Imm_r;
 
 // Program Counter Mux
-wire [31:0] PC_mux = (isIimm & op[3]) ? alu_out :
-                          isBimm           ? (alu_branch ? PC_plus_Bimm : PC_plus4) :
-                          isJAL            ? PC_plus_Jimm :
+wire [31:0] PC_mux = (isJALR) ? alu_out :
+                          isBimm           ? (alu_branch ? PC_plus_Imm : PC_plus4) :
+                          isJAL            ? PC_plus_Imm :
                           PC_plus4;
 
 // **************************************************
@@ -98,12 +102,37 @@ z_core_decoder decoder (
     ,.funct7(funct7)
 );
 
+// Decoder Combiational Logic
+
+wire [31:0] Imm_mux_out = isIimm ? Iimm :
+                          isSimm ? Simm :
+                          isBimm ? Bimm :
+                          isJAL  ? Jimm :
+                          isUimm ? Uimm :
+                          32'h0;
+
+// Decode Stage Registers
+
+// ALU Input Registers
+reg [31:0] alu_in1_r;
+reg [31:0] alu_in2_r;
+reg [6:0] alu_op_r;
+reg [2:0] alu_funct3_r;
+reg [6:0] alu_funct7_r;
+
+// Immediate Register
+reg [31:0] Imm_r;
+
 // **************************************************
 //                  Register File
 // **************************************************
 
-// Input Register
-reg [31:0] rd_in_r;
+// RD_In Multiplexer
+wire [31:0] rd_in_mux = isLoad   ? MDR :
+                        isJAL    ? PC_plus4 :
+                        isJALR   ? PC_plus4 :
+                        isUimm   ? Imm_r :
+                        ALUOut_r;
 
 // Outputs
 wire [31:0] rs1_out;
@@ -112,40 +141,32 @@ wire [31:0] rs2_out;
 z_core_reg_file reg_file (
     .clk(clk)
     ,.rd(rd)
-    ,.rd_in(rd_in_r)
+    ,.rd_in(rd_in_mux)
     ,.rs1(rs1)
     ,.rs2(rs2)
+    ,.write_enable(write_enable)
     ,.reset(reset)
     ,.rs1_out(rs1_out)
     ,.rs2_out(rs2_out)
 );
 
-// RD Multiplexer
-wire [31:0] rd_in_mux = isLoad   ? mem_data_in :
-                   isJAL    ? PC_plus4 :
-                   isJALR   ? PC_plus4 :
-                   isUimm   ? Uimm :
-                   alu_out;
 
+// Write Enable Control
+wire write_enable = state[STATE_WRITE_b];
 
 // **************************************************
 //                       ALU
 // **************************************************
 
-// Input Registers
-reg [31:0] alu_in1_r;
-reg [31:0] alu_in2_r;
-reg [6:0] alu_op_r;
-reg [2:0] alu_funct3_r;
-reg [6:0] alu_funct7_r;
+// Output Register
+reg [31:0] ALUOut_r;
 
 // Outputs
 wire [31:0] alu_out;
 wire alu_branch;
 
 z_core_alu alu (
-    .clk(clk)
-    ,.alu_in1(alu_in1_r)
+    .alu_in1(alu_in1_r)
     ,.alu_in2(alu_in2_r)
     ,.alu_op(alu_op_r)
     ,.alu_funct3(alu_funct3_r)
@@ -162,6 +183,7 @@ wire [31:0] alu_in2_mux = isIimm ? Iimm :
                           isUimm ? Uimm :
                           rs2_out;
 
+
 // **************************************************
 //                 Control Signals
 // **************************************************
@@ -172,6 +194,7 @@ wire isSimm = (op == S_INST);
 wire isBimm = (op == B_INST);
 wire isUimm = (op == LUI_INST) || (op == AUIPC);
 wire isJAL = (op == JAL_INST);
+wire isJALR = (op == JALR_INST);
 
 // Memory Control
 wire isLoad = (op == I_LOAD_INST);
@@ -212,6 +235,7 @@ always @(posedge clk) begin
         if (state[STATE_FETCH_b]) begin
             // Update Instruction Register
             IR <= mem_data_in;
+
             state <= STATE_DECODE;
         end
         else if (state[STATE_DECODE_b]) begin
@@ -221,20 +245,31 @@ always @(posedge clk) begin
             alu_op_r <= op;
             alu_funct3_r <= funct3;
             alu_funct7_r <= funct7;
+
+            // Store Immediate for later use
+            Imm_r <= Imm_mux_out;
+
+            // Store rs2_out for memory store
+            mem_data_out_r <= rs2_out;
+
             state <= STATE_EXECUTE;
         end
         else if (state[STATE_EXECUTE_b]) begin
             // Update Program Counter
             PC <= PC_mux;
+
+            // Store ALU Results
+            ALUOut_r <= alu_out;
+
             state <= (isLoad || isStore) ? STATE_MEM : (isWB ? STATE_WRITE : STATE_FETCH);
         end
         else if (state[STATE_MEM_b]) begin
-            // Read or Write Memory
+            // Store Memory Data Register
+            if (isLoad) MDR <= mem_data_in;
+
             state <= isWB ? STATE_WRITE : STATE_FETCH;
         end
         else if (state[STATE_WRITE_b]) begin
-            // Update Register File
-            rd_in_r <= rd_in_mux;
             state <= STATE_FETCH;
         end
     end

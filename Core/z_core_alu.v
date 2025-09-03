@@ -1,6 +1,5 @@
 
 module z_core_alu (
-    input clk,
     input [31:0] alu_in1,
     input [31:0] alu_in2,
     input [6:0] alu_op,

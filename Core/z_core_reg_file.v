@@ -5,6 +5,7 @@ module z_core_reg_file(
     input [31:0] rd_in,
     input [4:0] rs1,
     input [4:0] rs2,
+    input write_enable,
     input reset,
 
     // Outputs
@@ -83,7 +84,7 @@ module z_core_reg_file(
             reg_r30_q <= 32'b0;
             reg_r31_q <= 32'b0;
         end
-        else begin
+        else if (write_enable) begin
             if(rd == 5'h1) reg_r1_q <= rd_in;
             if(rd == 5'h2) reg_r2_q <= rd_in;
             if(rd == 5'h3) reg_r3_q <= rd_in;
