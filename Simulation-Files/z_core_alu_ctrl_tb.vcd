@@ -1,0 +1,129 @@
+$date
+	Tue Sep  9 18:27:15 2025
+$end
+$version
+	Icarus Verilog
+$end
+$timescale
+	1ps
+$end
+$scope module z_core_alu_ctrl_tb $end
+$var wire 4 ! alu_inst_type [3:0] $end
+$var reg 3 " alu_funct3 [2:0] $end
+$var reg 7 # alu_funct7 [6:0] $end
+$var reg 7 $ alu_op [6:0] $end
+$scope module alu_ctrl $end
+$var wire 3 % alu_funct3 [2:0] $end
+$var wire 7 & alu_funct7 [6:0] $end
+$var wire 7 ' alu_op [6:0] $end
+$var parameter 7 ( AUIPC_INST $end
+$var parameter 7 ) B_INST $end
+$var parameter 3 * F3_ADD_SUB_LB_JALR_SB_BEQ $end
+$var parameter 3 + F3_AND_BGEU $end
+$var parameter 3 , F3_OR_BLTU $end
+$var parameter 3 - F3_SLL_LH_SH_BNE $end
+$var parameter 3 . F3_SLTU $end
+$var parameter 3 / F3_SLT_LW_SW $end
+$var parameter 3 0 F3_SRL_SRA_LHU_BGE $end
+$var parameter 3 1 F3_XOR_LBU_BLT $end
+$var parameter 5 2 INST_ADD $end
+$var parameter 5 3 INST_AND $end
+$var parameter 5 4 INST_BEQ $end
+$var parameter 5 5 INST_BGE $end
+$var parameter 5 6 INST_BGEU $end
+$var parameter 5 7 INST_BLT $end
+$var parameter 5 8 INST_BLTU $end
+$var parameter 5 9 INST_BNE $end
+$var parameter 5 : INST_OR $end
+$var parameter 5 ; INST_SLL $end
+$var parameter 5 < INST_SLT $end
+$var parameter 5 = INST_SLTU $end
+$var parameter 5 > INST_SRA $end
+$var parameter 5 ? INST_SRL $end
+$var parameter 5 @ INST_SUB $end
+$var parameter 5 A INST_XOR $end
+$var parameter 7 B I_INST $end
+$var parameter 7 C I_LOAD_INST $end
+$var parameter 7 D JALR_INST $end
+$var parameter 7 E JAL_INST $end
+$var parameter 7 F LUI_INST $end
+$var parameter 7 G R_INST $end
+$var parameter 7 H S_INST $end
+$var reg 4 I alu_inst_type [3:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+b100011 H
+b110011 G
+b110111 F
+b1101111 E
+b1100111 D
+b11 C
+b10011 B
+b101 A
+b1 @
+b110 ?
+b111 >
+b100 =
+b11 <
+b10 ;
+b1000 :
+b1011 9
+b1110 8
+b1100 7
+b1111 6
+b1101 5
+b1010 4
+b1001 3
+b0 2
+b100 1
+b101 0
+b10 /
+b11 .
+b1 -
+b110 ,
+b111 +
+b0 *
+b1100011 )
+b10111 (
+$end
+#0
+$dumpvars
+b0 I
+b110011 '
+b0 &
+b0 %
+b110011 $
+b0 #
+b0 "
+b0 !
+$end
+#10000
+b1 !
+b1 I
+b100000 #
+b100000 &
+#20000
+b0 !
+b0 I
+bx #
+bx &
+b10011 $
+b10011 '
+#30000
+b10 !
+b10 I
+b1 "
+b1 %
+#40000
+bx !
+bx I
+b1111111 #
+b1111111 &
+b111 "
+b111 %
+b1111111 $
+b1111111 '
+#50000

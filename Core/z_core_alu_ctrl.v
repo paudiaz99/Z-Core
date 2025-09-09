@@ -6,9 +6,9 @@
 // **************************************************
 
 module z_core_alu_ctrl(
-    input [6:0] alu_op;
-    input [2:0] alu_funct3;
-    input [6:0] alu_funct7;
+    input [6:0] alu_op,
+    input [2:0] alu_funct3,
+    input [6:0] alu_funct7,
     output reg [3:0] alu_inst_type
 );
 
@@ -64,9 +64,9 @@ always @(*) begin
             case(alu_funct3)
                 F3_ADD_SUB_LB_JALR_SB_BEQ: begin
                     if (alu_funct7[5] == 1'b1) begin
-                        alu_inst_type <= INST_SUB; // SUB
+                        alu_inst_type = INST_SUB; // SUB
                     end else begin
-                        alu_inst_type <= INST_ADD; // ADD
+                        alu_inst_type = INST_ADD; // ADD
                     end
                 end
                 F3_SLL_LH_SH_BNE: alu_inst_type <= INST_SLL; // SLL
@@ -75,53 +75,53 @@ always @(*) begin
                 F3_XOR_LBU_BLT: alu_inst_type <= INST_XOR; // XOR
                 F3_SRL_SRA_LHU_BGE: begin
                     if (alu_funct7[5] == 1'b1) begin
-                        alu_inst_type <= INST_SRA; // SRA
+                        alu_inst_type = INST_SRA; // SRA
                     end else begin
-                        alu_inst_type <= INST_SRL; // SRL
+                        alu_inst_type = INST_SRL; // SRL
                     end
                 end
-                F3_OR_BLTU: alu_inst_type <= INST_OR; // OR
-                F3_AND_BGEU: alu_inst_type <= INST_AND; // AND
-                default: alu_inst_type <= 4'bxxxx; // Invalid
+                F3_OR_BLTU: alu_inst_type = INST_OR; // OR
+                F3_AND_BGEU: alu_inst_type = INST_AND; // AND
+                default: alu_inst_type = 4'bxxxx; // Invalid
             endcase
         end
         I_INST: begin
             case(alu_funct3)
-                F3_ADD_SUB_LB_JALR_SB_BEQ: alu_inst_type <= INST_ADD; // ADDI
-                F3_SLL_LH_SH_BNE: alu_inst_type <= INST_SLL; // SLLI
-                F3_SLT_LW_SW: alu_inst_type <= INST_SLT; // SLTI
-                F3_SLTU: alu_inst_type <= INST_SLTU; // SLTIU
-                F3_XOR_LBU_BLT: alu_inst_type <= INST_XOR; // XORI
+                F3_ADD_SUB_LB_JALR_SB_BEQ: alu_inst_type = INST_ADD; // ADDI
+                F3_SLL_LH_SH_BNE: alu_inst_type = INST_SLL; // SLLI
+                F3_SLT_LW_SW: alu_inst_type = INST_SLT; // SLTI
+                F3_SLTU: alu_inst_type = INST_SLTU; // SLTIU
+                F3_XOR_LBU_BLT: alu_inst_type = INST_XOR; // XORI
                 F3_SRL_SRA_LHU_BGE: begin
                     if (alu_funct7[5] == 1'b1) begin
-                        alu_inst_type <= INST_SRA; // SRAI
+                        alu_inst_type = INST_SRA; // SRAI
                     end else begin
-                        alu_inst_type <= INST_SRL; // SRLI
+                        alu_inst_type = INST_SRL; // SRLI
                     end
                 end
-                F3_OR_BLTU: alu_inst_type <= INST_OR; // ORI
-                F3_AND_BGEU: alu_inst_type <= INST_AND; // ANDI
-                default: alu_inst_type <= 4'bxxxx; // Invalid
+                F3_OR_BLTU: alu_inst_type = INST_OR; // ORI
+                F3_AND_BGEU: alu_inst_type = INST_AND; // ANDI
+                default: alu_inst_type = 4'bxxxx; // Invalid
             endcase
         end
-        I_LOAD_INST: alu_inst_type <= INST_ADD; // Load uses ADD for address calculation
-        S_INST: alu_inst_type <= INST_ADD; // Store uses ADD for address calculation
+        I_LOAD_INST: alu_inst_type = INST_ADD; // Load uses ADD for address calculation
+        S_INST: alu_inst_type = INST_ADD; // Store uses ADD for address calculation
         B_INST: begin
             case(alu_funct3)
-                F3_ADD_SUB_LB_JALR_SB_BEQ: alu_inst_type <= INST_BEQ; // BEQ
-                F3_SLL_LH_SH_BNE: alu_inst_type <= INST_BNE; // BNE
-                F3_XOR_LBU_BLT: alu_inst_type <= INST_BLT; // BLT
-                F3_OR_BLTU: alu_inst_type <= INST_BLTU; // BLTU
-                F3_SRL_SRA_LHU_BGE: alu_inst_type <= INST_BGE; // BGE
-                F3_AND_BGEU: alu_inst_type <= INST_BGEU; // BGEU
-                default: alu_inst_type <= 4'bxxxx; // Invalid
+                F3_ADD_SUB_LB_JALR_SB_BEQ: alu_inst_type = INST_BEQ; // BEQ
+                F3_SLL_LH_SH_BNE: alu_inst_type = INST_BNE; // BNE
+                F3_XOR_LBU_BLT: alu_inst_type = INST_BLT; // BLT
+                F3_OR_BLTU: alu_inst_type = INST_BLTU; // BLTU
+                F3_SRL_SRA_LHU_BGE: alu_inst_type = INST_BGE; // BGE
+                F3_AND_BGEU: alu_inst_type = INST_BGEU; // BGEU
+                default: alu_inst_type = 4'bxxxx; // Invalid
             endcase
         end
-        JALR_INST: alu_inst_type <= INST_ADD; // JALR uses ADD
-        JAL_INST: alu_inst_type <= INST_ADD; // JAL uses ADD
-        LUI_INST: alu_inst_type <= INST_ADD; // LUI uses ADD
-        AUIPC_INST: alu_inst_type <= INST_ADD; // AUIPC uses ADD
-        default: alu_inst_type <= 4'bxxxx; // Invalid
+        JALR_INST: alu_inst_type = INST_ADD; // JALR uses ADD
+        JAL_INST: alu_inst_type = INST_ADD; // JAL uses ADD
+        LUI_INST: alu_inst_type = INST_ADD; // LUI uses ADD
+        AUIPC_INST: alu_inst_type = INST_ADD; // AUIPC uses ADD
+        default: alu_inst_type = 4'bxxxx; // Invalid
     endcase
 
 end

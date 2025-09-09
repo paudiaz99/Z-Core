@@ -1,7 +1,7 @@
 `timescale 1ns / 1ns
 `include "Core/z_core_decoder.v"
 
-module dec_tb;
+module z_core_decoder_tb;
 
     // Input instruction
     reg [31:0] inst;
@@ -48,7 +48,7 @@ module dec_tb;
         inst = 32'b00000000001000001000100000100011;
 
         # 10;
-        inst = 32'b00000000001100000000000100010011;
+        inst = 32'b00000000001100000000000100010011; // ADDI x2, x0, 3
 
         # 10;
 

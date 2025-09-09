@@ -1,0 +1,79 @@
+`timescale 1ns / 1ns
+`include "Core/z_core_alu.v"
+
+module z_core_alu_tb;
+
+    // Inputs
+    reg [31:0] alu_in1;
+    reg [31:0] alu_in2;
+    reg [3:0] alu_inst_type;
+
+    // Outputs
+    wire [31:0] alu_out;
+    wire alu_branch;
+
+    // Instantiate the ALU
+    z_core_alu uut (
+        .alu_in1(alu_in1),
+        .alu_in2(alu_in2),
+        .alu_inst_type(alu_inst_type),
+        .alu_out(alu_out),
+        .alu_branch(alu_branch)
+    );
+
+    // Test
+    initial begin
+
+        $dumpfile("z_core_alu_tb.vcd");
+        $dumpvars(0, z_core_alu_tb);
+
+        alu_in1 = 32'd2;
+        alu_in2 = 32'd3;
+        alu_inst_type = 4'd0; // ADD [2 + 3 = 5]
+        
+        #10;
+        alu_in1 = 32'd5;
+        alu_in2 = 32'd3;
+        alu_inst_type = 4'd1; // SUB [5 - 3 = 2]
+
+        #10;
+        alu_in1 = 32'b00000000000000000000000000000010; // 2
+        alu_in2 = 32'b00000000000000000000000000000001; // 1
+        alu_inst_type = 4'd2; // SLL [2 << 1 = 4]
+
+        #10;
+        alu_in1 = 32'b00000000000000000000000000000010; // 2
+        alu_in2 = 32'b00000000000000000000000000001000; // 8
+        alu_inst_type = 4'd2; // SLL [2 << 8 = 512]
+
+        #10;
+        alu_in1 = 32'd10;
+        alu_in2 = 32'd20;
+        alu_inst_type = 4'd3; // SLT [10 < 20 = 1]
+
+        #10;
+        alu_in1 = 32'd20;
+        alu_in2 = 32'd10;
+        alu_inst_type = 4'd4; // SLT [20 < 10 = 0]
+
+        #10;
+        alu_in1 = 32'b00000000000000000000000000001100; // 12
+        alu_in2 = 32'b00000000000000000000000000000101; // 5
+        alu_inst_type = 4'd5; // XOR [12 ^ 5 = 9]
+
+        #10;
+        alu_in1 = 32'b00000000000000000000000000001100;
+        alu_in2 = 32'b00000000000000000000000000000010; // 2
+        alu_inst_type = 4'd6; // SRL [12 >> 2 = 3]
+    
+        #10;
+
+        // TODO Add more tests for remaining instructions
+
+        $display("All tests completed.");
+        $finish;
+
+    end
+
+
+endmodule

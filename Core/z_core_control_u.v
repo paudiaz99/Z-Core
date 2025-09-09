@@ -6,6 +6,11 @@
 //
 // **************************************************
 
+`include "Core/z_core_decoder.v"
+`include "Core/z_core_reg_file.v"
+`include "Core/z_core_alu_ctrl.v"
+`include "Core/z_core_alu.v"
+
 module z_core_control_u 
 (
     // Inputs
@@ -74,7 +79,7 @@ wire [31:0] PC_plus_Imm = PC + Imm_r;
 
 // Program Counter Mux
 wire [31:0] PC_mux = (isJALR) ? alu_out :
-                          isBimm           ? (alu_branch ? PC_plus_Imm : PC_plus4) :
+                          isBimm           ? (alu_branch_r ? PC_plus_Imm : PC_plus4) :
                           isJAL            ? PC_plus_Imm :
                           PC_plus4;
 
@@ -119,15 +124,6 @@ wire [31:0] Imm_mux_out = isIimm ? Iimm :
                           isUimm ? Uimm :
                           32'h0;
 
-// Decode Stage Registers
-
-// ALU Input Registers
-reg [31:0] alu_in1_r;
-reg [31:0] alu_in2_r;
-reg [6:0] alu_op_r;
-reg [2:0] alu_funct3_r;
-reg [6:0] alu_funct7_r;
-
 // Immediate Register
 reg [31:0] Imm_r;
 
@@ -167,7 +163,14 @@ wire write_enable = state[STATE_WRITE_b];
 //                    ALU Control
 // **************************************************
 
-// TODO: Instance z_core_alu_ctrl and wire up
+wire [3:0] alu_inst_type;
+
+z_core_alu_ctrl alu_ctrl (
+    .alu_op(op)
+    ,.alu_funct3(funct3)
+    ,.alu_funct7(funct7)
+    ,.alu_inst_type(alu_inst_type)
+);
 
 // **************************************************
 //                       ALU
@@ -175,6 +178,7 @@ wire write_enable = state[STATE_WRITE_b];
 
 // Output Register
 reg [31:0] ALUOut_r;
+reg alu_branch_r;
 
 // Outputs
 wire [31:0] alu_out;
@@ -183,9 +187,7 @@ wire alu_branch;
 z_core_alu alu (
     .alu_in1(alu_in1_r)
     ,.alu_in2(alu_in2_r)
-    ,.alu_inst_type(alu_op_r)
-    ,.alu_funct3(alu_funct3_r)
-    ,.alu_funct7(alu_funct7_r)
+    ,.alu_inst_type(alu_inst_type_r)
     ,.alu_out(alu_out)
     ,.alu_branch(alu_branch)
 );
@@ -198,6 +200,11 @@ wire [31:0] alu_in2_mux = isIimm ? Iimm :
                           isUimm ? Uimm :
                           rs2_out;
 
+
+// ALU Input Registers
+reg [31:0] alu_in1_r;
+reg [31:0] alu_in2_r;
+reg [3:0] alu_inst_type_r;
 
 // **************************************************
 //                 Control Signals
@@ -257,9 +264,7 @@ always @(posedge clk) begin
             // Update ALU Registers
             alu_in1_r <= rs1_out;
             alu_in2_r <= alu_in2_mux;
-            alu_op_r <= op;
-            alu_funct3_r <= funct3;
-            alu_funct7_r <= funct7;
+            alu_inst_type_r <= alu_inst_type;
 
             // Store Immediate for later use
             Imm_r <= Imm_mux_out;
@@ -275,6 +280,7 @@ always @(posedge clk) begin
 
             // Store ALU Results
             ALUOut_r <= alu_out;
+            alu_branch_r <= alu_branch;
 
             state <= (isLoad || isStore) ? STATE_MEM : (isWB ? STATE_WRITE : STATE_FETCH);
         end
