@@ -1,22 +1,24 @@
+`timescale 1ns / 1ns
+`include "Core/z_core_decoder.v"
+
 module dec_tb;
 
     // Input instruction
     reg [31:0] inst;
+    
     initial begin
-        # 0 inst =  32'b00000000001000001000100000100011;
-        # 10 inst = 32'b00100000000100101000000000100011;
-        # 20 $stop;
+        
     end
 
     wire [6:0] op;
     wire [4:0] rs1;
     wire [4:0] rs2;
     wire [4:0] rd;
-    wire [11:0] Iimm;
-    wire [11:0] Simm;
-    wire [19:0] Uimm;
-    wire [11:0] Bimm;
-    wire [19:0] Jimm;
+    wire [31:0] Iimm;
+    wire [31:0] Simm;
+    wire [31:0] Uimm;
+    wire [31:0] Bimm;
+    wire [31:0] Jimm;
     wire [2:0] funct3;
     wire [6:0] funct7;
 
@@ -38,8 +40,20 @@ module dec_tb;
 
     // Monitor the outputs
     initial begin
-        $monitor("At time %t, op=%d, rd=%d, rs1=%d, rs2=%d", $time, op, rd, rs1, rs2);
-        // $monitor("At time %t, Iimm=%d, Simm=%d, Uimm=%d, Bimm=%d, Jimm=%d", $time, Iimm, Simm, Uimm, Bimm, Jimm);
+
+        $dumpfile("decoder_tb.vcd");
+        $dumpvars(0, dec_tb);
+
+        # 0;
+        inst = 32'b00000000001000001000100000100011;
+
+        # 10;
+        inst = 32'b00000000001100000000000100010011;
+
+        # 10;
+
+        $display("Test completed");
+
     end
 
 endmodule

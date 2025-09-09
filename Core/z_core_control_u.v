@@ -1,3 +1,11 @@
+// **************************************************
+//                    TODO LIST
+// 1. Instance ALU Control Module and Wire Up
+// 2. Implement Testbench (Once All Modules are Done and Tested)
+// 3. Verify correctness of the Control Unit using Simulation
+//
+// **************************************************
+
 module z_core_control_u 
 (
     // Inputs
@@ -156,6 +164,12 @@ z_core_reg_file reg_file (
 wire write_enable = state[STATE_WRITE_b];
 
 // **************************************************
+//                    ALU Control
+// **************************************************
+
+// TODO: Instance z_core_alu_ctrl and wire up
+
+// **************************************************
 //                       ALU
 // **************************************************
 
@@ -169,7 +183,7 @@ wire alu_branch;
 z_core_alu alu (
     .alu_in1(alu_in1_r)
     ,.alu_in2(alu_in2_r)
-    ,.alu_op(alu_op_r)
+    ,.alu_inst_type(alu_op_r)
     ,.alu_funct3(alu_funct3_r)
     ,.alu_funct7(alu_funct7_r)
     ,.alu_out(alu_out)

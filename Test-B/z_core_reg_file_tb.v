@@ -1,9 +1,12 @@
-module reg_file_tb;
+`timescale 1ns / 1ns
+`include "Core/z_core_reg_file.v"
+
+module z_core_reg_file_tb;
 
     // Initialize clk to 0
     reg clk = 0;
 
-    
+    reg write_enable;
     reg [4:0] rd;
     reg [31:0] rd_in;
     reg [4:0] rs1;
@@ -11,33 +14,60 @@ module reg_file_tb;
     reg reset;
 
     initial begin
-        # 0 
+
+        $dumpfile("z_core_reg_file_tb.vcd");
+        $dumpvars(0, z_core_reg_file_tb);
+
         reset = 1'b1;
         rd = 5'b0;
         rs1 = 5'b0;
         rs2 = 5'b0;
 
-        # 10 
+        # 10;
         reset = 1'b0;
+        write_enable = 1'b1;
         rd = 5'd5;
         rd_in = 32'd15;
 
         // Write in x8
-        # 10
+        # 10;
+        write_enable = 1'b1;
         rd = 5'd8;
         rd_in = 32'd25;
 
         // Async Read from x8 and x5
-        # 10 
+        # 10;
+        write_enable = 1'b0;
         rs1 = 5'd5;
         rs2 = 5'd8;
 
         // Async Read from x8 and x5
-        # 10 
+        # 10;
         rs1 = 5'd8;
         rs2 = 5'd5;
 
-        # 5 $stop;
+        // Try to write with write_enable low
+        # 10;
+        write_enable = 1'b0;
+        rd = 5'd10;
+        rd_in = 32'd30;
+
+        // Try to write on x0
+        # 10;
+        write_enable = 1'b1;
+        rd = 5'd0;
+        rd_in = 32'd40;
+
+        // Read from x0 and x10
+        # 10;
+        write_enable = 1'b0;
+        rs1 = 5'd0;
+        rs2 = 5'd10;
+
+        # 10;
+    
+        $display("Test completed");
+        $finish;
     end
 
     always # 5 begin
@@ -53,13 +83,10 @@ module reg_file_tb;
         ,.rd_in
         ,.rs1
         ,.rs2
+        ,.write_enable
         ,.reset
         ,.rs1_out
         ,.rs2_out
     );
-
-    initial begin
-        $monitor("At time %t, rs1_out = %d, rs2_out = %d, clk = %b, rd = %d, rd_in = %d", $time, rs1_out, rs2_out, clk, rd, rd_in);
-    end
 
 endmodule
