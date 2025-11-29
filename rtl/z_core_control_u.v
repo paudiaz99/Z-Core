@@ -7,6 +7,8 @@
 //
 // **************************************************
 
+`timescale 1ns / 1ns
+
 `include "rtl/z_core_decoder.v"
 `include "rtl/z_core_reg_file.v"
 `include "rtl/z_core_alu_ctrl.v"

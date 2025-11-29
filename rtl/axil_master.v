@@ -3,7 +3,7 @@
 // Converts simple memory interface to AXI-Lite protocol
 // **************************************************
 
-`timescale 1ns / 1ps
+`timescale 1ns / 1ns
 
 module axil_master #(
     parameter DATA_WIDTH = 32,

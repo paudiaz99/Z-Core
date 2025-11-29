@@ -3,7 +3,7 @@
 //    Comprehensive test suite for RV32I instructions
 // **************************************************
 
-`timescale 1ns / 1ps
+`timescale 1ns / 1ns
 `include "rtl/z_core_control_u.v"
 `include "rtl/axi_mem.v"
 

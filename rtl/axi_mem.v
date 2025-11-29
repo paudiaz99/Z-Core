@@ -25,7 +25,7 @@ THE SOFTWARE.
 // Language: Verilog 2001
 
 `resetall
-`timescale 1ns / 1ps
+`timescale 1ns / 1ns
 `default_nettype none
 
 /*
@@ -179,5 +179,3 @@ always @(posedge clk) begin
 end
 
 endmodule
-
-`resetall
