@@ -1,8 +1,9 @@
 // **************************************************
 //                    TODO LIST
-// 1. Instance ALU Control Module and Wire Up
-// 2. Implement Testbench (Once All Modules are Done and Tested)
-// 3. Verify correctness of the Control Unit using Simulation
+// 1. Implement Multiple Size Load/Store
+// 2. Implement AXI4 Interface
+// 3. Implement Testbench (Once All Modules are Done and Tested)
+// 4. Verify correctness of the Control Unit using Simulation
 //
 // **************************************************
 
@@ -13,15 +14,28 @@
 
 module z_core_control_u 
 (
-    // Inputs
-    input clk,
-    input reset,
-    input [31:0] mem_data_in,
+    input  wire                   clk,
+    input  wire                   rstn,
 
-    // Outputs
-    output mem_write_en,
-    output [31:0] mem_data_out,
-    output [31:0] mem_addr
+    output  wire [ADDR_WIDTH-1:0]  s_axil_awaddr,
+    output  wire [2:0]             s_axil_awprot,
+    output  wire                   s_axil_awvalid,
+    input wire                   s_axil_awready,
+    output wire [DATA_WIDTH-1:0]  s_axil_wdata,
+    output  wire [STRB_WIDTH-1:0]  s_axil_wstrb,
+    output  wire                   s_axil_wvalid,
+    input wire                   s_axil_wready,
+    input wire [1:0]             s_axil_bresp,
+    input wire                   s_axil_bvalid,
+    output wire                   s_axil_bready,
+    output  wire [ADDR_WIDTH-1:0]  s_axil_araddr,
+    output  wire [2:0]             s_axil_arprot,
+    output  wire                   s_axil_arvalid,
+    input wire                   s_axil_arready,
+    input wire [DATA_WIDTH-1:0]  s_axil_rdata,
+    input wire [1:0]             s_axil_rresp,
+    input wire                   s_axil_rvalid,
+    output wire                   s_axil_rready
 );
 
 // **************************************************
@@ -78,6 +92,15 @@ wire [31:0] PC_plus4     = PC + 4;
 wire [31:0] PC_plus_Imm = PC + Imm_r;
 
 // Program Counter Mux
+
+// THIS CAN BETTER BE IMPLEMTNED USING A CASE STATEMENT
+// Using a case statement, all inputs have the same propagation delay to the output
+// Using nested ternary operators, the propagation delay increases with each level of nesting
+// For a small number of inputs, this is not a big deal, but for a larger number of inputs, it can be significant
+// Additionally, a case statement is easier to read and understand
+// However, for a small number of inputs, the difference is negligible, and it comes
+// down to personal preference
+
 wire [31:0] PC_mux = (isJALR) ? alu_out :
                           isBimm           ? (alu_branch_r ? PC_plus_Imm : PC_plus4) :
                           isJAL            ? PC_plus_Imm :
@@ -150,7 +173,7 @@ z_core_reg_file reg_file (
     ,.rs1(rs1)
     ,.rs2(rs2)
     ,.write_enable(write_enable)
-    ,.reset(reset)
+    ,.reset(~rstn)
     ,.rs1_out(rs1_out)
     ,.rs2_out(rs2_out)
 );
@@ -249,7 +272,7 @@ reg [N_STATES-1:0] state;
 
 always @(posedge clk) begin
 
-    if(reset) begin 
+    if(~rstn) begin 
         state <= STATE_FETCH;
         PC <= PC_INIT;
     end

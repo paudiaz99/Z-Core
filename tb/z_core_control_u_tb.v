@@ -49,6 +49,38 @@ module z_core_control_u_tb;
         # 10; // Execute -> Memory
 
         # 10; // Memory -> Fetch
+        mem_data_in = 32'b00100000000000100000000110000011; // LB x3, 512(x4)
+
+        # 10; // Fetch -> Decode
+
+        # 10; // Decode -> Execute
+
+        # 10; // Execute -> Memory
+        mem_data_in = 32'b00000000000000000000000000000011; // Simulate memory read
+
+        # 10; // Memory -> Writeback
+
+        # 10; // Writeback -> Fetch
+        mem_data_in = 32'b00000000001100010000001010110011; // ADD x5, x2, x3 [3 + 3 = 6]
+
+        # 10; // Fetch -> Decode
+
+        # 10; // Decode -> Execute
+
+        # 10; // Execute -> Writeback
+
+        # 10; // Writeback -> Fetch
+        mem_data_in = 32'b00010000010100100000000000100011; // SB x5, 256(x4)
+
+        # 10; // Fetch -> Decode
+
+        # 10; // Decode -> Execute
+
+        # 10; // Execute -> Writeback
+
+        # 10; // Writeback -> Fetch
+
+
         $display("Test Finished");
         $finish;
 
