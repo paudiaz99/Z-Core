@@ -22,6 +22,7 @@ module z_core_control_u_tb;
     integer test_count = 0;
     integer pass_count = 0;
     integer fail_count = 0;
+    reg [5:0] current_state = 0;
 
     // AXI-Lite signals between Control Unit (Master) and Memory (Slave)
     wire [ADDR_WIDTH-1:0]  axil_awaddr;
@@ -109,6 +110,10 @@ module z_core_control_u_tb;
 
     // Clock generation (100MHz)
     always #5 clk = ~clk;
+
+    always @(posedge clk) begin
+        current_state <= uut.state[5:0];
+    end
 
     // ==========================================
     //              Test Tasks
