@@ -151,8 +151,9 @@ wire [31:0] PC_saved_plus4 = PC_saved + 4;
 wire [31:0] PC_saved_plus_Imm = PC_saved + Imm_r;
 
 // Program Counter Mux
+// Note: Use alu_branch (current output) not alu_branch_r (registered) for branches
 wire [31:0] PC_mux = (isJALR) ? alu_out :
-                          isBimm           ? (alu_branch_r ? PC_plus_Imm : PC_plus4) :
+                          isBimm           ? (alu_branch ? PC_plus_Imm : PC_plus4) :
                           isJAL            ? PC_plus_Imm :
                           PC_plus4;
 

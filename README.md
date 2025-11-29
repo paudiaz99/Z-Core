@@ -143,8 +143,8 @@ vvp sim/z_core_control_u_tb.vvp
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  45                                          ║
-║  Passed:       45                                          ║
+║  Total Tests:  68                                          ║
+║  Passed:       68                                          ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║            ALL TESTS PASSED SUCCESSFULLY                   ║
@@ -156,6 +156,23 @@ vvp sim/z_core_control_u_tb.vvp
 ```bash
 gtkwave sim/z_core_control_u_tb.vcd
 ```
+
+## Test Coverage
+
+The processor has been verified with **68 comprehensive tests** across 10 test suites:
+
+| Test Suite | Description | Tests |
+|------------|-------------|-------|
+| Arithmetic | ADD, SUB, ADDI | 6 |
+| Logical | AND, OR, XOR, ANDI, ORI, XORI | 8 |
+| Shifts | SLL, SRL, SRA, SLLI, SRLI, SRAI | 8 |
+| Memory | LW, SW with AXI transactions | 8 |
+| Compare | SLT, SLTU, SLTI, SLTIU | 8 |
+| Upper Immediate | LUI, AUIPC | 4 |
+| Integration | Fibonacci sequence | 9 |
+| Branches | BEQ, BNE, BLT, BGE, BLTU, BGEU | 7 |
+| Jumps | JAL, JALR, JALR+offset | 7 |
+| Loop | Backward branch (sum 0..4) | 3 |
 
 ## Performance
 
@@ -187,8 +204,9 @@ module z_core_top #(
 
 Detailed documentation is available in the `doc/` directory:
 
-- **[AXI Interface](doc/AXI_INTERFACE.md)** - Complete AXI-Lite protocol documentation
 - **[Architecture](doc/Z_CORE_ARCHITECTURE.md)** - Detailed architecture overview
+- **[AXI Interface](doc/AXI_INTERFACE.md)** - Complete AXI-Lite protocol documentation
+- **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
 
 ## Roadmap
 

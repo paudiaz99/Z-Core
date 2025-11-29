@@ -255,10 +255,17 @@ module z_core_control_u_tb;
             // ADDI x8, x0, 8       - x8 = 8 (shift amount)
             u_axil_ram.mem[6] = 32'h00800413;
             // SLL x9, x2, x8       - x9 = 1 << 8 = 256
-            u_axil_ram.mem[7] = 32'h00811493;
+            // Encoding: funct7=0000000, rs2=8, rs1=2, funct3=001, rd=9, opcode=0110011
+            u_axil_ram.mem[7] = 32'h008114b3;
+            // SRL x10, x5, x8      - x10 = 0xFFFFFFFF >>> 8 = 0x00FFFFFF
+            // Encoding: funct7=0000000, rs2=8, rs1=5, funct3=101, rd=10, opcode=0110011
+            u_axil_ram.mem[8] = 32'h0082d533;
+            // SRA x11, x5, x8      - x11 = 0xFFFFFFFF >> 8 = 0xFFFFFFFF
+            // Encoding: funct7=0100000, rs2=8, rs1=5, funct3=101, rd=11, opcode=0110011
+            u_axil_ram.mem[9] = 32'h4082d5b3;
             // NOPs
-            u_axil_ram.mem[8] = 32'h00000013;
-            u_axil_ram.mem[9] = 32'h00000013;
+            u_axil_ram.mem[10] = 32'h00000013;
+            u_axil_ram.mem[11] = 32'h00000013;
         end
     endtask
 
@@ -302,13 +309,19 @@ module z_core_control_u_tb;
             u_axil_ram.mem[4] = 32'h00f12313;
             // SLTI x7, x2, 5       - x7 = (10 < 5) = 0
             u_axil_ram.mem[5] = 32'h00512393;
-            // ADDI x8, x0, -1      - x8 = -1
+            // ADDI x8, x0, -1      - x8 = -1 (0xFFFFFFFF)
             u_axil_ram.mem[6] = 32'hfff00413;
             // SLTU x9, x8, x2      - x9 = (0xFFFFFFFF < 10) = 0 (unsigned)
             u_axil_ram.mem[7] = 32'h00243493;
+            // SLTIU x10, x2, 100   - x10 = (10 < 100 unsigned) = 1
+            u_axil_ram.mem[8] = 32'h06413513;
+            // SLTIU x11, x8, 1     - x11 = (0xFFFFFFFF < 1 unsigned) = 0
+            u_axil_ram.mem[9] = 32'h00143593;
+            // SLTU x12, x2, x8     - x12 = (10 < 0xFFFFFFFF unsigned) = 1
+            u_axil_ram.mem[10] = 32'h00813633;
             // NOPs
-            u_axil_ram.mem[8] = 32'h00000013;
-            u_axil_ram.mem[9] = 32'h00000013;
+            u_axil_ram.mem[11] = 32'h00000013;
+            u_axil_ram.mem[12] = 32'h00000013;
         end
     endtask
 
@@ -356,6 +369,213 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[9] = 32'h00000013;
             u_axil_ram.mem[10] = 32'h00000013;
+        end
+    endtask
+
+    task load_test8_branches;
+        begin
+            $display("\n--- Loading Test 8: Branch Operations ---");
+            // This test verifies all branch instructions
+            // We use x10 as a result accumulator, incrementing on correct paths
+            
+            // Setup values
+            // 0x00: ADDI x2, x0, 5       - x2 = 5
+            u_axil_ram.mem[0] = 32'h00500113;
+            // 0x04: ADDI x3, x0, 5       - x3 = 5 (equal to x2)
+            u_axil_ram.mem[1] = 32'h00500193;
+            // 0x08: ADDI x4, x0, 10      - x4 = 10 (greater than x2)
+            u_axil_ram.mem[2] = 32'h00a00213;
+            // 0x0C: ADDI x10, x0, 0      - x10 = 0 (result counter)
+            u_axil_ram.mem[3] = 32'h00000513;
+            // 0x10: ADDI x5, x0, -1      - x5 = -1 (0xFFFFFFFF for unsigned tests)
+            u_axil_ram.mem[4] = 32'hfff00293;
+            
+            // ---- Test BEQ (branch if equal) ----
+            // 0x14: BEQ x2, x3, +8       - Should branch (5 == 5)
+            u_axil_ram.mem[5] = 32'h00310463;
+            // 0x18: ADDI x11, x0, 1      - SKIP (x11 = 1 means BEQ failed)
+            u_axil_ram.mem[6] = 32'h00100593;
+            // 0x1C: ADDI x10, x10, 1     - x10++ (BEQ taken correctly)
+            u_axil_ram.mem[7] = 32'h00150513;
+            
+            // ---- Test BNE (branch if not equal) ----
+            // 0x20: BNE x2, x4, +8       - Should branch (5 != 10)
+            u_axil_ram.mem[8] = 32'h00411463;
+            // 0x24: ADDI x12, x0, 1      - SKIP (x12 = 1 means BNE failed)
+            u_axil_ram.mem[9] = 32'h00100613;
+            // 0x28: ADDI x10, x10, 1     - x10++ (BNE taken correctly)
+            u_axil_ram.mem[10] = 32'h00150513;
+            
+            // ---- Test BLT (branch if less than, signed) ----
+            // 0x2C: BLT x2, x4, +8       - Should branch (5 < 10)
+            u_axil_ram.mem[11] = 32'h00414463;
+            // 0x30: ADDI x13, x0, 1      - SKIP (x13 = 1 means BLT failed)
+            u_axil_ram.mem[12] = 32'h00100693;
+            // 0x34: ADDI x10, x10, 1     - x10++ (BLT taken correctly)
+            u_axil_ram.mem[13] = 32'h00150513;
+            
+            // ---- Test BGE (branch if greater or equal, signed) ----
+            // 0x38: BGE x4, x2, +8       - Should branch (10 >= 5)
+            u_axil_ram.mem[14] = 32'h00225463;
+            // 0x3C: ADDI x14, x0, 1      - SKIP (x14 = 1 means BGE failed)
+            u_axil_ram.mem[15] = 32'h00100713;
+            // 0x40: ADDI x10, x10, 1     - x10++ (BGE taken correctly)
+            u_axil_ram.mem[16] = 32'h00150513;
+            
+            // ---- Test BLTU (branch if less than, unsigned) ----
+            // 0x44: BLTU x2, x5, +8      - Should branch (5 < 0xFFFFFFFF unsigned)
+            u_axil_ram.mem[17] = 32'h00516463;
+            // 0x48: ADDI x15, x0, 1      - SKIP (x15 = 1 means BLTU failed)
+            u_axil_ram.mem[18] = 32'h00100793;
+            // 0x4C: ADDI x10, x10, 1     - x10++ (BLTU taken correctly)
+            u_axil_ram.mem[19] = 32'h00150513;
+            
+            // ---- Test BGEU (branch if greater or equal, unsigned) ----
+            // 0x50: BGEU x5, x2, +8      - Should branch (0xFFFFFFFF >= 5 unsigned)
+            u_axil_ram.mem[20] = 32'h00217463;
+            // 0x54: ADDI x1, x0, 1       - SKIP (x1 = 1 means BGEU failed)
+            u_axil_ram.mem[21] = 32'h00100093;
+            // 0x58: ADDI x10, x10, 1     - x10++ (BGEU taken correctly)
+            u_axil_ram.mem[22] = 32'h00150513;
+            
+            // ---- Test branch NOT taken cases ----
+            // 0x5C: BEQ x2, x4, +8       - Should NOT branch (5 != 10)
+            u_axil_ram.mem[23] = 32'h00410463;
+            // 0x60: ADDI x10, x10, 1     - x10++ (BEQ correctly not taken)
+            u_axil_ram.mem[24] = 32'h00150513;
+            // 0x64: NOP                  - This would be skipped if branch taken
+            u_axil_ram.mem[25] = 32'h00000013;
+            
+            // 0x68: BNE x2, x3, +8       - Should NOT branch (5 == 5)
+            u_axil_ram.mem[26] = 32'h00311463;
+            // 0x6C: ADDI x10, x10, 1     - x10++ (BNE correctly not taken)
+            u_axil_ram.mem[27] = 32'h00150513;
+            // 0x70: NOP
+            u_axil_ram.mem[28] = 32'h00000013;
+            
+            // Final result: x10 should be 8 (6 taken + 2 not taken tests passed)
+            // NOPs
+            u_axil_ram.mem[29] = 32'h00000013;
+            u_axil_ram.mem[30] = 32'h00000013;
+        end
+    endtask
+
+    task load_test10_backward_branch;
+        integer i;
+        begin
+            $display("\n--- Loading Test 10: Backward Branch (Loop) ---");
+            // Clear memory first to avoid contamination from previous tests
+            for (i = 0; i < 64; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // This test implements a simple loop that counts from 0 to 5
+            // x2 = counter, x3 = limit (5), x10 = sum accumulator
+            
+            // 0x00: ADDI x2, x0, 0      - x2 = 0 (counter)
+            u_axil_ram.mem[0] = 32'h00000113;
+            // 0x04: ADDI x3, x0, 5      - x3 = 5 (limit)
+            u_axil_ram.mem[1] = 32'h00500193;
+            // 0x08: ADDI x10, x0, 0     - x10 = 0 (sum)
+            u_axil_ram.mem[2] = 32'h00000513;
+            
+            // Loop start (0x0C):
+            // 0x0C: ADD x10, x10, x2    - sum += counter
+            u_axil_ram.mem[3] = 32'h00250533;
+            // 0x10: ADDI x2, x2, 1      - counter++
+            u_axil_ram.mem[4] = 32'h00110113;
+            // 0x14: BLT x2, x3, -8      - if counter < 5, branch back to 0x0C
+            // Branch offset: 0x0C - 0x14 = -8
+            // -8 = 0b1_1111_1111_1000, imm[12]=1, imm[11]=1, imm[10:5]=111111, imm[4:1]=1100
+            // B-type: imm[12|10:5] rs2 rs1 funct3 imm[4:1|11] opcode
+            //       = 1_111111 00011 00010 100 1100_1 1100011 = 0xFE314CE3
+            u_axil_ram.mem[5] = 32'hfe314ce3;
+            
+            // Loop done, x10 should be 0+1+2+3+4 = 10
+        end
+    endtask
+
+    task load_test9_jumps;
+        begin
+            $display("\n--- Loading Test 9: Jump Operations (JAL/JALR) ---");
+            // This test verifies JAL and JALR instructions
+            // x10 is used as result accumulator
+            
+            // 0x00: ADDI x10, x0, 0      - x10 = 0 (result counter)
+            u_axil_ram.mem[0] = 32'h00000513;
+            
+            // ---- Test JAL (Jump and Link) ----
+            // 0x04: JAL x1, +12          - Jump to 0x10, x1 = 0x08 (return addr)
+            u_axil_ram.mem[1] = 32'h00c000ef;
+            // 0x08: ADDI x11, x0, 1      - SKIP (x11 = 1 means JAL failed)
+            u_axil_ram.mem[2] = 32'h00100593;
+            // 0x0C: ADDI x11, x0, 2      - SKIP
+            u_axil_ram.mem[3] = 32'h00200593;
+            // 0x10: ADDI x10, x10, 1     - x10++ (JAL landed here correctly)
+            u_axil_ram.mem[4] = 32'h00150513;
+            
+            // Verify x1 has correct return address (0x08)
+            // 0x14: ADDI x2, x0, 8       - x2 = 8 (expected return addr)
+            u_axil_ram.mem[5] = 32'h00800113;
+            // 0x18: BNE x1, x2, +8       - Skip increment if x1 != 8
+            u_axil_ram.mem[6] = 32'h00209463;
+            // 0x1C: ADDI x10, x10, 1     - x10++ (return addr correct)
+            u_axil_ram.mem[7] = 32'h00150513;
+            // 0x20: NOP
+            u_axil_ram.mem[8] = 32'h00000013;
+            
+            // ---- Test JALR (Jump and Link Register) ----
+            // 0x24: ADDI x3, x0, 0x38    - x3 = 0x38 (target address)
+            u_axil_ram.mem[9] = 32'h03800193;
+            // 0x28: JALR x4, x3, 0       - Jump to x3 (0x38), x4 = 0x2C
+            u_axil_ram.mem[10] = 32'h00018267;
+            // 0x2C: ADDI x12, x0, 1      - SKIP (x12 = 1 means JALR failed)
+            u_axil_ram.mem[11] = 32'h00100613;
+            // 0x30: ADDI x12, x0, 2      - SKIP
+            u_axil_ram.mem[12] = 32'h00200613;
+            // 0x34: ADDI x12, x0, 3      - SKIP
+            u_axil_ram.mem[13] = 32'h00300613;
+            // 0x38: ADDI x10, x10, 1     - x10++ (JALR landed here correctly)
+            u_axil_ram.mem[14] = 32'h00150513;
+            
+            // Verify x4 has correct return address (0x2C)
+            // 0x3C: ADDI x5, x0, 0x2C    - x5 = 0x2C (expected return addr)
+            u_axil_ram.mem[15] = 32'h02c00293;
+            // 0x40: BNE x4, x5, +8       - Skip increment if x4 != 0x2C
+            u_axil_ram.mem[16] = 32'h00521463;
+            // 0x44: ADDI x10, x10, 1     - x10++ (return addr correct)
+            u_axil_ram.mem[17] = 32'h00150513;
+            // 0x48: NOP
+            u_axil_ram.mem[18] = 32'h00000013;
+            
+            // ---- Test JALR with offset ----
+            // 0x4C: ADDI x6, x0, 0x58    - x6 = 0x58
+            u_axil_ram.mem[19] = 32'h05800313;
+            // 0x50: JALR x7, x6, 8       - Jump to x6+8 (0x60), x7 = 0x54
+            // Encoding: imm[11:0]=8, rs1=6, funct3=000, rd=7, opcode=1100111
+            u_axil_ram.mem[20] = 32'h008303e7;
+            // 0x54: ADDI x13, x0, 1      - SKIP
+            u_axil_ram.mem[21] = 32'h00100693;
+            // 0x58: ADDI x13, x0, 2      - SKIP
+            u_axil_ram.mem[22] = 32'h00200693;
+            // 0x5C: ADDI x13, x0, 3      - SKIP
+            u_axil_ram.mem[23] = 32'h00300693;
+            // 0x60: ADDI x10, x10, 1     - x10++ (JALR+offset landed correctly)
+            u_axil_ram.mem[24] = 32'h00150513;
+            
+            // Verify x7 has correct return address (0x54)
+            // 0x64: ADDI x8, x0, 0x54    - x8 = 0x54
+            u_axil_ram.mem[25] = 32'h05400413;
+            // 0x68: BNE x7, x8, +8       - Skip increment if x7 != 0x54
+            u_axil_ram.mem[26] = 32'h00839463;
+            // 0x6C: ADDI x10, x10, 1     - x10++ (return addr correct)
+            u_axil_ram.mem[27] = 32'h00150513;
+            
+            // Final result: x10 should be 6 (3 jumps + 3 return addr checks)
+            // NOPs
+            u_axil_ram.mem[28] = 32'h00000013;
+            u_axil_ram.mem[29] = 32'h00000013;
+            u_axil_ram.mem[30] = 32'h00000013;
         end
     endtask
 
@@ -418,6 +638,9 @@ module z_core_control_u_tb;
         check_reg(4, 256, "SLLI x4, x2, 8");
         check_reg(6, 255, "SRLI x6, x5, 24");
         check_reg(7, -1,  "SRAI x7, x5, 24");
+        check_reg(9, 256, "SLL x9, x2, x8");
+        check_reg(10, 32'h00FFFFFF, "SRL x10, x5, x8");
+        check_reg(11, -1, "SRA x11, x5, x8");
 
         // ==========================================
         // Test 4: Memory Load/Store
@@ -448,7 +671,10 @@ module z_core_control_u_tb;
         check_reg(5, 0, "SLT x5 (20 < 10)");
         check_reg(6, 1, "SLTI x6 (10 < 15)");
         check_reg(7, 0, "SLTI x7 (10 < 5)");
-        check_reg(9, 0, "SLTU x9 (unsigned)");
+        check_reg(9, 0, "SLTU x9 (0xFFFFFFFF < 10)");
+        check_reg(10, 1, "SLTIU x10 (10 < 100)");
+        check_reg(11, 0, "SLTIU x11 (0xFFFFFFFF < 1)");
+        check_reg(12, 1, "SLTU x12 (10 < 0xFFFFFFFF)");
 
         // ==========================================
         // Test 6: LUI and AUIPC
@@ -480,6 +706,50 @@ module z_core_control_u_tb;
         check_reg(8, 13, "f[6] = 13");
         check_reg(9, 21, "f[7] = 21");
         check_mem(256, 21, "Stored f[7]");
+
+        // ==========================================
+        // Test 8: Branch Operations
+        // ==========================================
+        load_test8_branches();
+        reset_cpu();
+        #4000;
+        
+        $display("\n=== Test 8 Results: Branches ===");
+        check_reg(10, 8, "Branch test counter (8 passed)");
+        check_reg(11, 0, "BEQ taken (should be 0)");
+        check_reg(12, 0, "BNE taken (should be 0)");
+        check_reg(13, 0, "BLT taken (should be 0)");
+        check_reg(14, 0, "BGE taken (should be 0)");
+        check_reg(15, 0, "BLTU taken (should be 0)");
+        check_reg(1,  0, "BGEU taken (should be 0)");
+
+        // ==========================================
+        // Test 9: Jump Operations (JAL/JALR)
+        // ==========================================
+        load_test9_jumps();
+        reset_cpu();
+        #4000;
+        
+        $display("\n=== Test 9 Results: Jumps ===");
+        check_reg(10, 6, "Jump test counter (6 passed)");
+        check_reg(1,  8, "JAL return addr (x1=0x08)");
+        check_reg(4,  32'h2C, "JALR return addr (x4=0x2C)");
+        check_reg(7,  32'h54, "JALR+offset return (x7=0x54)");
+        check_reg(11, 0, "JAL path check (should be 0)");
+        check_reg(12, 0, "JALR path check (should be 0)");
+        check_reg(13, 0, "JALR+offset path (should be 0)");
+
+        // ==========================================
+        // Test 10: Backward Branch (Loop)
+        // ==========================================
+        load_test10_backward_branch();
+        reset_cpu();
+        #6000;  // Loop needs more time with AXI latency
+        
+        $display("\n=== Test 10 Results: Backward Branch ===");
+        check_reg(2, 5,  "Loop counter final (5)");
+        check_reg(3, 5,  "Loop limit (5)");
+        check_reg(10, 10, "Sum 0+1+2+3+4 = 10");
 
         // ==========================================
         // Final Summary
