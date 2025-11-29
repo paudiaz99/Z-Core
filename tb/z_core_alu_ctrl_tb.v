@@ -5,7 +5,7 @@
 // **************************************************
 
 `timescale 1ns / 1ps
-`include "Core/z_core_alu_ctrl.v"
+`include "rtl/z_core_alu_ctrl.v"
 
 module z_core_alu_ctrl_tb;
 

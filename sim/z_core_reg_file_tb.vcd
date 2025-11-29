@@ -1,0 +1,235 @@
+$date
+	Sat Nov 29 17:50:43 2025
+$end
+$version
+	Icarus Verilog
+$end
+$timescale
+	1ns
+$end
+$scope module z_core_reg_file_tb $end
+$var wire 32 ! rs2_out [31:0] $end
+$var wire 32 " rs1_out [31:0] $end
+$var reg 1 # clk $end
+$var reg 5 $ rd [4:0] $end
+$var reg 32 % rd_in [31:0] $end
+$var reg 1 & reset $end
+$var reg 5 ' rs1 [4:0] $end
+$var reg 5 ( rs2 [4:0] $end
+$var reg 1 ) write_enable $end
+$scope module reg_file $end
+$var wire 1 # clk $end
+$var wire 5 * rd [4:0] $end
+$var wire 32 + rd_in [31:0] $end
+$var wire 1 & reset $end
+$var wire 5 , rs1 [4:0] $end
+$var wire 32 - rs1_out [31:0] $end
+$var wire 5 . rs2 [4:0] $end
+$var wire 32 / rs2_out [31:0] $end
+$var wire 1 ) write_enable $end
+$var reg 32 0 reg_r10_q [31:0] $end
+$var reg 32 1 reg_r11_q [31:0] $end
+$var reg 32 2 reg_r12_q [31:0] $end
+$var reg 32 3 reg_r13_q [31:0] $end
+$var reg 32 4 reg_r14_q [31:0] $end
+$var reg 32 5 reg_r15_q [31:0] $end
+$var reg 32 6 reg_r16_q [31:0] $end
+$var reg 32 7 reg_r17_q [31:0] $end
+$var reg 32 8 reg_r18_q [31:0] $end
+$var reg 32 9 reg_r19_q [31:0] $end
+$var reg 32 : reg_r1_q [31:0] $end
+$var reg 32 ; reg_r20_q [31:0] $end
+$var reg 32 < reg_r21_q [31:0] $end
+$var reg 32 = reg_r22_q [31:0] $end
+$var reg 32 > reg_r23_q [31:0] $end
+$var reg 32 ? reg_r24_q [31:0] $end
+$var reg 32 @ reg_r25_q [31:0] $end
+$var reg 32 A reg_r26_q [31:0] $end
+$var reg 32 B reg_r27_q [31:0] $end
+$var reg 32 C reg_r28_q [31:0] $end
+$var reg 32 D reg_r29_q [31:0] $end
+$var reg 32 E reg_r2_q [31:0] $end
+$var reg 32 F reg_r30_q [31:0] $end
+$var reg 32 G reg_r31_q [31:0] $end
+$var reg 32 H reg_r3_q [31:0] $end
+$var reg 32 I reg_r4_q [31:0] $end
+$var reg 32 J reg_r5_q [31:0] $end
+$var reg 32 K reg_r6_q [31:0] $end
+$var reg 32 L reg_r7_q [31:0] $end
+$var reg 32 M reg_r8_q [31:0] $end
+$var reg 32 N reg_r9_q [31:0] $end
+$var reg 32 O rs1_reg [31:0] $end
+$var reg 32 P rs2_reg [31:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+$end
+#0
+$dumpvars
+b0 P
+b0 O
+bx N
+bx M
+bx L
+bx K
+bx J
+bx I
+bx H
+bx G
+bx F
+bx E
+bx D
+bx C
+bx B
+bx A
+bx @
+bx ?
+bx >
+bx =
+bx <
+bx ;
+bx :
+bx 9
+bx 8
+bx 7
+bx 6
+bx 5
+bx 4
+bx 3
+bx 2
+bx 1
+bx 0
+b0 /
+b0 .
+b0 -
+b0 ,
+bx +
+b0 *
+x)
+b0 (
+b0 '
+1&
+bx %
+b0 $
+0#
+b0 "
+b0 !
+$end
+#5
+b0 G
+b0 F
+b0 D
+b0 C
+b0 B
+b0 A
+b0 @
+b0 ?
+b0 >
+b0 =
+b0 <
+b0 ;
+b0 9
+b0 8
+b0 7
+b0 6
+b0 5
+b0 4
+b0 3
+b0 2
+b0 1
+b0 0
+b0 N
+b0 M
+b0 L
+b0 K
+b0 J
+b0 I
+b0 H
+b0 E
+b0 :
+1#
+#10
+0#
+b1111 %
+b1111 +
+b101 $
+b101 *
+1)
+0&
+#15
+b1111 J
+1#
+#20
+0#
+b11001 %
+b11001 +
+b1000 $
+b1000 *
+#25
+b11001 M
+1#
+#30
+b11001 !
+b11001 /
+b11001 P
+b1111 "
+b1111 -
+b1111 O
+0#
+b1000 (
+b1000 .
+b101 '
+b101 ,
+0)
+#35
+1#
+#40
+b1111 !
+b1111 /
+b1111 P
+b11001 "
+b11001 -
+b11001 O
+0#
+b101 (
+b101 .
+b1000 '
+b1000 ,
+#45
+1#
+#50
+0#
+b11110 %
+b11110 +
+b1010 $
+b1010 *
+#55
+1#
+#60
+0#
+b101000 %
+b101000 +
+b0 $
+b0 *
+1)
+#65
+1#
+#70
+b0 !
+b0 /
+b0 P
+b0 "
+b0 -
+b0 O
+0#
+b1010 (
+b1010 .
+b0 '
+b0 ,
+0)
+#75
+1#
+#80
+0#

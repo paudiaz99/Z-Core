@@ -1,5 +1,5 @@
 `timescale 1ns / 1ns
-`include "Core/z_core_decoder.v"
+`include "rtl/z_core_decoder.v"
 
 module z_core_decoder_tb;
 
@@ -41,8 +41,8 @@ module z_core_decoder_tb;
     // Monitor the outputs
     initial begin
 
-        $dumpfile("decoder_tb.vcd");
-        $dumpvars(0, dec_tb);
+        $dumpfile("z_core_decoder_tb.vcd");
+        $dumpvars(0, z_core_decoder_tb);
 
         # 0;
         inst = 32'b00000000001000001000100000100011;

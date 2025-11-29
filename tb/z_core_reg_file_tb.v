@@ -1,5 +1,5 @@
 `timescale 1ns / 1ns
-`include "Core/z_core_reg_file.v"
+`include "rtl/z_core_reg_file.v"
 
 module z_core_reg_file_tb;
 

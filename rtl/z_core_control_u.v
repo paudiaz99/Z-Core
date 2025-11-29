@@ -1,41 +1,46 @@
 // **************************************************
 //                    TODO LIST
 // 1. Implement Multiple Size Load/Store
-// 2. Implement AXI4 Interface
+// 2. Implement AXI4 Interface [DONE]
 // 3. Implement Testbench (Once All Modules are Done and Tested)
 // 4. Verify correctness of the Control Unit using Simulation
 //
 // **************************************************
 
-`include "Core/z_core_decoder.v"
-`include "Core/z_core_reg_file.v"
-`include "Core/z_core_alu_ctrl.v"
-`include "Core/z_core_alu.v"
+`include "rtl/z_core_decoder.v"
+`include "rtl/z_core_reg_file.v"
+`include "rtl/z_core_alu_ctrl.v"
+`include "rtl/z_core_alu.v"
+`include "rtl/axil_master.v"
 
-module z_core_control_u 
-(
+module z_core_control_u #(
+    parameter DATA_WIDTH = 32,
+    parameter ADDR_WIDTH = 32,
+    parameter STRB_WIDTH = (DATA_WIDTH/8)
+)(
     input  wire                   clk,
     input  wire                   rstn,
 
-    output  wire [ADDR_WIDTH-1:0]  s_axil_awaddr,
-    output  wire [2:0]             s_axil_awprot,
-    output  wire                   s_axil_awvalid,
-    input wire                   s_axil_awready,
-    output wire [DATA_WIDTH-1:0]  s_axil_wdata,
-    output  wire [STRB_WIDTH-1:0]  s_axil_wstrb,
-    output  wire                   s_axil_wvalid,
-    input wire                   s_axil_wready,
-    input wire [1:0]             s_axil_bresp,
-    input wire                   s_axil_bvalid,
-    output wire                   s_axil_bready,
-    output  wire [ADDR_WIDTH-1:0]  s_axil_araddr,
-    output  wire [2:0]             s_axil_arprot,
-    output  wire                   s_axil_arvalid,
-    input wire                   s_axil_arready,
-    input wire [DATA_WIDTH-1:0]  s_axil_rdata,
-    input wire [1:0]             s_axil_rresp,
-    input wire                   s_axil_rvalid,
-    output wire                   s_axil_rready
+    // AXI-Lite Master Interface
+    output wire [ADDR_WIDTH-1:0]  m_axil_awaddr,
+    output wire [2:0]             m_axil_awprot,
+    output wire                   m_axil_awvalid,
+    input  wire                   m_axil_awready,
+    output wire [DATA_WIDTH-1:0]  m_axil_wdata,
+    output wire [STRB_WIDTH-1:0]  m_axil_wstrb,
+    output wire                   m_axil_wvalid,
+    input  wire                   m_axil_wready,
+    input  wire [1:0]             m_axil_bresp,
+    input  wire                   m_axil_bvalid,
+    output wire                   m_axil_bready,
+    output wire [ADDR_WIDTH-1:0]  m_axil_araddr,
+    output wire [2:0]             m_axil_arprot,
+    output wire                   m_axil_arvalid,
+    input  wire                   m_axil_arready,
+    input  wire [DATA_WIDTH-1:0]  m_axil_rdata,
+    input  wire [1:0]             m_axil_rresp,
+    input  wire                   m_axil_rvalid,
+    output wire                   m_axil_rready
 );
 
 // **************************************************
@@ -60,17 +65,66 @@ localparam LUI_INST = 7'b0110111;
 localparam AUIPC_INST = 7'b0010111;
 
 // **************************************************
-//                Memory Addressing
+//              AXI-Lite Master Interface
 // **************************************************
 
-assign mem_addr = state[STATE_MEM_b] ? ALUOut_r : PC;
+// Internal memory interface signals
+reg  [ADDR_WIDTH-1:0] mem_addr;
+wire [DATA_WIDTH-1:0] mem_rdata;
+wire                  mem_ready;
+wire                  mem_busy;
+reg                   mem_req;
+reg                   mem_wen;
 
-assign mem_write_en = state[STATE_MEM_b] ? isStore : 0;
+// Memory write data register
+reg [31:0] mem_data_out_r;
 
-assign mem_data_out = state[STATE_MEM_b] ? mem_data_out_r : 32'h0;
+// AXI-Lite Master Instance
+axil_master #(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(ADDR_WIDTH),
+    .STRB_WIDTH(STRB_WIDTH)
+) u_axil_master (
+    .clk(clk),
+    .rstn(rstn),
+    
+    // Simple memory interface
+    .mem_req(mem_req),
+    .mem_wen(mem_wen),
+    .mem_addr(mem_addr),
+    .mem_wdata(mem_data_out_r),
+    .mem_wstrb({STRB_WIDTH{1'b1}}),  // Full word write for now
+    .mem_rdata(mem_rdata),
+    .mem_ready(mem_ready),
+    .mem_busy(mem_busy),
+    
+    // AXI-Lite signals
+    .m_axil_awaddr(m_axil_awaddr),
+    .m_axil_awprot(m_axil_awprot),
+    .m_axil_awvalid(m_axil_awvalid),
+    .m_axil_awready(m_axil_awready),
+    .m_axil_wdata(m_axil_wdata),
+    .m_axil_wstrb(m_axil_wstrb),
+    .m_axil_wvalid(m_axil_wvalid),
+    .m_axil_wready(m_axil_wready),
+    .m_axil_bresp(m_axil_bresp),
+    .m_axil_bvalid(m_axil_bvalid),
+    .m_axil_bready(m_axil_bready),
+    .m_axil_araddr(m_axil_araddr),
+    .m_axil_arprot(m_axil_arprot),
+    .m_axil_arvalid(m_axil_arvalid),
+    .m_axil_arready(m_axil_arready),
+    .m_axil_rdata(m_axil_rdata),
+    .m_axil_rresp(m_axil_rresp),
+    .m_axil_rvalid(m_axil_rvalid),
+    .m_axil_rready(m_axil_rready)
+);
+
+// **************************************************
+//                 Memory Data Registers
+// **************************************************
 
 reg [31:0] MDR;
-reg [31:0] mem_data_out_r;
 
 // **************************************************
 //              Instruction Register
@@ -88,19 +142,10 @@ localparam PC_INIT = 32'd0;
 reg [31:0] PC;
 
 // Program Counter Plus 
-wire [31:0] PC_plus4     = PC + 4;
+wire [31:0] PC_plus4    = PC + 4;
 wire [31:0] PC_plus_Imm = PC + Imm_r;
 
 // Program Counter Mux
-
-// THIS CAN BETTER BE IMPLEMTNED USING A CASE STATEMENT
-// Using a case statement, all inputs have the same propagation delay to the output
-// Using nested ternary operators, the propagation delay increases with each level of nesting
-// For a small number of inputs, this is not a big deal, but for a larger number of inputs, it can be significant
-// Additionally, a case statement is easier to read and understand
-// However, for a small number of inputs, the difference is negligible, and it comes
-// down to personal preference
-
 wire [31:0] PC_mux = (isJALR) ? alu_out :
                           isBimm           ? (alu_branch_r ? PC_plus_Imm : PC_plus4) :
                           isJAL            ? PC_plus_Imm :
@@ -138,8 +183,7 @@ z_core_decoder decoder (
     ,.funct7(funct7)
 );
 
-// Decoder Combiational Logic
-
+// Decoder Combinational Logic
 wire [31:0] Imm_mux_out = isIimm ? Iimm :
                           isSimm ? Simm :
                           isBimm ? Bimm :
@@ -177,7 +221,6 @@ z_core_reg_file reg_file (
     ,.rs1_out(rs1_out)
     ,.rs2_out(rs2_out)
 );
-
 
 // Write Enable Control
 wire write_enable = state[STATE_WRITE_b];
@@ -223,7 +266,6 @@ wire [31:0] alu_in2_mux = isIimm ? Iimm :
                           isUimm ? Uimm :
                           rs2_out;
 
-
 // ALU Input Registers
 reg [31:0] alu_in1_r;
 reg [31:0] alu_in2_r;
@@ -254,68 +296,123 @@ wire isWB = ~(isSimm | isBimm);
 //                   FSM - OneHot
 // **************************************************
 
-localparam N_STATES = 5;
+localparam N_STATES = 6;
 
-localparam STATE_FETCH_b   = 0;
-localparam STATE_DECODE_b  = 1;
-localparam STATE_EXECUTE_b = 2;
-localparam STATE_MEM_b     = 3;
-localparam STATE_WRITE_b   = 4;
+localparam STATE_FETCH_b      = 0;
+localparam STATE_FETCH_WAIT_b = 1;
+localparam STATE_DECODE_b     = 2;
+localparam STATE_EXECUTE_b    = 3;
+localparam STATE_MEM_b        = 4;
+localparam STATE_WRITE_b      = 5;
 
-localparam STATE_FETCH =    1 << STATE_FETCH_b;
-localparam STATE_DECODE =   1 << STATE_DECODE_b;
-localparam STATE_EXECUTE =  1 << STATE_EXECUTE_b;
-localparam STATE_MEM =      1 << STATE_MEM_b;
-localparam STATE_WRITE =    1 << STATE_WRITE_b;
+localparam STATE_FETCH      = 1 << STATE_FETCH_b;
+localparam STATE_FETCH_WAIT = 1 << STATE_FETCH_WAIT_b;
+localparam STATE_DECODE     = 1 << STATE_DECODE_b;
+localparam STATE_EXECUTE    = 1 << STATE_EXECUTE_b;
+localparam STATE_MEM        = 1 << STATE_MEM_b;
+localparam STATE_WRITE      = 1 << STATE_WRITE_b;
 
 reg [N_STATES-1:0] state;
 
 always @(posedge clk) begin
 
-    if(~rstn) begin 
+    if (~rstn) begin 
         state <= STATE_FETCH;
         PC <= PC_INIT;
+        mem_req <= 1'b0;
+        mem_wen <= 1'b0;
+        mem_addr <= {ADDR_WIDTH{1'b0}};
+        IR <= 32'h0;
+        MDR <= 32'h0;
+        ALUOut_r <= 32'h0;
+        alu_branch_r <= 1'b0;
+        alu_in1_r <= 32'h0;
+        alu_in2_r <= 32'h0;
+        alu_inst_type_r <= 4'h0;
+        Imm_r <= 32'h0;
+        mem_data_out_r <= 32'h0;
     end
     else begin
-        if (state[STATE_FETCH_b]) begin
-            // Update Instruction Register
-            IR <= mem_data_in;
+        // Default: clear memory request after one cycle
+        mem_req <= 1'b0;
+        
+        case (1'b1)
+            state[STATE_FETCH_b]: begin
+                // Set address and initiate instruction fetch
+                mem_addr <= PC;
+                mem_wen <= 1'b0;  // Read
+                mem_req <= 1'b1;
+                state <= STATE_FETCH_WAIT;
+            end
+            
+            state[STATE_FETCH_WAIT_b]: begin
+                // Wait for memory to respond
+                if (mem_ready) begin
+                    IR <= mem_rdata;
+                    state <= STATE_DECODE;
+                end
+            end
+            
+            state[STATE_DECODE_b]: begin
+                // Update ALU Registers
+                alu_in1_r <= rs1_out;
+                alu_in2_r <= alu_in2_mux;
+                alu_inst_type_r <= alu_inst_type;
 
-            state <= STATE_DECODE;
-        end
-        else if (state[STATE_DECODE_b]) begin
-            // Update ALU Registers
-            alu_in1_r <= rs1_out;
-            alu_in2_r <= alu_in2_mux;
-            alu_inst_type_r <= alu_inst_type;
+                // Store Immediate for later use
+                Imm_r <= Imm_mux_out;
 
-            // Store Immediate for later use
-            Imm_r <= Imm_mux_out;
+                // Store rs2_out for memory store
+                mem_data_out_r <= rs2_out;
 
-            // Store rs2_out for memory store
-            mem_data_out_r <= rs2_out;
+                state <= STATE_EXECUTE;
+            end
+            
+            state[STATE_EXECUTE_b]: begin
+                // Update Program Counter
+                PC <= PC_mux;
 
-            state <= STATE_EXECUTE;
-        end
-        else if (state[STATE_EXECUTE_b]) begin
-            // Update Program Counter
-            PC <= PC_mux;
+                // Store ALU Results
+                ALUOut_r <= alu_out;
+                alu_branch_r <= alu_branch;
 
-            // Store ALU Results
-            ALUOut_r <= alu_out;
-            alu_branch_r <= alu_branch;
-
-            state <= (isLoad || isStore) ? STATE_MEM : (isWB ? STATE_WRITE : STATE_FETCH);
-        end
-        else if (state[STATE_MEM_b]) begin
-            // Store Memory Data Register
-            if (isLoad) MDR <= mem_data_in;
-
-            state <= isWB ? STATE_WRITE : STATE_FETCH;
-        end
-        else if (state[STATE_WRITE_b]) begin
-            state <= STATE_FETCH;
-        end
+                if (isLoad) begin
+                    // Setup for load
+                    mem_addr <= alu_out;
+                    mem_wen <= 1'b0;  // Read
+                    mem_req <= 1'b1;
+                    state <= STATE_MEM;
+                end else if (isStore) begin
+                    // Setup for store
+                    mem_addr <= alu_out;
+                    mem_wen <= 1'b1;  // Write
+                    mem_req <= 1'b1;
+                    state <= STATE_MEM;
+                end else if (isWB) begin
+                    state <= STATE_WRITE;
+                end else begin
+                    state <= STATE_FETCH;
+                end
+            end
+            
+            state[STATE_MEM_b]: begin
+                // Wait for memory operation to complete
+                if (mem_ready) begin
+                    if (isLoad) begin
+                        MDR <= mem_rdata;
+                    end
+                    state <= isWB ? STATE_WRITE : STATE_FETCH;
+                end
+            end
+            
+            state[STATE_WRITE_b]: begin
+                state <= STATE_FETCH;
+            end
+            
+            default: begin
+                state <= STATE_FETCH;
+            end
+        endcase
     end
 
 end
