@@ -21,16 +21,16 @@
 
 ---
 
-## ✨ Features
+## Features
 
-- 🚀 **Full RV32I Implementation** - Complete base integer instruction set
-- 🔌 **AXI4-Lite Interface** - Industry-standard memory bus protocol
-- 📦 **Modular Design** - Clean separation of concerns with individual modules
-- 🧪 **Comprehensive Testbenches** - Automated testing for all components
-- 📖 **Well Documented** - Extensive documentation and code comments
-- 🎯 **Educational Focus** - Perfect for learning computer architecture
+- **Full RV32I Implementation** - Complete base integer instruction set
+- **AXI4-Lite Interface** - Industry-standard memory bus protocol
+- **Modular Design** - Clean separation of concerns with individual modules
+- **Comprehensive Testbenches** - Automated testing for all components
+- **Well Documented** - Extensive documentation and code comments
+- **Educational Focus** - Perfect for learning computer architecture
 
-## 🏗️ Architecture
+## Architecture
 
 ```
                     ┌─────────────────────────────────────────────────────┐
@@ -55,7 +55,7 @@
                     └──────────────────────────────────────────────────────┘
 ```
 
-## 📋 Supported Instructions
+## Supported Instructions
 
 | Type | Instructions | Description |
 |------|-------------|-------------|
@@ -67,11 +67,11 @@
 | **Jump** | `JAL`, `JALR` | Jump and link |
 | **Upper** | `LUI`, `AUIPC` | Upper immediate |
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Z-Core/
-├── 📂 rtl/                    # RTL source files
+├── rtl/                       # RTL source files
 │   ├── z_core_top_model.v     # Top-level SoC
 │   ├── z_core_control_u.v     # Control unit / CPU core
 │   ├── z_core_decoder.v       # Instruction decoder
@@ -81,23 +81,23 @@ Z-Core/
 │   ├── axil_master.v          # AXI-Lite master
 │   └── axi_mem.v              # AXI-Lite RAM
 │
-├── 📂 tb/                     # Testbenches
+├── tb/                        # Testbenches
 │   ├── z_core_control_u_tb.v  # Full system test
 │   ├── z_core_alu_tb.v        # ALU unit test
 │   ├── z_core_alu_ctrl_tb.v   # ALU control test
 │   ├── z_core_decoder_tb.v    # Decoder test
 │   └── z_core_reg_file_tb.v   # Register file test
 │
-├── 📂 sim/                    # Simulation outputs
+├── sim/                       # Simulation outputs
 │   ├── *.vvp                  # Compiled simulations
 │   └── *.vcd                  # Waveform files
 │
-└── 📂 doc/                    # Documentation
+└── doc/                       # Documentation
     ├── AXI_INTERFACE.md       # AXI protocol details
     └── Z_CORE_ARCHITECTURE.md # Architecture overview
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -143,11 +143,11 @@ vvp sim/z_core_control_u_tb.vvp
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  42                                          ║
-║  Passed:       42                                          ║
+║  Total Tests:  45                                          ║
+║  Passed:       45                                          ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
-║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║
+║            ALL TESTS PASSED SUCCESSFULLY                   ║
 ╚═══════════════════════════════════════════════════════════╝
 ```
 
@@ -157,7 +157,7 @@ vvp sim/z_core_control_u_tb.vvp
 gtkwave sim/z_core_control_u_tb.vcd
 ```
 
-## ⚡ Performance
+## Performance
 
 | Metric | Value |
 |--------|-------|
@@ -167,7 +167,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
 
-## 🔧 Configuration
+## Configuration
 
 The processor is parameterizable through top-level parameters:
 
@@ -183,14 +183,14 @@ module z_core_top #(
 );
 ```
 
-## 📚 Documentation
+## Documentation
 
 Detailed documentation is available in the `doc/` directory:
 
 - **[AXI Interface](doc/AXI_INTERFACE.md)** - Complete AXI-Lite protocol documentation
 - **[Architecture](doc/Z_CORE_ARCHITECTURE.md)** - Detailed architecture overview
 
-## 🗺️ Roadmap
+## Roadmap
 
 - [x] RV32I base integer instructions
 - [x] AXI4-Lite memory interface
@@ -203,9 +203,9 @@ Detailed documentation is available in the `doc/` directory:
 - [ ] FPGA synthesis and validation
 - [ ] Cache subsystem
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome. Please feel free to submit a Pull Request.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
@@ -213,11 +213,11 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [RISC-V Foundation](https://riscv.org/) for the open ISA specification
 - [Alex Forencich](https://github.com/alexforencich) for the AXI-Lite RAM module
@@ -227,8 +227,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Built with ❤️ for learning computer architecture**
-
-*If you find this project helpful, please consider giving it a ⭐!*
+**Built for learning computer architecture**
 
 </div>
