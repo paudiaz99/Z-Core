@@ -2,7 +2,7 @@
 
 ## Overview
 
-Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruction set. It uses a multi-cycle architecture with an AXI4-Lite memory interface.
+Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruction set. It uses a 6-stage multi-cycle architecture with an AXI4-Lite memory interface.
 
 ## Block Diagram
 
