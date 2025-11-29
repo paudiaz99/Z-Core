@@ -141,9 +141,14 @@ localparam PC_INIT = 32'd0;
 // Program Counter Register
 reg [31:0] PC;
 
+// Saved PC for AUIPC and return address calculation
+reg [31:0] PC_saved;
+
 // Program Counter Plus 
-wire [31:0] PC_plus4    = PC + 4;
-wire [31:0] PC_plus_Imm = PC + Imm_r;
+wire [31:0] PC_plus4       = PC + 4;
+wire [31:0] PC_plus_Imm    = PC + Imm_r;
+wire [31:0] PC_saved_plus4 = PC_saved + 4;
+wire [31:0] PC_saved_plus_Imm = PC_saved + Imm_r;
 
 // Program Counter Mux
 wire [31:0] PC_mux = (isJALR) ? alu_out :
@@ -199,11 +204,12 @@ reg [31:0] Imm_r;
 // **************************************************
 
 // RD_In Multiplexer
+// Note: PC_saved is used for JAL/JALR/AUIPC since PC updates in EXECUTE before WRITE
 wire [31:0] rd_in_mux = isLoad   ? MDR :
-                        isJAL    ? PC_plus4 :
-                        isJALR   ? PC_plus4 :
+                        isJAL    ? PC_saved_plus4 :
+                        isJALR   ? PC_saved_plus4 :
                         isLUI    ? Imm_r :
-                        isAUIPC  ? PC_plus_Imm :
+                        isAUIPC  ? PC_saved_plus_Imm :
                         ALUOut_r;
 
 // Outputs
@@ -324,6 +330,7 @@ always @(posedge clk) begin
         mem_addr <= {ADDR_WIDTH{1'b0}};
         IR <= 32'h0;
         MDR <= 32'h0;
+        PC_saved <= 32'h0;
         ALUOut_r <= 32'h0;
         alu_branch_r <= 1'b0;
         alu_in1_r <= 32'h0;
@@ -354,6 +361,9 @@ always @(posedge clk) begin
             end
             
             state[STATE_DECODE_b]: begin
+                // Save current PC for AUIPC/JAL/JALR (before it gets updated)
+                PC_saved <= PC;
+                
                 // Update ALU Registers
                 alu_in1_r <= rs1_out;
                 alu_in2_r <= alu_in2_mux;

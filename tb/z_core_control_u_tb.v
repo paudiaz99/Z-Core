@@ -1,6 +1,6 @@
 // **************************************************
 //        Z-Core Control Unit Testbench
-//    Tests AXI-Lite interface with memory
+//    Comprehensive test suite for RV32I instructions
 // **************************************************
 
 `timescale 1ns / 1ps
@@ -17,6 +17,11 @@ module z_core_control_u_tb;
     // Clock and Reset
     reg clk = 0;
     reg rstn;
+
+    // Test tracking
+    integer test_count = 0;
+    integer pass_count = 0;
+    integer fail_count = 0;
 
     // AXI-Lite signals between Control Unit (Master) and Memory (Slave)
     wire [ADDR_WIDTH-1:0]  axil_awaddr;
@@ -102,123 +107,421 @@ module z_core_control_u_tb;
         .s_axil_rready(axil_rready)
     );
 
-    // Clock generation
+    // Clock generation (100MHz)
     always #5 clk = ~clk;
 
-    // Initialize memory with test program
-    initial begin
-        // Wait for reset to complete before initializing memory
-        @(posedge rstn);
-        @(posedge clk);
-        
-        // Load program into memory (word-aligned addresses)
-        // Address 0x00: ADDI x2, x0, 3   - Load 3 into x2
-        u_axil_ram.mem[0] = 32'b00000000001100000000000100010011;
-        
-        // Address 0x04: ADDI x3, x0, 5   - Load 5 into x3
-        u_axil_ram.mem[1] = 32'b00000000010100000000000110010011;
-        
-        // Address 0x08: ADD x4, x2, x3   - x4 = x2 + x3 = 8
-        u_axil_ram.mem[2] = 32'b00000000001100010000001000110011;
-        
-        // Address 0x0C: SW x4, 256(x0)   - Store x4 to address 256
-        u_axil_ram.mem[3] = 32'b00010000010000000010000000100011;
-        
-        // Address 0x10: LW x5, 256(x0)   - Load from address 256 into x5
-        u_axil_ram.mem[4] = 32'b00010000000000000010001010000011;
-        
-        // Address 0x14: SUB x6, x5, x2   - x6 = x5 - x2 = 8 - 3 = 5
-        u_axil_ram.mem[5] = 32'b01000000001000101000001100110011;
-        
-        // Address 0x18: NOP (ADDI x0, x0, 0)
-        u_axil_ram.mem[6] = 32'b00000000000000000000000000010011;
-        u_axil_ram.mem[7] = 32'b00000000000000000000000000010011;
-        
-        $display("Program loaded into memory");
-    end
+    // ==========================================
+    //              Test Tasks
+    // ==========================================
+    
+    task check_reg;
+        input [4:0] reg_num;
+        input [31:0] expected;
+        input [255:0] test_name;
+        reg [31:0] actual;
+        begin
+            test_count = test_count + 1;
+            case (reg_num)
+                5'd1:  actual = uut.reg_file.reg_r1_q;
+                5'd2:  actual = uut.reg_file.reg_r2_q;
+                5'd3:  actual = uut.reg_file.reg_r3_q;
+                5'd4:  actual = uut.reg_file.reg_r4_q;
+                5'd5:  actual = uut.reg_file.reg_r5_q;
+                5'd6:  actual = uut.reg_file.reg_r6_q;
+                5'd7:  actual = uut.reg_file.reg_r7_q;
+                5'd8:  actual = uut.reg_file.reg_r8_q;
+                5'd9:  actual = uut.reg_file.reg_r9_q;
+                5'd10: actual = uut.reg_file.reg_r10_q;
+                5'd11: actual = uut.reg_file.reg_r11_q;
+                5'd12: actual = uut.reg_file.reg_r12_q;
+                5'd13: actual = uut.reg_file.reg_r13_q;
+                5'd14: actual = uut.reg_file.reg_r14_q;
+                5'd15: actual = uut.reg_file.reg_r15_q;
+                default: actual = 32'hDEADBEEF;
+            endcase
+            
+            if (actual == expected) begin
+                pass_count = pass_count + 1;
+                $display("  [PASS] %0s: x%0d = %0d", test_name, reg_num, actual);
+            end else begin
+                fail_count = fail_count + 1;
+                $display("  [FAIL] %0s: x%0d = %0d (expected %0d)", 
+                         test_name, reg_num, actual, expected);
+            end
+        end
+    endtask
 
-    // Test sequence
+    task check_mem;
+        input [31:0] addr;
+        input [31:0] expected;
+        input [255:0] test_name;
+        reg [31:0] actual;
+        begin
+            test_count = test_count + 1;
+            actual = u_axil_ram.mem[addr >> 2];
+            
+            if (actual == expected) begin
+                pass_count = pass_count + 1;
+                $display("  [PASS] %0s: mem[0x%04h] = %0d", test_name, addr, actual);
+            end else begin
+                fail_count = fail_count + 1;
+                $display("  [FAIL] %0s: mem[0x%04h] = %0d (expected %0d)", 
+                         test_name, addr, actual, expected);
+            end
+        end
+    endtask
+
+    task wait_cycles;
+        input integer n;
+        begin
+            repeat(n) @(posedge clk);
+        end
+    endtask
+
+    task reset_cpu;
+        begin
+            rstn = 0;
+            wait_cycles(4);
+            rstn = 1;
+            wait_cycles(2);
+        end
+    endtask
+
+    // ==========================================
+    //           Test Program Loading
+    // ==========================================
+    
+    task load_test1_arithmetic;
+        begin
+            $display("\n--- Loading Test 1: Arithmetic Operations ---");
+            // Address 0x00: ADDI x2, x0, 10    - x2 = 10
+            u_axil_ram.mem[0] = 32'h00a00113;
+            // Address 0x04: ADDI x3, x0, 7     - x3 = 7
+            u_axil_ram.mem[1] = 32'h00700193;
+            // Address 0x08: ADD x4, x2, x3     - x4 = 10 + 7 = 17
+            u_axil_ram.mem[2] = 32'h00310233;
+            // Address 0x0C: SUB x5, x2, x3     - x5 = 10 - 7 = 3
+            u_axil_ram.mem[3] = 32'h403102b3;
+            // Address 0x10: ADDI x6, x0, -5    - x6 = -5
+            u_axil_ram.mem[4] = 32'hffb00313;
+            // Address 0x14: ADD x7, x4, x6     - x7 = 17 + (-5) = 12
+            u_axil_ram.mem[5] = 32'h006203b3;
+            // NOPs
+            u_axil_ram.mem[6] = 32'h00000013;
+            u_axil_ram.mem[7] = 32'h00000013;
+        end
+    endtask
+
+    task load_test2_logical;
+        begin
+            $display("\n--- Loading Test 2: Logical Operations ---");
+            // ADDI x2, x0, 0xFF    - x2 = 255
+            u_axil_ram.mem[0] = 32'h0ff00113;
+            // ADDI x3, x0, 0x0F    - x3 = 15
+            u_axil_ram.mem[1] = 32'h00f00193;
+            // AND x4, x2, x3       - x4 = 255 & 15 = 15
+            u_axil_ram.mem[2] = 32'h00317233;
+            // OR x5, x2, x3        - x5 = 255 | 15 = 255
+            u_axil_ram.mem[3] = 32'h003162b3;
+            // XOR x6, x2, x3       - x6 = 255 ^ 15 = 240
+            u_axil_ram.mem[4] = 32'h00314333;
+            // ANDI x7, x2, 0x55    - x7 = 255 & 85 = 85
+            u_axil_ram.mem[5] = 32'h05517393;
+            // ORI x8, x0, 0xAA     - x8 = 0 | 170 = 170
+            u_axil_ram.mem[6] = 32'h0aa06413;
+            // XORI x9, x8, 0xFF    - x9 = 170 ^ 255 = 85
+            u_axil_ram.mem[7] = 32'h0ff44493;
+            // NOPs
+            u_axil_ram.mem[8] = 32'h00000013;
+            u_axil_ram.mem[9] = 32'h00000013;
+        end
+    endtask
+
+    task load_test3_shifts;
+        begin
+            $display("\n--- Loading Test 3: Shift Operations ---");
+            // ADDI x2, x0, 1       - x2 = 1
+            u_axil_ram.mem[0] = 32'h00100113;
+            // SLLI x3, x2, 4       - x3 = 1 << 4 = 16
+            u_axil_ram.mem[1] = 32'h00411193;
+            // SLLI x4, x2, 8       - x4 = 1 << 8 = 256
+            u_axil_ram.mem[2] = 32'h00811213;
+            // ADDI x5, x0, -1      - x5 = 0xFFFFFFFF
+            u_axil_ram.mem[3] = 32'hfff00293;
+            // SRLI x6, x5, 24      - x6 = 0xFFFFFFFF >>> 24 = 0xFF = 255
+            u_axil_ram.mem[4] = 32'h0182d313;
+            // SRAI x7, x5, 24      - x7 = 0xFFFFFFFF >> 24 = 0xFFFFFFFF = -1
+            u_axil_ram.mem[5] = 32'h4182d393;
+            // ADDI x8, x0, 8       - x8 = 8 (shift amount)
+            u_axil_ram.mem[6] = 32'h00800413;
+            // SLL x9, x2, x8       - x9 = 1 << 8 = 256
+            u_axil_ram.mem[7] = 32'h00811493;
+            // NOPs
+            u_axil_ram.mem[8] = 32'h00000013;
+            u_axil_ram.mem[9] = 32'h00000013;
+        end
+    endtask
+
+    task load_test4_memory;
+        begin
+            $display("\n--- Loading Test 4: Memory Load/Store ---");
+            // ADDI x2, x0, 42      - x2 = 42
+            u_axil_ram.mem[0] = 32'h02a00113;
+            // ADDI x3, x0, 100     - x3 = 100
+            u_axil_ram.mem[1] = 32'h06400193;
+            // SW x2, 256(x0)       - mem[256] = 42
+            u_axil_ram.mem[2] = 32'h10202023;
+            // SW x3, 260(x0)       - mem[260] = 100
+            u_axil_ram.mem[3] = 32'h10302223;
+            // LW x4, 256(x0)       - x4 = mem[256] = 42
+            u_axil_ram.mem[4] = 32'h10002203;
+            // LW x5, 260(x0)       - x5 = mem[260] = 100
+            u_axil_ram.mem[5] = 32'h10402283;
+            // ADD x6, x4, x5       - x6 = 42 + 100 = 142
+            u_axil_ram.mem[6] = 32'h00520333;
+            // SW x6, 264(x0)       - mem[264] = 142
+            u_axil_ram.mem[7] = 32'h10602423;
+            // NOPs
+            u_axil_ram.mem[8] = 32'h00000013;
+            u_axil_ram.mem[9] = 32'h00000013;
+        end
+    endtask
+
+    task load_test5_compare;
+        begin
+            $display("\n--- Loading Test 5: Compare Operations ---");
+            // ADDI x2, x0, 10      - x2 = 10
+            u_axil_ram.mem[0] = 32'h00a00113;
+            // ADDI x3, x0, 20      - x3 = 20
+            u_axil_ram.mem[1] = 32'h01400193;
+            // SLT x4, x2, x3       - x4 = (10 < 20) = 1
+            u_axil_ram.mem[2] = 32'h00312233;
+            // SLT x5, x3, x2       - x5 = (20 < 10) = 0
+            u_axil_ram.mem[3] = 32'h0021a2b3;
+            // SLTI x6, x2, 15      - x6 = (10 < 15) = 1
+            u_axil_ram.mem[4] = 32'h00f12313;
+            // SLTI x7, x2, 5       - x7 = (10 < 5) = 0
+            u_axil_ram.mem[5] = 32'h00512393;
+            // ADDI x8, x0, -1      - x8 = -1
+            u_axil_ram.mem[6] = 32'hfff00413;
+            // SLTU x9, x8, x2      - x9 = (0xFFFFFFFF < 10) = 0 (unsigned)
+            u_axil_ram.mem[7] = 32'h00243493;
+            // NOPs
+            u_axil_ram.mem[8] = 32'h00000013;
+            u_axil_ram.mem[9] = 32'h00000013;
+        end
+    endtask
+
+    task load_test6_lui_auipc;
+        begin
+            $display("\n--- Loading Test 6: LUI and AUIPC ---");
+            // LUI x2, 0x12345      - x2 = 0x12345000
+            u_axil_ram.mem[0] = 32'h12345137;
+            // ADDI x3, x2, 0x678   - x3 = 0x12345678
+            u_axil_ram.mem[1] = 32'h67810193;
+            // AUIPC x4, 0          - x4 = PC (0x08)
+            u_axil_ram.mem[2] = 32'h00000217;
+            // LUI x5, 0xFFFFF      - x5 = 0xFFFFF000
+            u_axil_ram.mem[3] = 32'hfffff2b7;
+            // NOPs
+            u_axil_ram.mem[4] = 32'h00000013;
+            u_axil_ram.mem[5] = 32'h00000013;
+        end
+    endtask
+
+    task load_test7_full_program;
+        begin
+            $display("\n--- Loading Test 7: Full Integration Test ---");
+            // Fibonacci-like computation: f(n) = f(n-1) + f(n-2)
+            
+            // ADDI x2, x0, 1       - x2 = 1 (f[0])
+            u_axil_ram.mem[0] = 32'h00100113;
+            // ADDI x3, x0, 1       - x3 = 1 (f[1])
+            u_axil_ram.mem[1] = 32'h00100193;
+            // ADD x4, x2, x3       - x4 = 2 (f[2])
+            u_axil_ram.mem[2] = 32'h00310233;
+            // ADD x5, x3, x4       - x5 = 3 (f[3])
+            u_axil_ram.mem[3] = 32'h004182b3;
+            // ADD x6, x4, x5       - x6 = 5 (f[4])
+            u_axil_ram.mem[4] = 32'h00520333;
+            // ADD x7, x5, x6       - x7 = 8 (f[5])
+            u_axil_ram.mem[5] = 32'h006283b3;
+            // ADD x8, x6, x7       - x8 = 13 (f[6])
+            u_axil_ram.mem[6] = 32'h00730433;
+            // ADD x9, x7, x8       - x9 = 21 (f[7])
+            u_axil_ram.mem[7] = 32'h008384b3;
+            // Store results
+            // SW x9, 256(x0)       - mem[256] = 21
+            u_axil_ram.mem[8] = 32'h10902023;
+            // NOPs
+            u_axil_ram.mem[9] = 32'h00000013;
+            u_axil_ram.mem[10] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //           Main Test Sequence
+    // ==========================================
+    
     initial begin
         $dumpfile("z_core_control_u_tb.vcd");
         $dumpvars(0, z_core_control_u_tb);
 
-        // Initialize
-        rstn = 0;
+        $display("");
+        $display("╔═══════════════════════════════════════════════════════════╗");
+        $display("║           Z-Core RISC-V Processor Test Suite              ║");
+        $display("║                   RV32I Instruction Set                    ║");
+        $display("╚═══════════════════════════════════════════════════════════╝");
+
+        // ==========================================
+        // Test 1: Arithmetic Operations
+        // ==========================================
+        load_test1_arithmetic();
+        reset_cpu();
+        #1500;
         
-        // Hold reset for a few cycles
-        #20;
-        rstn = 1;
-        
-        $display("===========================================");
-        $display("Z-Core Control Unit AXI Interface Test");
-        $display("===========================================");
-        
-        // Run simulation for enough cycles to execute program
-        // Each instruction takes multiple cycles due to FSM and AXI latency
+        $display("\n=== Test 1 Results: Arithmetic ===");
+        check_reg(2, 10, "ADDI x2, x0, 10");
+        check_reg(3, 7,  "ADDI x3, x0, 7");
+        check_reg(4, 17, "ADD x4, x2, x3");
+        check_reg(5, 3,  "SUB x5, x2, x3");
+        check_reg(6, -5, "ADDI x6, x0, -5");
+        check_reg(7, 12, "ADD x7, x4, x6");
+
+        // ==========================================
+        // Test 2: Logical Operations
+        // ==========================================
+        load_test2_logical();
+        reset_cpu();
         #2000;
         
-        // Check results
-        $display("");
-        $display("=== Simulation Results ===");
-        $display("PC = %d", uut.PC);
-        $display("");
-        $display("Register x2 = %d (expected: 3)", uut.reg_file.reg_r2_q);
-        $display("Register x3 = %d (expected: 5)", uut.reg_file.reg_r3_q);
-        $display("Register x4 = %d (expected: 8)", uut.reg_file.reg_r4_q);
-        $display("Register x5 = %d (expected: 8)", uut.reg_file.reg_r5_q);
-        $display("Register x6 = %d (expected: 5)", uut.reg_file.reg_r6_q);
-        $display("");
-        $display("Memory[256/4] = %d (expected: 8)", u_axil_ram.mem[64]);
-        $display("");
+        $display("\n=== Test 2 Results: Logical ===");
+        check_reg(2, 255, "ADDI x2, x0, 0xFF");
+        check_reg(3, 15,  "ADDI x3, x0, 0x0F");
+        check_reg(4, 15,  "AND x4, x2, x3");
+        check_reg(5, 255, "OR x5, x2, x3");
+        check_reg(6, 240, "XOR x6, x2, x3");
+        check_reg(7, 85,  "ANDI x7, x2, 0x55");
+        check_reg(8, 170, "ORI x8, x0, 0xAA");
+        check_reg(9, 85,  "XORI x9, x8, 0xFF");
+
+        // ==========================================
+        // Test 3: Shift Operations
+        // ==========================================
+        load_test3_shifts();
+        reset_cpu();
+        #2000;
         
-        // Verify results
-        if (uut.reg_file.reg_r2_q == 3 &&
-            uut.reg_file.reg_r3_q == 5 &&
-            uut.reg_file.reg_r4_q == 8 &&
-            uut.reg_file.reg_r5_q == 8 &&
-            uut.reg_file.reg_r6_q == 5) begin
-            $display("*** TEST PASSED ***");
+        $display("\n=== Test 3 Results: Shifts ===");
+        check_reg(2, 1,   "ADDI x2, x0, 1");
+        check_reg(3, 16,  "SLLI x3, x2, 4");
+        check_reg(4, 256, "SLLI x4, x2, 8");
+        check_reg(6, 255, "SRLI x6, x5, 24");
+        check_reg(7, -1,  "SRAI x7, x5, 24");
+
+        // ==========================================
+        // Test 4: Memory Load/Store
+        // ==========================================
+        load_test4_memory();
+        reset_cpu();
+        #2500;
+        
+        $display("\n=== Test 4 Results: Memory ===");
+        check_reg(2, 42,  "ADDI x2, x0, 42");
+        check_reg(3, 100, "ADDI x3, x0, 100");
+        check_reg(4, 42,  "LW x4, 256(x0)");
+        check_reg(5, 100, "LW x5, 260(x0)");
+        check_reg(6, 142, "ADD x6, x4, x5");
+        check_mem(256, 42,  "SW x2, 256(x0)");
+        check_mem(260, 100, "SW x3, 260(x0)");
+        check_mem(264, 142, "SW x6, 264(x0)");
+
+        // ==========================================
+        // Test 5: Compare Operations
+        // ==========================================
+        load_test5_compare();
+        reset_cpu();
+        #2000;
+        
+        $display("\n=== Test 5 Results: Compare ===");
+        check_reg(4, 1, "SLT x4 (10 < 20)");
+        check_reg(5, 0, "SLT x5 (20 < 10)");
+        check_reg(6, 1, "SLTI x6 (10 < 15)");
+        check_reg(7, 0, "SLTI x7 (10 < 5)");
+        check_reg(9, 0, "SLTU x9 (unsigned)");
+
+        // ==========================================
+        // Test 6: LUI and AUIPC
+        // ==========================================
+        load_test6_lui_auipc();
+        reset_cpu();
+        #1500;
+        
+        $display("\n=== Test 6 Results: LUI/AUIPC ===");
+        check_reg(2, 32'h12345000, "LUI x2, 0x12345");
+        check_reg(3, 32'h12345678, "ADDI x3, x2, 0x678");
+        check_reg(4, 8,            "AUIPC x4, 0");
+        check_reg(5, 32'hFFFFF000, "LUI x5, 0xFFFFF");
+
+        // ==========================================
+        // Test 7: Full Integration (Fibonacci)
+        // ==========================================
+        load_test7_full_program();
+        reset_cpu();
+        #2500;
+        
+        $display("\n=== Test 7 Results: Fibonacci ===");
+        check_reg(2, 1,  "f[0] = 1");
+        check_reg(3, 1,  "f[1] = 1");
+        check_reg(4, 2,  "f[2] = 2");
+        check_reg(5, 3,  "f[3] = 3");
+        check_reg(6, 5,  "f[4] = 5");
+        check_reg(7, 8,  "f[5] = 8");
+        check_reg(8, 13, "f[6] = 13");
+        check_reg(9, 21, "f[7] = 21");
+        check_mem(256, 21, "Stored f[7]");
+
+        // ==========================================
+        // Final Summary
+        // ==========================================
+        $display("");
+        $display("╔═══════════════════════════════════════════════════════════╗");
+        $display("║                    TEST SUMMARY                            ║");
+        $display("╠═══════════════════════════════════════════════════════════╣");
+        $display("║  Total Tests: %3d                                          ║", test_count);
+        $display("║  Passed:      %3d                                          ║", pass_count);
+        $display("║  Failed:      %3d                                          ║", fail_count);
+        $display("╠═══════════════════════════════════════════════════════════╣");
+        
+        if (fail_count == 0) begin
+            $display("║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║");
         end else begin
-            $display("*** TEST FAILED ***");
+            $display("║              ✗ SOME TESTS FAILED ✗                        ║");
         end
         
-        $display("===========================================");
-        $display("Test Finished");
+        $display("╚═══════════════════════════════════════════════════════════╝");
+        $display("");
+        
         $finish;
     end
 
-    // Monitor AXI transactions
+    // ==========================================
+    //           Debug Monitors
+    // ==========================================
+    
+    // Optional: Uncomment to see AXI transactions
+    /*
     always @(posedge clk) begin
         if (rstn) begin
-            // Monitor read transactions
-            if (axil_arvalid && axil_arready) begin
-                $display("[%0t] AXI Read Request: addr=0x%08h", $time, axil_araddr);
-            end
-            if (axil_rvalid && axil_rready) begin
-                $display("[%0t] AXI Read Response: data=0x%08h", $time, axil_rdata);
-            end
-            
-            // Monitor write transactions
-            if (axil_awvalid && axil_awready) begin
-                $display("[%0t] AXI Write Request: addr=0x%08h, data=0x%08h", 
+            if (axil_arvalid && axil_arready)
+                $display("[%0t] AXI RD: addr=0x%08h", $time, axil_araddr);
+            if (axil_rvalid && axil_rready)
+                $display("[%0t] AXI RD: data=0x%08h", $time, axil_rdata);
+            if (axil_awvalid && axil_awready)
+                $display("[%0t] AXI WR: addr=0x%08h data=0x%08h", 
                          $time, axil_awaddr, axil_wdata);
-            end
-            if (axil_bvalid && axil_bready) begin
-                $display("[%0t] AXI Write Response: complete", $time);
-            end
         end
     end
-
-    // Debug FSM state transitions
-    reg [5:0] prev_state;
-    always @(posedge clk) begin
-        if (rstn) begin
-            prev_state <= uut.state;
-            if (uut.state != prev_state) begin
-                $display("[%0t] FSM State: %b -> %b, PC=0x%08h, IR=0x%08h", 
-                         $time, prev_state, uut.state, uut.PC, uut.IR);
-            end
-        end
-    end
+    */
 
 endmodule

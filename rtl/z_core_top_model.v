@@ -1,111 +1,133 @@
 // **************************************************
-//                    TODO LIST
+//                    Z-Core Top Model
+// 
+// A complete RISC-V RV32I processor with AXI-Lite
+// memory interface.
+//
+// TODO LIST
 // 1. Instance Control Unit, Memory, and IO Modules [DONE]
-// 2. Implement Testbench (Once All Modules are Done and Tested) [IN PROGRESS]
-// 3. Verify correctness of the CPU using Simulation
+// 2. Implement Testbench [DONE]
+// 3. Verify correctness of the CPU using Simulation [DONE]
 // 4. Synthesize and Test on FPGA
 //
 // **************************************************
 
-module top_model # (
+`include "rtl/z_core_control_u.v"
+`include "rtl/axi_mem.v"
 
+module z_core_top #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
+    parameter MEM_ADDR_WIDTH = 16,      // 64KB memory
     parameter PIPELINE_OUTPUT = 0
-)
-(
-    input clk,
-    input resetn
+)(
+    input wire clk,
+    input wire rstn
 );
 
 // **************************************************
-//              Wires and Assignments
+//              AXI-Lite Interconnect Wires
 // **************************************************
 
+// Write Address Channel
+wire [ADDR_WIDTH-1:0]  axil_awaddr;
+wire [2:0]             axil_awprot;
+wire                   axil_awvalid;
+wire                   axil_awready;
 
-wire [ADDR_WIDTH-1:0] aw_addr;
-wire [2:0] aw_prot;
-wire aw_valid;
-wire aw_ready;
+// Write Data Channel
+wire [DATA_WIDTH-1:0]  axil_wdata;
+wire [STRB_WIDTH-1:0]  axil_wstrb;
+wire                   axil_wvalid;
+wire                   axil_wready;
 
-wire [DATA_WIDTH-1:0] w_data;
-wire [STRB_WIDTH-1:0] w_strb;
-wire w_valid;
-wire w_ready;
+// Write Response Channel
+wire [1:0]             axil_bresp;
+wire                   axil_bvalid;
+wire                   axil_bready;
 
-wire [1:0] b_resp;
-wire b_ready;
-wire b_valid;
+// Read Address Channel
+wire [ADDR_WIDTH-1:0]  axil_araddr;
+wire [2:0]             axil_arprot;
+wire                   axil_arvalid;
+wire                   axil_arready;
 
-
-wire [ADDR_WIDTH-1:0] ar_addr;
-wire ar_valid;
-wire [2:0] ar_prot;
-wire ar_ready;
-
-wire [DATA_WIDTH-1:0] r_data;
-wire [2:0] r_resp;
-wire r_valid;
-wire r_ready;
-
-
-// **************************************************
-//                Control Unit
-// **************************************************
-
-z_core_control_u control_unit (
-    .clk(clk)
-    ,.rstn(resetn)
-    ,.aw_addr(aw_addr)
-    ,.aw_prot(aw_prot)
-    ,.aw_valid(aw_valid)
-    ,.aw_ready(aw_ready)
-    ,.w_data(w_data)
-    ,.w_strb(w_strb)
-    ,.w_valid(w_valid)
-    ,.w_ready(w_ready)
-    ,.b_resp(b_resp)
-    ,.b_ready(b_ready)
-    ,.b_valid(b_valid)
-    ,.ar_addr(ar_addr)
-    ,.ar_prot(ar_prot)
-    ,.ar_valid(ar_valid)
-    ,.ar_ready(ar_ready)
-    ,.r_data(r_data)
-    ,.r_resp(r_resp)
-    ,.r_valid(r_valid)
-    ,.r_ready(r_ready)
-)
+// Read Data Channel
+wire [DATA_WIDTH-1:0]  axil_rdata;
+wire [1:0]             axil_rresp;
+wire                   axil_rvalid;
+wire                   axil_rready;
 
 
 // **************************************************
-//                Memory
+//                Control Unit (CPU Core)
 // **************************************************
 
-z_axi_mem_if memory (
-    .clk(clk)
-    ,.rstn(resetn)
-    ,.aw_addr(aw_addr)
-    ,.aw_prot(aw_prot)
-    ,.aw_valid(aw_valid)
-    ,.aw_ready(aw_ready)
-    ,.w_data(w_data)
-    ,.w_strb(w_strb)
-    ,.w_valid(w_valid)
-    ,.w_ready(w_ready)
-    ,.b_resp(b_resp)
-    ,.b_ready(b_ready)
-    ,.b_valid(b_valid)
-    ,.ar_addr(ar_addr)
-    ,.ar_prot(ar_prot)
-    ,.ar_valid(ar_valid)
-    ,.ar_ready(ar_ready)
-    ,.r_data(r_data)
-    ,.r_resp(r_resp)
-    ,.r_valid(r_valid)
-    ,.r_ready(r_ready)
-)
+z_core_control_u #(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(ADDR_WIDTH),
+    .STRB_WIDTH(STRB_WIDTH)
+) u_control_unit (
+    .clk(clk),
+    .rstn(rstn),
+    
+    // AXI-Lite Master Interface
+    .m_axil_awaddr(axil_awaddr),
+    .m_axil_awprot(axil_awprot),
+    .m_axil_awvalid(axil_awvalid),
+    .m_axil_awready(axil_awready),
+    .m_axil_wdata(axil_wdata),
+    .m_axil_wstrb(axil_wstrb),
+    .m_axil_wvalid(axil_wvalid),
+    .m_axil_wready(axil_wready),
+    .m_axil_bresp(axil_bresp),
+    .m_axil_bvalid(axil_bvalid),
+    .m_axil_bready(axil_bready),
+    .m_axil_araddr(axil_araddr),
+    .m_axil_arprot(axil_arprot),
+    .m_axil_arvalid(axil_arvalid),
+    .m_axil_arready(axil_arready),
+    .m_axil_rdata(axil_rdata),
+    .m_axil_rresp(axil_rresp),
+    .m_axil_rvalid(axil_rvalid),
+    .m_axil_rready(axil_rready)
+);
 
+
+// **************************************************
+//              Memory (AXI-Lite RAM)
+// **************************************************
+
+axil_ram #(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(MEM_ADDR_WIDTH),
+    .STRB_WIDTH(STRB_WIDTH),
+    .PIPELINE_OUTPUT(PIPELINE_OUTPUT)
+) u_memory (
+    .clk(clk),
+    .rstn(rstn),
+    
+    // AXI-Lite Slave Interface
+    .s_axil_awaddr(axil_awaddr[MEM_ADDR_WIDTH-1:0]),
+    .s_axil_awprot(axil_awprot),
+    .s_axil_awvalid(axil_awvalid),
+    .s_axil_awready(axil_awready),
+    .s_axil_wdata(axil_wdata),
+    .s_axil_wstrb(axil_wstrb),
+    .s_axil_wvalid(axil_wvalid),
+    .s_axil_wready(axil_wready),
+    .s_axil_bresp(axil_bresp),
+    .s_axil_bvalid(axil_bvalid),
+    .s_axil_bready(axil_bready),
+    .s_axil_araddr(axil_araddr[MEM_ADDR_WIDTH-1:0]),
+    .s_axil_arprot(axil_arprot),
+    .s_axil_arvalid(axil_arvalid),
+    .s_axil_arready(axil_arready),
+    .s_axil_rdata(axil_rdata),
+    .s_axil_rresp(axil_rresp),
+    .s_axil_rvalid(axil_rvalid),
+    .s_axil_rready(axil_rready)
+);
 
 endmodule
