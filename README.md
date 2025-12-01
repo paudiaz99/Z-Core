@@ -50,9 +50,14 @@
                     │            └─────────────┬──────────────┘            │
                     └──────────────────────────┼───────────────────────────┘
                                                │ AXI-Lite Bus
-                    ┌──────────────────────────┴───────────────────────────┐
-                    │                   Memory (64KB RAM)                   │
-                    └──────────────────────────────────────────────────────┘
+                                               ▼
+                                  ┌─────────────────────────┐
+                                  │  AXI-Lite Interconnect  │
+                                  └─┬──────────┬──────────┬─┘
+                                    │          │          │
+                ┌───────────────────▼─┐  ┌─────▼────┐  ┌──▼───────┐
+                │    Memory (RAM)     │  │   UART   │  │   GPIO   │
+                └─────────────────────┘  └──────────┘  └──────────┘
 ```
 
 ## Supported Instructions
@@ -78,7 +83,10 @@ Z-Core/
 │   ├── z_core_reg_file.v      # 32x32-bit register file
 │   ├── z_core_alu.v           # Arithmetic logic unit
 │   ├── z_core_alu_ctrl.v      # ALU control
-│   ├── axil_master.v          # AXI-Lite master
+│   ├── axil_interconnect.v    # AXI-Lite Interconnect
+│   ├── axil_slave.v           # Generic AXI-Lite Slave
+│   ├── axil_uart.v            # UART Module
+│   ├── axil_gpio.v            # GPIO Module
 │   └── axi_mem.v              # AXI-Lite RAM
 │
 ├── tb/                        # Testbenches
@@ -94,7 +102,8 @@ Z-Core/
 │
 └── doc/                       # Documentation
     ├── AXI_INTERFACE.md       # AXI protocol details
-    └── Z_CORE_ARCHITECTURE.md # Architecture overview
+    ├── Z_CORE_ARCHITECTURE.md # Architecture overview
+    └── VERIFICATION.md        # Verification details
 ```
 
 ## Quick Start
@@ -143,11 +152,11 @@ vvp sim/z_core_control_u_tb.vvp
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  68                                          ║
-║  Passed:       68                                          ║
+║  Total Tests:  70                                          ║
+║  Passed:       70                                          ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
-║            ALL TESTS PASSED SUCCESSFULLY                   ║
+║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
 ╚═══════════════════════════════════════════════════════════╝
 ```
 
@@ -159,7 +168,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 
 ## Test Coverage
 
-The processor has been verified with **68 comprehensive tests** across 10 test suites:
+The processor has been verified with **70 comprehensive tests** across 11 test suites:
 
 | Test Suite | Description | Tests |
 |------------|-------------|-------|
@@ -173,6 +182,7 @@ The processor has been verified with **68 comprehensive tests** across 10 test s
 | Branches | BEQ, BNE, BLT, BGE, BLTU, BGEU | 7 |
 | Jumps | JAL, JALR, JALR+offset | 7 |
 | Loop | Backward branch (sum 0..4) | 3 |
+| IO Access | UART/GPIO Read/Write | 2 |
 
 ## Performance
 
@@ -213,6 +223,7 @@ Detailed documentation is available in the `doc/` directory:
 - [x] RV32I base integer instructions
 - [x] AXI4-Lite memory interface
 - [x] Comprehensive testbench
+- [x] Modular IO (UART, GPIO)
 - [ ] Pipelining for improved throughput
 - [ ] Branch prediction
 - [ ] M extension (multiply/divide)
