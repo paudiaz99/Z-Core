@@ -7,7 +7,6 @@
 `include "rtl/z_core_control_u.v"
 `include "rtl/axi_mem.v"
 `include "rtl/axil_interconnect.v"
-`include "rtl/axil_slave.v"
 `include "rtl/axil_uart.v"
 `include "rtl/axil_gpio.v"
 `include "rtl/arbiter.v"
