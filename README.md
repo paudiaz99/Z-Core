@@ -213,8 +213,8 @@ Detailed documentation is available in the `doc/` directory:
 - [x] RV32I base integer instructions
 - [x] AXI4-Lite memory interface
 - [x] Comprehensive testbench
-- [ ] Branch prediction
 - [ ] Pipelining for improved throughput
+- [ ] Branch prediction
 - [ ] M extension (multiply/divide)
 - [ ] C extension (compressed instructions)
 - [ ] Interrupt support

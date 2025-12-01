@@ -25,13 +25,20 @@ This document describes the verification strategy, test coverage, and results fo
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │                    Device Under Test (DUT)                            │  │
 │  │  ┌────────────────────┐      AXI-Lite      ┌────────────────────┐   │  │
-│  │  │  z_core_control_u  │◄──────────────────►│     axil_ram       │   │  │
-│  │  │    (CPU Core)      │                    │    (64KB Memory)   │   │  │
-│  │  └────────────────────┘                    └────────────────────┘   │  │
+│  │  │  z_core_control_u  │◄──────────────────►│ axil_interconnect  │   │  │
+│  │  │    (CPU Core)      │                    │                    │   │  │
+│  │  └────────────────────┘                    └─────────┬──────────┘   │  │
+│  │                                                      │               │  │
+│  │                                          ┌───────────▼───────────┐   │  │
+│  │                                          │   AXI-Lite Slaves     │   │  │
+│  │                                          │ - Memory (64KB)       │   │  │
+│  │                                          │ - UART (Wrapper)      │   │  │
+│  │                                          │ - GPIO (Wrapper)      │   │  │
+│  │                                          └───────────────────────┘   │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  Output: VCD Waveforms, Test Results, Coverage Report                       │
-└────────────────────────────────────────────────────────────────────────────┘
+34: └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Test Suites
@@ -152,6 +159,16 @@ while (counter < 5) {
 // Result: sum = 0+1+2+3+4 = 10
 ```
 
+### Test 11: IO Access (UART/GPIO)
+**Purpose:** Verify AXI-Lite Interconnect routing to IO modules
+
+| Instruction | Test Case | Expected |
+|-------------|-----------|----------|
+| SW | Write to UART Base (0x0400_0000) | OKAY Response |
+| LW | Read from UART Base | Data = 0 |
+| SW | Write to GPIO Base (0x0400_1000) | OKAY Response |
+| LW | Read from GPIO Base | Data = 0 |
+
 ## Instruction Coverage
 
 ### RV32I Base Integer Instructions
@@ -216,7 +233,7 @@ while (counter < 5) {
 
 ```bash
 # Compile testbench
-iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv
+iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv rtl/arbiter.v rtl/priority_encoder.v
 
 # Run simulation
 vvp sim/z_core_control_u_tb.vvp
@@ -242,11 +259,11 @@ gtkwave sim/z_core_control_u_tb.vcd
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  68                                          ║
-║  Passed:       68                                          ║
+║  Total Tests:  70                                          ║
+║  Passed:       70                                          ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
-║         ALL TESTS PASSED SUCCESSFULLY                      ║
+║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
 ╚═══════════════════════════════════════════════════════════╝
 ```
 

@@ -359,35 +359,35 @@ always @(posedge clk) begin
                 // Wait for memory to respond
                 if (mem_ready) begin
                     IR <= mem_rdata;
-                    state <= STATE_DECODE;
-                end
+            state <= STATE_DECODE;
+        end
             end
             
             state[STATE_DECODE_b]: begin
                 // Save current PC for AUIPC/JAL/JALR (before it gets updated)
                 PC_saved <= PC;
                 
-                // Update ALU Registers
-                alu_in1_r <= rs1_out;
-                alu_in2_r <= alu_in2_mux;
-                alu_inst_type_r <= alu_inst_type;
+            // Update ALU Registers
+            alu_in1_r <= rs1_out;
+            alu_in2_r <= alu_in2_mux;
+            alu_inst_type_r <= alu_inst_type;
 
-                // Store Immediate for later use
-                Imm_r <= Imm_mux_out;
+            // Store Immediate for later use
+            Imm_r <= Imm_mux_out;
 
-                // Store rs2_out for memory store
-                mem_data_out_r <= rs2_out;
+            // Store rs2_out for memory store
+            mem_data_out_r <= rs2_out;
 
-                state <= STATE_EXECUTE;
-            end
+            state <= STATE_EXECUTE;
+        end
             
             state[STATE_EXECUTE_b]: begin
-                // Update Program Counter
-                PC <= PC_mux;
+            // Update Program Counter
+            PC <= PC_mux;
 
-                // Store ALU Results
-                ALUOut_r <= alu_out;
-                alu_branch_r <= alu_branch;
+            // Store ALU Results
+            ALUOut_r <= alu_out;
+            alu_branch_r <= alu_branch;
 
                 if (isLoad) begin
                     // Setup for load
@@ -405,7 +405,7 @@ always @(posedge clk) begin
                     state <= STATE_WRITE;
                 end else begin
                     state <= STATE_FETCH;
-                end
+        end
             end
             
             state[STATE_MEM_b]: begin
@@ -414,8 +414,8 @@ always @(posedge clk) begin
                     if (isLoad) begin
                         MDR <= mem_rdata;
                     end
-                    state <= isWB ? STATE_WRITE : STATE_FETCH;
-                end
+            state <= isWB ? STATE_WRITE : STATE_FETCH;
+        end
             end
             
             state[STATE_WRITE_b]: begin
@@ -423,8 +423,8 @@ always @(posedge clk) begin
             end
             
             default: begin
-                state <= STATE_FETCH;
-            end
+            state <= STATE_FETCH;
+        end
         endcase
     end
 

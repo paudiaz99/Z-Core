@@ -17,21 +17,20 @@ Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruct
 │  │  └────────┘  └────────────┘  └─────────┘  └────┬─────┘  └─────────┘ │ │
 │  │                                                │                     │ │
 │  │                                           ┌────┴────┐                │ │
-│  │                                           │   MEM   │                │ │
-│  │                                           └─────────┘                │ │
-│  └─────────────────────────────────────────────────────────────────────┘ │
-│                                                                           │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐ │
-│  │ Decoder  │  │ Reg File │  │ ALU Ctrl │  │   ALU    │  │ AXI Master │ │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └────────────┘ │
+│  │                                           │ AXI Mst │                │ │
+│  │                                           └────┬────┘                │ │
+│  └────────────────────────────────────────────────│────────────────────┘ │
+│                                                   │ AXI-Lite             │
+│                                                   ▼                      │
+│                                      ┌─────────────────────────┐         │
+│                                      │  AXI-Lite Interconnect  │         │
+│                                      └─┬──────────┬──────────┬─┘         │
+│                                        │          │          │           │
+│                    ┌───────────────────▼─┐  ┌─────▼────┐  ┌──▼───────┐   │
+│                    │    Memory (RAM)     │  │   UART   │  │   GPIO   │   │
+│                    └─────────────────────┘  └──────────┘  └──────────┘   │
 │                                                                           │
 └──────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    │ AXI-Lite Interface
-                                    ▼
-                           ┌──────────────────┐
-                           │   Memory (RAM)   │
-                           └──────────────────┘
 ```
 
 ## Module Descriptions
@@ -118,7 +117,7 @@ Multi-cycle FSM that orchestrates instruction execution.
 FETCH ──► FETCH_WAIT ──► DECODE ──► EXECUTE ──► WRITE
                                         │
                                         ▼
-                                       MEM
+                                   AXI ACCESS
 ```
 
 | State      | Description                                    |
@@ -130,11 +129,29 @@ FETCH ──► FETCH_WAIT ──► DECODE ──► EXECUTE ──► WRITE
 | MEM        | Perform load/store memory operation            |
 | WRITE      | Write result to register file                  |
 
-### 6. AXI Master (`axil_master`)
+### 6. AXI-Lite Interconnect (`axil_interconnect`)
 
-Converts simple memory interface to AXI4-Lite protocol.
+Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
-See [AXI_INTERFACE.md](AXI_INTERFACE.md) for detailed documentation.
+**Configuration:**
+- 1 Slave Interface (from Control Unit)
+- 3 Master Interfaces (to Memory, UART, GPIO)
+
+### 7. Peripherals
+
+#### UART (`axil_uart`)
+- Base Address: `0x0400_0000`
+- Size: 4KB
+- Uses `axil_slave` wrapper to expose User Interface.
+
+#### GPIO (`axil_gpio`)
+- Base Address: `0x0400_1000`
+- Size: 4KB
+- Uses `axil_slave` wrapper to expose User Interface.
+
+#### Generic Slave (`axil_slave`)
+- Reusable AXI-Lite slave interface.
+- Handles handshake and exposes simple Read/Write interface (`usr_addr`, `usr_wdata`, `usr_wen`, `usr_ren`, `usr_rdata`).
 
 ## Supported Instructions
 
@@ -174,10 +191,11 @@ JAL
 
 The processor uses a unified address space for instructions and data:
 
-| Address Range    | Description           |
-|------------------|-----------------------|
-| 0x00000000+      | Program memory (text) |
-| Variable         | Data memory           |
+| Address Range             | Device        | Description           |
+|---------------------------|---------------|-----------------------|
+| `0x0000_0000` - `0x03FF_FFFF` | Memory (RAM)  | Program & Data (64MB) |
+| `0x0400_0000` - `0x0400_0FFF` | UART          | Serial Communication  |
+| `0x0400_1000` - `0x0400_1FFF` | GPIO          | General Purpose I/O   |
 
 **Note:** The current implementation uses word-aligned (4-byte) accesses only.
 
@@ -198,13 +216,17 @@ Each instruction takes multiple clock cycles:
 
 | File                     | Description                    |
 |--------------------------|--------------------------------|
+| rtl/z_core_top_model.v   | Top-level wrapper              |
+| rtl/z_core_control_u.v   | Control unit / CPU Core        |
 | rtl/z_core_decoder.v     | Instruction decoder            |
 | rtl/z_core_reg_file.v    | Register file                  |
 | rtl/z_core_alu_ctrl.v    | ALU control                    |
 | rtl/z_core_alu.v         | Arithmetic logic unit          |
-| rtl/z_core_control_u.v   | Control unit / top module      |
-| rtl/axil_master.v        | AXI-Lite master                |
+| rtl/axil_interconnect.v  | AXI-Lite Interconnect          |
 | rtl/axi_mem.v            | AXI-Lite RAM                   |
+| rtl/axil_slave.v         | Generic AXI-Lite Slave         |
+| rtl/axil_uart.v          | UART Module                    |
+| rtl/axil_gpio.v          | GPIO Module                    |
 
 ## Simulation
 
@@ -234,4 +256,5 @@ gtkwave sim/z_core_control_u_tb.vcd
 4. **Interrupts**: Exception and interrupt handling
 5. **M Extension**: Multiply/divide instructions
 6. **C Extension**: Compressed instructions
+7. **Peripherals**: Capability to talk to the outter world
 

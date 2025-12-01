@@ -6,6 +6,12 @@
 `timescale 1ns / 1ns
 `include "rtl/z_core_control_u.v"
 `include "rtl/axi_mem.v"
+`include "rtl/axil_interconnect.v"
+`include "rtl/axil_slave.v"
+`include "rtl/axil_uart.v"
+`include "rtl/axil_gpio.v"
+`include "rtl/arbiter.v"
+`include "rtl/priority_encoder.v"
 
 module z_core_control_u_tb;
 
@@ -24,26 +30,125 @@ module z_core_control_u_tb;
     integer fail_count = 0;
     reg [5:0] current_state = 0;
 
-    // AXI-Lite signals between Control Unit (Master) and Memory (Slave)
-    wire [ADDR_WIDTH-1:0]  axil_awaddr;
-    wire [2:0]             axil_awprot;
-    wire                   axil_awvalid;
-    wire                   axil_awready;
-    wire [DATA_WIDTH-1:0]  axil_wdata;
-    wire [STRB_WIDTH-1:0]  axil_wstrb;
-    wire                   axil_wvalid;
-    wire                   axil_wready;
-    wire [1:0]             axil_bresp;
-    wire                   axil_bvalid;
-    wire                   axil_bready;
-    wire [ADDR_WIDTH-1:0]  axil_araddr;
-    wire [2:0]             axil_arprot;
-    wire                   axil_arvalid;
-    wire                   axil_arready;
-    wire [DATA_WIDTH-1:0]  axil_rdata;
-    wire [1:0]             axil_rresp;
-    wire                   axil_rvalid;
-    wire                   axil_rready;
+    // Interconnect Parameters
+    localparam S_COUNT = 1;
+    localparam M_COUNT = 3;
+    localparam M_REGIONS = 1;
+
+    // Address Map
+    // M0: Memory (0x0000_0000 - 0x03FF_FFFF) 64MB
+    // M1: UART   (0x0400_0000 - 0x0400_0FFF) 4KB
+    // M2: GPIO   (0x0400_1000 - 0x0400_1FFF) 4KB
+
+    localparam [M_COUNT*ADDR_WIDTH-1:0] M_BASE_ADDR = {
+        32'h0400_1000, // M2: GPIO
+        32'h0400_0000, // M1: UART
+        32'h0000_0000  // M0: Memory
+    };
+
+    localparam [M_COUNT*32-1:0] M_ADDR_WIDTH_CONF = {
+        32'd12, // M2: GPIO (4KB = 2^12)
+        32'd12, // M1: UART (4KB = 2^12)
+        32'd26  // M0: Memory (64MB = 2^26)
+    };
+
+    // Interconnect Wires
+    wire [S_COUNT*ADDR_WIDTH-1:0]  s_axil_awaddr;
+    wire [S_COUNT*3-1:0]           s_axil_awprot;
+    wire [S_COUNT-1:0]             s_axil_awvalid;
+    wire [S_COUNT-1:0]             s_axil_awready;
+    wire [S_COUNT*DATA_WIDTH-1:0]  s_axil_wdata;
+    wire [S_COUNT*STRB_WIDTH-1:0]  s_axil_wstrb;
+    wire [S_COUNT-1:0]             s_axil_wvalid;
+    wire [S_COUNT-1:0]             s_axil_wready;
+    wire [S_COUNT*2-1:0]           s_axil_bresp;
+    wire [S_COUNT-1:0]             s_axil_bvalid;
+    wire [S_COUNT-1:0]             s_axil_bready;
+    wire [S_COUNT*ADDR_WIDTH-1:0]  s_axil_araddr;
+    wire [S_COUNT*3-1:0]           s_axil_arprot;
+    wire [S_COUNT-1:0]             s_axil_arvalid;
+    wire [S_COUNT-1:0]             s_axil_arready;
+    wire [S_COUNT*DATA_WIDTH-1:0]  s_axil_rdata;
+    wire [S_COUNT*2-1:0]           s_axil_rresp;
+    wire [S_COUNT-1:0]             s_axil_rvalid;
+    wire [S_COUNT-1:0]             s_axil_rready;
+
+    wire [M_COUNT*ADDR_WIDTH-1:0]  m_axil_awaddr;
+    wire [M_COUNT*3-1:0]           m_axil_awprot;
+    wire [M_COUNT-1:0]             m_axil_awvalid;
+    wire [M_COUNT-1:0]             m_axil_awready;
+    wire [M_COUNT*DATA_WIDTH-1:0]  m_axil_wdata;
+    wire [M_COUNT*STRB_WIDTH-1:0]  m_axil_wstrb;
+    wire [M_COUNT-1:0]             m_axil_wvalid;
+    wire [M_COUNT-1:0]             m_axil_wready;
+    wire [M_COUNT*2-1:0]           m_axil_bresp;
+    wire [M_COUNT-1:0]             m_axil_bvalid;
+    wire [M_COUNT-1:0]             m_axil_bready;
+    wire [M_COUNT*ADDR_WIDTH-1:0]  m_axil_araddr;
+    wire [M_COUNT*3-1:0]           m_axil_arprot;
+    wire [M_COUNT-1:0]             m_axil_arvalid;
+    wire [M_COUNT-1:0]             m_axil_arready;
+    wire [M_COUNT*DATA_WIDTH-1:0]  m_axil_rdata;
+    wire [M_COUNT*2-1:0]           m_axil_rresp;
+    wire [M_COUNT-1:0]             m_axil_rvalid;
+    wire [M_COUNT-1:0]             m_axil_rready;
+
+    // Instantiate Interconnect
+    axil_interconnect #(
+        .S_COUNT(S_COUNT),
+        .M_COUNT(M_COUNT),
+        .DATA_WIDTH(DATA_WIDTH),
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .STRB_WIDTH(STRB_WIDTH),
+        .M_REGIONS(M_REGIONS),
+        .M_BASE_ADDR(M_BASE_ADDR),
+        .M_ADDR_WIDTH(M_ADDR_WIDTH_CONF)
+    ) u_interconnect (
+        .clk(clk),
+        .rst(~rstn), // Active high reset
+        
+        // Slave Interfaces (Connect to Control Unit)
+        .s_axil_awaddr(s_axil_awaddr),
+        .s_axil_awprot(s_axil_awprot),
+        .s_axil_awvalid(s_axil_awvalid),
+        .s_axil_awready(s_axil_awready),
+        .s_axil_wdata(s_axil_wdata),
+        .s_axil_wstrb(s_axil_wstrb),
+        .s_axil_wvalid(s_axil_wvalid),
+        .s_axil_wready(s_axil_wready),
+        .s_axil_bresp(s_axil_bresp),
+        .s_axil_bvalid(s_axil_bvalid),
+        .s_axil_bready(s_axil_bready),
+        .s_axil_araddr(s_axil_araddr),
+        .s_axil_arprot(s_axil_arprot),
+        .s_axil_arvalid(s_axil_arvalid),
+        .s_axil_arready(s_axil_arready),
+        .s_axil_rdata(s_axil_rdata),
+        .s_axil_rresp(s_axil_rresp),
+        .s_axil_rvalid(s_axil_rvalid),
+        .s_axil_rready(s_axil_rready),
+        
+        // Master Interfaces (Connect to Slaves)
+        .m_axil_awaddr(m_axil_awaddr),
+        .m_axil_awprot(m_axil_awprot),
+        .m_axil_awvalid(m_axil_awvalid),
+        .m_axil_awready(m_axil_awready),
+        .m_axil_wdata(m_axil_wdata),
+        .m_axil_wstrb(m_axil_wstrb),
+        .m_axil_wvalid(m_axil_wvalid),
+        .m_axil_wready(m_axil_wready),
+        .m_axil_bresp(m_axil_bresp),
+        .m_axil_bvalid(m_axil_bvalid),
+        .m_axil_bready(m_axil_bready),
+        .m_axil_araddr(m_axil_araddr),
+        .m_axil_arprot(m_axil_arprot),
+        .m_axil_arvalid(m_axil_arvalid),
+        .m_axil_arready(m_axil_arready),
+        .m_axil_rdata(m_axil_rdata),
+        .m_axil_rresp(m_axil_rresp),
+        .m_axil_rvalid(m_axil_rvalid),
+        .m_axil_rready(m_axil_rready)
+    );
 
     // Instantiate Control Unit (AXI-Lite Master)
     z_core_control_u #(
@@ -54,58 +159,118 @@ module z_core_control_u_tb;
         .clk(clk),
         .rstn(rstn),
         
-        // AXI-Lite Master Interface
-        .m_axil_awaddr(axil_awaddr),
-        .m_axil_awprot(axil_awprot),
-        .m_axil_awvalid(axil_awvalid),
-        .m_axil_awready(axil_awready),
-        .m_axil_wdata(axil_wdata),
-        .m_axil_wstrb(axil_wstrb),
-        .m_axil_wvalid(axil_wvalid),
-        .m_axil_wready(axil_wready),
-        .m_axil_bresp(axil_bresp),
-        .m_axil_bvalid(axil_bvalid),
-        .m_axil_bready(axil_bready),
-        .m_axil_araddr(axil_araddr),
-        .m_axil_arprot(axil_arprot),
-        .m_axil_arvalid(axil_arvalid),
-        .m_axil_arready(axil_arready),
-        .m_axil_rdata(axil_rdata),
-        .m_axil_rresp(axil_rresp),
-        .m_axil_rvalid(axil_rvalid),
-        .m_axil_rready(axil_rready)
+        // AXI-Lite Master Interface -> Interconnect Slave 0
+        .m_axil_awaddr(s_axil_awaddr),
+        .m_axil_awprot(s_axil_awprot),
+        .m_axil_awvalid(s_axil_awvalid),
+        .m_axil_awready(s_axil_awready),
+        .m_axil_wdata(s_axil_wdata),
+        .m_axil_wstrb(s_axil_wstrb),
+        .m_axil_wvalid(s_axil_wvalid),
+        .m_axil_wready(s_axil_wready),
+        .m_axil_bresp(s_axil_bresp),
+        .m_axil_bvalid(s_axil_bvalid),
+        .m_axil_bready(s_axil_bready),
+        .m_axil_araddr(s_axil_araddr),
+        .m_axil_arprot(s_axil_arprot),
+        .m_axil_arvalid(s_axil_arvalid),
+        .m_axil_arready(s_axil_arready),
+        .m_axil_rdata(s_axil_rdata),
+        .m_axil_rresp(s_axil_rresp),
+        .m_axil_rvalid(s_axil_rvalid),
+        .m_axil_rready(s_axil_rready)
     );
 
-    // Instantiate AXI-Lite RAM (Slave)
+    // Instantiate AXI-Lite RAM (Slave 0)
     axil_ram #(
         .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(16),  // 64KB memory space
+        .ADDR_WIDTH(16),  // Keep 64KB for simulation speed/simplicity, mapped at 0x0
         .STRB_WIDTH(STRB_WIDTH),
         .PIPELINE_OUTPUT(0)
     ) u_axil_ram (
         .clk(clk),
         .rstn(rstn),
         
-        // AXI-Lite Slave Interface
-        .s_axil_awaddr(axil_awaddr[15:0]),
-        .s_axil_awprot(axil_awprot),
-        .s_axil_awvalid(axil_awvalid),
-        .s_axil_awready(axil_awready),
-        .s_axil_wdata(axil_wdata),
-        .s_axil_wstrb(axil_wstrb),
-        .s_axil_wvalid(axil_wvalid),
-        .s_axil_wready(axil_wready),
-        .s_axil_bresp(axil_bresp),
-        .s_axil_bvalid(axil_bvalid),
-        .s_axil_bready(axil_bready),
-        .s_axil_araddr(axil_araddr[15:0]),
-        .s_axil_arprot(axil_arprot),
-        .s_axil_arvalid(axil_arvalid),
-        .s_axil_arready(axil_arready),
-        .s_axil_rdata(axil_rdata),
-        .s_axil_rresp(axil_rresp),
-        .s_axil_rvalid(axil_rvalid),
-        .s_axil_rready(axil_rready)
+        // AXI-Lite Slave Interface <- Interconnect Master 0
+        .s_axil_awaddr(m_axil_awaddr[0*ADDR_WIDTH +: 16]), // Truncate to local size
+        .s_axil_awprot(m_axil_awprot[0*3 +: 3]),
+        .s_axil_awvalid(m_axil_awvalid[0]),
+        .s_axil_awready(m_axil_awready[0]),
+        .s_axil_wdata(m_axil_wdata[0*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_wstrb(m_axil_wstrb[0*STRB_WIDTH +: STRB_WIDTH]),
+        .s_axil_wvalid(m_axil_wvalid[0]),
+        .s_axil_wready(m_axil_wready[0]),
+        .s_axil_bresp(m_axil_bresp[0*2 +: 2]),
+        .s_axil_bvalid(m_axil_bvalid[0]),
+        .s_axil_bready(m_axil_bready[0]),
+        .s_axil_araddr(m_axil_araddr[0*ADDR_WIDTH +: 16]), // Truncate to local size
+        .s_axil_arprot(m_axil_arprot[0*3 +: 3]),
+        .s_axil_arvalid(m_axil_arvalid[0]),
+        .s_axil_arready(m_axil_arready[0]),
+        .s_axil_rdata(m_axil_rdata[0*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_rresp(m_axil_rresp[0*2 +: 2]),
+        .s_axil_rvalid(m_axil_rvalid[0]),
+        .s_axil_rready(m_axil_rready[0])
+    );
+
+    // Instantiate UART (Slave 1)
+    axil_uart #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .ADDR_WIDTH(12), // 4KB
+        .STRB_WIDTH(STRB_WIDTH)
+    ) u_uart (
+        .clk(clk),
+        .rst(~rstn), // Active high reset
+        
+        .s_axil_awaddr(m_axil_awaddr[1*ADDR_WIDTH +: 12]),
+        .s_axil_awprot(m_axil_awprot[1*3 +: 3]),
+        .s_axil_awvalid(m_axil_awvalid[1]),
+        .s_axil_awready(m_axil_awready[1]),
+        .s_axil_wdata(m_axil_wdata[1*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_wstrb(m_axil_wstrb[1*STRB_WIDTH +: STRB_WIDTH]),
+        .s_axil_wvalid(m_axil_wvalid[1]),
+        .s_axil_wready(m_axil_wready[1]),
+        .s_axil_bresp(m_axil_bresp[1*2 +: 2]),
+        .s_axil_bvalid(m_axil_bvalid[1]),
+        .s_axil_bready(m_axil_bready[1]),
+        .s_axil_araddr(m_axil_araddr[1*ADDR_WIDTH +: 12]),
+        .s_axil_arprot(m_axil_arprot[1*3 +: 3]),
+        .s_axil_arvalid(m_axil_arvalid[1]),
+        .s_axil_arready(m_axil_arready[1]),
+        .s_axil_rdata(m_axil_rdata[1*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_rresp(m_axil_rresp[1*2 +: 2]),
+        .s_axil_rvalid(m_axil_rvalid[1]),
+        .s_axil_rready(m_axil_rready[1])
+    );
+
+    // Instantiate GPIO (Slave 2)
+    axil_gpio #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .ADDR_WIDTH(12), // 4KB
+        .STRB_WIDTH(STRB_WIDTH)
+    ) u_gpio (
+        .clk(clk),
+        .rst(~rstn), // Active high reset
+        
+        .s_axil_awaddr(m_axil_awaddr[2*ADDR_WIDTH +: 12]),
+        .s_axil_awprot(m_axil_awprot[2*3 +: 3]),
+        .s_axil_awvalid(m_axil_awvalid[2]),
+        .s_axil_awready(m_axil_awready[2]),
+        .s_axil_wdata(m_axil_wdata[2*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_wstrb(m_axil_wstrb[2*STRB_WIDTH +: STRB_WIDTH]),
+        .s_axil_wvalid(m_axil_wvalid[2]),
+        .s_axil_wready(m_axil_wready[2]),
+        .s_axil_bresp(m_axil_bresp[2*2 +: 2]),
+        .s_axil_bvalid(m_axil_bvalid[2]),
+        .s_axil_bready(m_axil_bready[2]),
+        .s_axil_araddr(m_axil_araddr[2*ADDR_WIDTH +: 12]),
+        .s_axil_arprot(m_axil_arprot[2*3 +: 3]),
+        .s_axil_arvalid(m_axil_arvalid[2]),
+        .s_axil_arready(m_axil_arready[2]),
+        .s_axil_rdata(m_axil_rdata[2*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_rresp(m_axil_rresp[2*2 +: 2]),
+        .s_axil_rvalid(m_axil_rvalid[2]),
+        .s_axil_rready(m_axil_rready[2])
     );
 
     // Clock generation (100MHz)
@@ -500,6 +665,39 @@ module z_core_control_u_tb;
         end
     endtask
 
+    task load_test11_io_access;
+        begin
+            $display("\n--- Loading Test 11: IO Access (UART/GPIO) ---");
+            // Test writing and reading from UART and GPIO regions
+            // Note: Since they are empty slaves, they will just respond with OKAY and 0 data.
+            // We just want to verify the interconnect routes the requests correctly and doesn't hang.
+
+            // 0x00: ADDI x2, x0, 0x123      - x2 = 0x123
+            u_axil_ram.mem[0] = 32'h12300113;
+            
+            // ---- UART Access (0x0400_0000) ----
+            // 0x04: LUI x3, 0x04000         - x3 = 0x04000000 (UART Base)
+            u_axil_ram.mem[1] = 32'h040001b7;
+            // 0x08: SW x2, 0(x3)            - Write 0x123 to UART Base
+            u_axil_ram.mem[2] = 32'h0021a023;
+            // 0x0C: LW x4, 0(x3)            - Read from UART Base (should be 0)
+            u_axil_ram.mem[3] = 32'h0001a203;
+
+            // ---- GPIO Access (0x0400_1000) ----
+            // 0x10: LUI x5, 0x04001         - x5 = 0x04001000 (GPIO Base)
+            u_axil_ram.mem[4] = 32'h040012b7;
+            
+            // 0x14: SW x2, 0(x5)            - Write 0x123 to GPIO Base
+            u_axil_ram.mem[5] = 32'h0022a023;
+            // 0x18: LW x6, 0(x5)            - Read from GPIO Base (should be 0)
+            u_axil_ram.mem[6] = 32'h0002a303;
+
+            // NOPs
+            u_axil_ram.mem[7] = 32'h00000013;
+            u_axil_ram.mem[8] = 32'h00000013;
+        end
+    endtask
+
     task load_test9_jumps;
         begin
             $display("\n--- Loading Test 9: Jump Operations (JAL/JALR) ---");
@@ -755,6 +953,17 @@ module z_core_control_u_tb;
         check_reg(2, 5,  "Loop counter final (5)");
         check_reg(3, 5,  "Loop limit (5)");
         check_reg(10, 10, "Sum 0+1+2+3+4 = 10");
+
+        // ==========================================
+        // Test 11: IO Access (UART/GPIO)
+        // ==========================================
+        load_test11_io_access();
+        reset_cpu();
+        #2000;
+        
+        $display("\n=== Test 11 Results: IO Access ===");
+        check_reg(4, 0, "UART Read (should be 0)");
+        check_reg(6, 0, "GPIO Read (should be 0)");
 
         // ==========================================
         // Final Summary
