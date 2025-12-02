@@ -28,6 +28,7 @@ module z_core_control_u_tb;
     integer pass_count = 0;
     integer fail_count = 0;
     reg [5:0] current_state = 0;
+    real instruction_count = 0;
 
     // Interconnect Parameters
     localparam S_COUNT = 1;
@@ -277,6 +278,9 @@ module z_core_control_u_tb;
 
     always @(posedge clk) begin
         current_state <= uut.state[5:0];
+        if (current_state == 1) begin
+            instruction_count <= instruction_count + 1;
+        end
     end
 
     // ==========================================
@@ -969,19 +973,22 @@ module z_core_control_u_tb;
         // ==========================================
         $display("");
         $display("╔═══════════════════════════════════════════════════════════╗");
-        $display("║                    TEST SUMMARY                            ║");
+        $display("║                    TEST SUMMARY                           ║");
         $display("╠═══════════════════════════════════════════════════════════╣");
-        $display("║  Total Tests: %3d                                          ║", test_count);
-        $display("║  Passed:      %3d                                          ║", pass_count);
-        $display("║  Failed:      %3d                                          ║", fail_count);
+        $display("║  Total Tests: %3d                                         ║", test_count);
+        $display("║  Passed:      %3d                                         ║", pass_count);
+        $display("║  Failed:      %3d                                         ║", fail_count);
         $display("╠═══════════════════════════════════════════════════════════╣");
         
         if (fail_count == 0) begin
-            $display("║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║");
+            $display("║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║");
         end else begin
             $display("║              ✗ SOME TESTS FAILED ✗                        ║");
         end
-        
+
+        $display("║  Test Duration: %3d ns                                  ║", $time);
+        $display("║  Clock Cycles:  %3d                                      ║", $time / 10);
+        $display("║  Instructions:   %3d                                      ║", instruction_count);
         $display("╚═══════════════════════════════════════════════════════════╝");
         $display("");
         
