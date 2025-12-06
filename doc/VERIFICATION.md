@@ -169,6 +169,21 @@ while (counter < 5) {
 | SW | Write to GPIO Base (0x0400_1000) | OKAY Response |
 | LW | Read from GPIO Base | Data = 0 |
 
+### Test 12: GPIO Bidirectional
+**Purpose:** Verify GPIO bidirectional functionality via AXI-Lite
+
+This test verifies that the GPIO module correctly handles:
+1. **Output Mode**: CPU configures pins as outputs and drives data
+2. **Input Mode**: CPU configures pins as inputs and reads external data
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Write 0xFFFFFFFF to DIR (0x08) | GPIO[31:0] = Output mode |
+| 2 | Write 0xFF to DATA (0x00) | gpio[31:0] = 0x000000FF |
+| 3 | Write 0x00 to DIR (0x08) | GPIO[31:0] = Input mode |
+| 4 | TB drives 0xCAFEBABE | gpio[31:0] = 0xCAFEBABE |
+| 5 | Read DATA (0x00) | x6 = 0xCAFEBABE |
+
 ## Instruction Coverage
 
 ### RV32I Base Integer Instructions

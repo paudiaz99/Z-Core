@@ -18,6 +18,7 @@ module z_core_control_u_tb;
     parameter DATA_WIDTH = 32;
     parameter ADDR_WIDTH = 32;
     parameter STRB_WIDTH = (DATA_WIDTH/8);
+    parameter N_GPIO     = 64;
 
     // Clock and Reset
     reg clk = 0;
@@ -92,6 +93,19 @@ module z_core_control_u_tb;
     wire [M_COUNT*2-1:0]           m_axil_rresp;
     wire [M_COUNT-1:0]             m_axil_rvalid;
     wire [M_COUNT-1:0]             m_axil_rready;
+
+    // GPIO Signals for Bidirectional Testing
+    wire [N_GPIO-1:0] gpio_wiring;
+    reg  [N_GPIO-1:0] gpio_test_drive;
+    reg  [N_GPIO-1:0] gpio_test_en;
+    
+    // Bidirectional Drive Logic - TB drives when gpio_test_en is set
+    genvar gpio_idx;
+    generate
+        for (gpio_idx = 0; gpio_idx < N_GPIO; gpio_idx = gpio_idx + 1) begin : gpio_drivers
+            assign gpio_wiring[gpio_idx] = gpio_test_en[gpio_idx] ? gpio_test_drive[gpio_idx] : 1'bz;
+        end
+    endgenerate
 
     // Instantiate Interconnect
     axil_interconnect #(
@@ -247,7 +261,8 @@ module z_core_control_u_tb;
     axil_gpio #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(12), // 4KB
-        .STRB_WIDTH(STRB_WIDTH)
+        .STRB_WIDTH(STRB_WIDTH),
+        .N_GPIO(N_GPIO)
     ) u_gpio (
         .clk(clk),
         .rst(~rstn), // Active high reset
@@ -270,7 +285,9 @@ module z_core_control_u_tb;
         .s_axil_rdata(m_axil_rdata[2*DATA_WIDTH +: DATA_WIDTH]),
         .s_axil_rresp(m_axil_rresp[2*2 +: 2]),
         .s_axil_rvalid(m_axil_rvalid[2]),
-        .s_axil_rready(m_axil_rready[2])
+        .s_axil_rready(m_axil_rready[2]),
+        // Bidirectional GPIO Pins
+        .gpio(gpio_wiring)
     );
 
     // Clock generation (100MHz)
@@ -966,7 +983,34 @@ module z_core_control_u_tb;
         
         $display("\n=== Test 11 Results: IO Access ===");
         check_reg(4, 0, "UART Read (should be 0)");
-        check_reg(6, 0, "GPIO Read (should be 0)");
+        // NOTE: GPIO read removed - bidirectional GPIO is tested in Test 12
+
+        // ==========================================
+        // Test 12: GPIO Bidirectional Verification
+        // ==========================================
+        load_test12_gpio_bidirectional();
+        gpio_test_en = 0;    // TB not driving initially
+        gpio_test_drive = 0;
+        reset_cpu();
+        
+        // Wait for GPIO to be configured as output and data written
+        // CPU writes DIR=0xFFFFFFFF then DATA=0x000000FF
+        wait(gpio_wiring[31:0] === 32'h000000FF);
+        $display("\n=== Test 12 Results: GPIO Bidirectional ===");
+        test_count = test_count + 1;
+        pass_count = pass_count + 1;
+        $display("  [PASS] GPIO Output Drive: gpio[31:0] = 0x%08h", gpio_wiring[31:0]);
+        
+        // Wait for CPU to switch GPIO to input mode (DIR=0)
+        wait(u_gpio.gpio_dir[31:0] === 32'h00000000);
+        
+        // Now TB drives the GPIO pins with test pattern
+        gpio_test_en[31:0] = 32'hFFFFFFFF;
+        gpio_test_drive[31:0] = 32'hCAFEBABE;
+        
+        // Wait for CPU to read the value
+        #500;
+        check_reg(6, 32'hCAFEBABE, "GPIO Input Read");
 
         // ==========================================
         // Final Summary
@@ -986,14 +1030,56 @@ module z_core_control_u_tb;
             $display("║              ✗ SOME TESTS FAILED ✗                        ║");
         end
 
-        $display("║  Test Duration: %3d ns                                  ║", $time);
-        $display("║  Clock Cycles:  %3d                                      ║", $time / 10);
-        $display("║  Instructions:   %3d                                      ║", instruction_count);
+        $display("║  Test Duration: %0d ns                                    ║", $time);
+        $display("║  Clock Cycles:  %0d                                       ║", $time / 10);
+        $display("║  Instructions:  %0d                                       ║", instruction_count);
         $display("╚═══════════════════════════════════════════════════════════╝");
         $display("");
         
         $finish;
     end
+
+    // ==========================================
+    //   Test 12: GPIO Bidirectional Test Program
+    // ==========================================
+    task load_test12_gpio_bidirectional;
+        begin
+            $display("\n--- Loading Test 12: GPIO Bidirectional ---");
+            // This test verifies:
+            // 1. GPIO can be configured as output and drive pins
+            // 2. GPIO can be configured as input and read external data
+            
+            // x5 = GPIO Base Address (0x0400_1000)
+            // LUI x5, 0x04001
+            u_axil_ram.mem[0] = 32'h040012b7;
+            
+            // Step 1: Configure GPIO[31:0] as Output (DIR=1)
+            // ADDI x2, x0, -1       - x2 = 0xFFFFFFFF (all outputs)
+            u_axil_ram.mem[1] = 32'hfff00113;
+            // SW x2, 8(x5)          - Write to DIR register (offset 0x08)
+            u_axil_ram.mem[2] = 32'h0022a423;
+            
+            // Step 2: Write test pattern to GPIO output
+            // ADDI x2, x0, 0xFF     - x2 = 0x000000FF
+            u_axil_ram.mem[3] = 32'h0ff00113;
+            // SW x2, 0(x5)          - Write to DATA register (offset 0x00)
+            u_axil_ram.mem[4] = 32'h0022a023;
+            
+            // Step 3: Configure GPIO[31:0] as Input (DIR=0)
+            // ADDI x3, x0, 0        - x3 = 0 (all inputs)
+            u_axil_ram.mem[5] = 32'h00000193;
+            // SW x3, 8(x5)          - Write to DIR register
+            u_axil_ram.mem[6] = 32'h0032a423;
+            
+            // Step 4: Read GPIO input into x6
+            // LW x6, 0(x5)          - Read DATA register into x6
+            u_axil_ram.mem[7] = 32'h0002a303;
+            
+            // NOPs to let CPU complete
+            u_axil_ram.mem[8] = 32'h00000013;
+            u_axil_ram.mem[9] = 32'h00000013;
+        end
+    endtask
 
     // ==========================================
     //           Debug Monitors
