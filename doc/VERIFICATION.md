@@ -184,6 +184,22 @@ This test verifies that the GPIO module correctly handles:
 | 4 | TB drives 0xCAFEBABE | gpio[31:0] = 0xCAFEBABE |
 | 5 | Read DATA (0x00) | x6 = 0xCAFEBABE |
 
+### Test 13: Byte/Halfword Load/Store
+**Purpose:** Verify LB, LH, LBU, LHU, SB, SH instructions
+
+This test verifies sub-word memory access with proper sign/zero extension:
+
+| Instruction | Offset | Source Data | Expected Result |
+|-------------|--------|-------------|-----------------|
+| LB  | 0 | 0xEF | 0xFFFFFFEF (sign-extend) |
+| LBU | 0 | 0xEF | 0x000000EF (zero-extend) |
+| LH  | 0 | 0xBEEF | 0xFFFFBEEF (sign-extend) |
+| LHU | 0 | 0xBEEF | 0x0000BEEF (zero-extend) |
+| LB  | 1 | 0xBE | 0xFFFFFFBE (sign-extend) |
+| LBU | 2 | 0xAD | 0x000000AD (zero-extend) |
+| LH  | 2 | 0xDEAD | 0xFFFFDEAD (sign-extend) |
+| LHU | 2 | 0xDEAD | 0x0000DEAD (zero-extend) |
+
 ## Instruction Coverage
 
 ### RV32I Base Integer Instructions

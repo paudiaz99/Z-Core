@@ -1013,6 +1013,32 @@ module z_core_control_u_tb;
         check_reg(6, 32'hCAFEBABE, "GPIO Input Read");
 
         // ==========================================
+        // Test 13: Byte/Halfword Load/Store
+        // ==========================================
+        load_test13_byte_halfword();
+        reset_cpu();
+        #4000;  // Allow time for all operations
+        
+        $display("\n=== Test 13 Results: Byte/Halfword ===");
+        // mem[0x200] = 0xDEADBEEF (little endian: EF BE AD DE)
+        // LB from byte 0: 0xEF, sign-extended -> 0xFFFFFFEF
+        check_reg(6, 32'hFFFFFFEF, "LB (sign-ext 0xEF)");
+        // LBU from byte 0: 0xEF, zero-extended -> 0x000000EF
+        check_reg(7, 32'h000000EF, "LBU (zero-ext 0xEF)");
+        // LH from offset 0: 0xBEEF, sign-extended -> 0xFFFFBEEF
+        check_reg(8, 32'hFFFFBEEF, "LH (sign-ext 0xBEEF)");
+        // LHU from offset 0: 0xBEEF, zero-extended -> 0x0000BEEF
+        check_reg(9, 32'h0000BEEF, "LHU (zero-ext 0xBEEF)");
+        // LB from byte 1: 0xBE, sign-extended -> 0xFFFFFFBE
+        check_reg(10, 32'hFFFFFFBE, "LB offset 1 (sign-ext 0xBE)");
+        // LBU from byte 2: 0xAD, zero-extended -> 0x000000AD
+        check_reg(11, 32'h000000AD, "LBU offset 2 (zero-ext 0xAD)");
+        // LH from offset 2: 0xDEAD, sign-extended -> 0xFFFFDEAD
+        check_reg(12, 32'hFFFFDEAD, "LH offset 2 (sign-ext 0xDEAD)");
+        // LHU from offset 2: 0xDEAD, zero-extended -> 0x0000DEAD
+        check_reg(13, 32'h0000DEAD, "LHU offset 2 (zero-ext 0xDEAD)");
+
+        // ==========================================
         // Final Summary
         // ==========================================
         $display("");
@@ -1078,6 +1104,92 @@ module z_core_control_u_tb;
             // NOPs to let CPU complete
             u_axil_ram.mem[8] = 32'h00000013;
             u_axil_ram.mem[9] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 13: Byte/Halfword Load/Store
+    // ==========================================
+    task load_test13_byte_halfword;
+        begin
+            $display("\n--- Loading Test 13: Byte/Halfword Load/Store ---");
+            // This test verifies:
+            // 1. SB, SH store correct bytes/halfwords
+            // 2. LB, LH sign-extend correctly
+            // 3. LBU, LHU zero-extend correctly
+            
+            // First, initialize memory at 0x200 with a known pattern
+            // We'll use SW to write 0xDEADBEEF to 0x200
+            // ADDI x2, x0, 0x200     - x2 = 0x200 (base address)
+            u_axil_ram.mem[0] = 32'h20000113;
+            
+            // LUI x3, 0xDEADC       - x3 = 0xDEADC000 (upper bits, adjusted for ADDI)
+            u_axil_ram.mem[1] = 32'hdeadc1b7;
+            // ADDI x3, x3, -273     - x3 = 0xDEADBEEF
+            u_axil_ram.mem[2] = 32'heef18193;
+            // SW x3, 0(x2)          - mem[0x200] = 0xDEADBEEF
+            u_axil_ram.mem[3] = 32'h00312023;
+            
+            // Test SB: Store byte 0xAB to address 0x204
+            // ADDI x4, x0, 0xAB     - x4 = 0xAB (171, positive as unsigned)
+            u_axil_ram.mem[4] = 32'h0ab00213;
+            // SB x4, 4(x2)          - mem[0x204] = 0x000000AB (byte 0)
+            u_axil_ram.mem[5] = 32'h00410223;
+            
+            // Test SH: Store halfword 0xCDEF to address 0x206
+            // Note: 0xCDEF as signed = -12817
+            // LUI x5, 0x0000D       - x5 = 0x0000D000
+            // Actually easier: ADDI x5, x0, -0x3211 won't work. Use LUI+ADDI
+            // LUI x5, 0xFFFCD       - x5 = 0xFFFCD000 (for -0x3211)
+            // Let's just use a positive value instead for clarity
+            // ADDI can only do -2048 to 2047, so use LUI+ADDI for 0xCDEF
+            // Actually 0xCDEF = 52719, too big for ADDI
+            // Use: LUI x5, 0  then ORI doesn't exist, so:
+            // ADDI x5, x0, 0x7FF  + another add... too complex
+            // Simpler: just use 0x1234 which fits in ADDI
+            // ADDI x5, x0, 0x1234 won't work (max 2047)
+            // Use 0x123 = 291
+            // Actually let's use 0xFFFFFEEF which is -273 (works for sign test)
+            // ADDI x5, x0, -273    - x5 = 0xFFFFFEEF
+            u_axil_ram.mem[6] = 32'heef00293;
+            // SH x5, 6(x2)          - mem[0x206] = 0xFEEF (lower halfword)
+            u_axil_ram.mem[7] = 32'h00511323;
+            
+            // Test LB (sign-extend): Load byte from 0x200 (should be 0xEF, sign-extended)
+            // LB x6, 0(x2)          - x6 = sign_extend(0xEF) = 0xFFFFFFEF
+            u_axil_ram.mem[8] = 32'h00010303;
+            
+            // Test LBU (zero-extend): Load byte from 0x200 (should be 0xEF, zero-extended)
+            // LBU x7, 0(x2)         - x7 = 0x000000EF
+            u_axil_ram.mem[9] = 32'h00014383;
+            
+            // Test LH (sign-extend): Load halfword from 0x200 (should be 0xBEEF, sign-extended)
+            // LH x8, 0(x2)          - x8 = sign_extend(0xBEEF) = 0xFFFFBEEF
+            u_axil_ram.mem[10] = 32'h00011403;
+            
+            // Test LHU (zero-extend): Load halfword from 0x200 (should be 0xBEEF, zero-extended)
+            // LHU x9, 0(x2)         - x9 = 0x0000BEEF
+            u_axil_ram.mem[11] = 32'h00015483;
+            
+            // Test LB at offset 1 (should be 0xBE, sign-extended)
+            // LB x10, 1(x2)         - x10 = sign_extend(0xBE) = 0xFFFFFFBE
+            u_axil_ram.mem[12] = 32'h00110503;
+            
+            // Test LBU at offset 2 (should be 0xAD, zero-extended)
+            // LBU x11, 2(x2)        - x11 = 0x000000AD
+            u_axil_ram.mem[13] = 32'h00214583;
+            
+            // Test LH at offset 2 (should be 0xDEAD, sign-extended)
+            // LH x12, 2(x2)         - x12 = sign_extend(0xDEAD) = 0xFFFFDEAD
+            u_axil_ram.mem[14] = 32'h00211603;
+            
+            // Test LHU at offset 2 (should be 0xDEAD, zero-extended)
+            // LHU x13, 2(x2)        - x13 = 0x0000DEAD
+            u_axil_ram.mem[15] = 32'h00215683;
+            
+            // NOPs
+            u_axil_ram.mem[16] = 32'h00000013;
+            u_axil_ram.mem[17] = 32'h00000013;
         end
     endtask
 

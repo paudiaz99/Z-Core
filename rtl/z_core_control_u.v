@@ -1,9 +1,5 @@
 // **************************************************
-//                    TODO LIST
-// 1. Implement Multiple Size Load/Store
-// 2. Implement AXI4 Interface [DONE]
-// 3. Implement Testbench (Once All Modules are Done and Tested)
-// 4. Verify correctness of the Control Unit using Simulation
+//                 Z-Core Control Unit
 //
 // **************************************************
 
@@ -81,6 +77,12 @@ reg                   mem_wen;
 // Memory write data register
 reg [31:0] mem_data_out_r;
 
+// Memory write strobe register (for byte/halfword stores)
+reg [STRB_WIDTH-1:0] mem_wstrb_r;
+
+// Saved funct3 for load/store operations
+reg [2:0] funct3_r;
+
 // AXI-Lite Master Instance
 axil_master #(
     .DATA_WIDTH(DATA_WIDTH),
@@ -95,7 +97,7 @@ axil_master #(
     .mem_wen(mem_wen),
     .mem_addr(mem_addr),
     .mem_wdata(mem_data_out_r),
-    .mem_wstrb({STRB_WIDTH{1'b1}}),  // Full word write for now
+    .mem_wstrb(mem_wstrb_r),  // Dynamic byte strobe for partial writes
     .mem_rdata(mem_rdata),
     .mem_ready(mem_ready),
     .mem_busy(mem_busy),
@@ -341,6 +343,8 @@ always @(posedge clk) begin
         alu_inst_type_r <= 4'h0;
         Imm_r <= 32'h0;
         mem_data_out_r <= 32'h0;
+        mem_wstrb_r <= {STRB_WIDTH{1'b1}};
+        funct3_r <= 3'b0;
     end
     else begin
         // Default: clear memory request after one cycle
@@ -367,55 +371,104 @@ always @(posedge clk) begin
                 // Save current PC for AUIPC/JAL/JALR (before it gets updated)
                 PC_saved <= PC;
                 
-            // Update ALU Registers
-            alu_in1_r <= rs1_out;
-            alu_in2_r <= alu_in2_mux;
-            alu_inst_type_r <= alu_inst_type;
+                // Update ALU Registers
+                alu_in1_r <= rs1_out;
+                alu_in2_r <= alu_in2_mux;
+                alu_inst_type_r <= alu_inst_type;
 
-            // Store Immediate for later use
-            Imm_r <= Imm_mux_out;
+                // Store Immediate for later use
+                Imm_r <= Imm_mux_out;
 
-            // Store rs2_out for memory store
-            mem_data_out_r <= rs2_out;
+                // Save funct3 for memory operations (load/store size)
+                funct3_r <= funct3;
 
-            state <= STATE_EXECUTE;
-        end
+                // Position store data in correct byte lanes based on funct3
+                // Byte: replicate across all lanes
+                // Halfword: replicate in both halves
+                // Word: pass through
+                case (funct3[1:0])
+                    2'b00: mem_data_out_r <= {4{rs2_out[7:0]}};   // SB: replicate byte
+                    2'b01: mem_data_out_r <= {2{rs2_out[15:0]}};  // SH: replicate halfword
+                    default: mem_data_out_r <= rs2_out;            // SW: full word
+                endcase
+
+                state <= STATE_EXECUTE;
+            end
             
             state[STATE_EXECUTE_b]: begin
-            // Update Program Counter
-            PC <= PC_mux;
+                // Update Program Counter
+                PC <= PC_mux;
 
-            // Store ALU Results
-            ALUOut_r <= alu_out;
-            alu_branch_r <= alu_branch;
+                // Store ALU Results
+                ALUOut_r <= alu_out;
+                alu_branch_r <= alu_branch;
 
                 if (isLoad) begin
                     // Setup for load
                     mem_addr <= alu_out;
                     mem_wen <= 1'b0;  // Read
                     mem_req <= 1'b1;
+                    mem_wstrb_r <= 4'b1111;  // Full word read (strobe doesn't matter for reads)
                     state <= STATE_MEM;
                 end else if (isStore) begin
-                    // Setup for store
+                    // Setup for store with proper byte strobe
                     mem_addr <= alu_out;
                     mem_wen <= 1'b1;  // Write
                     mem_req <= 1'b1;
+                    // Generate byte strobe based on funct3 and address bits [1:0]
+                    case (funct3_r[1:0])
+                        2'b00: mem_wstrb_r <= 4'b0001 << alu_out[1:0];  // SB
+                        2'b01: mem_wstrb_r <= 4'b0011 << alu_out[1:0];  // SH
+                        default: mem_wstrb_r <= 4'b1111;                 // SW
+                    endcase
                     state <= STATE_MEM;
                 end else if (isWB) begin
                     state <= STATE_WRITE;
                 end else begin
                     state <= STATE_FETCH;
-        end
+                end
             end
             
             state[STATE_MEM_b]: begin
                 // Wait for memory operation to complete
                 if (mem_ready) begin
                     if (isLoad) begin
-                        MDR <= mem_rdata;
+                        // Sign/zero extend loaded data based on funct3 and address
+                        case (funct3_r)
+                            3'b000: begin // LB (sign-extend byte)
+                                case (ALUOut_r[1:0])
+                                    2'b00: MDR <= {{24{mem_rdata[7]}}, mem_rdata[7:0]};
+                                    2'b01: MDR <= {{24{mem_rdata[15]}}, mem_rdata[15:8]};
+                                    2'b10: MDR <= {{24{mem_rdata[23]}}, mem_rdata[23:16]};
+                                    2'b11: MDR <= {{24{mem_rdata[31]}}, mem_rdata[31:24]};
+                                endcase
+                            end
+                            3'b001: begin // LH (sign-extend halfword)
+                                case (ALUOut_r[1])
+                                    1'b0: MDR <= {{16{mem_rdata[15]}}, mem_rdata[15:0]};
+                                    1'b1: MDR <= {{16{mem_rdata[31]}}, mem_rdata[31:16]};
+                                endcase
+                            end
+                            3'b010: MDR <= mem_rdata; // LW
+                            3'b100: begin // LBU (zero-extend byte)
+                                case (ALUOut_r[1:0])
+                                    2'b00: MDR <= {24'b0, mem_rdata[7:0]};
+                                    2'b01: MDR <= {24'b0, mem_rdata[15:8]};
+                                    2'b10: MDR <= {24'b0, mem_rdata[23:16]};
+                                    2'b11: MDR <= {24'b0, mem_rdata[31:24]};
+                                endcase
+                            end
+                            3'b101: begin // LHU (zero-extend halfword)
+                                case (ALUOut_r[1])
+                                    1'b0: MDR <= {16'b0, mem_rdata[15:0]};
+                                    1'b1: MDR <= {16'b0, mem_rdata[31:16]};
+                                endcase
+                            end
+                            default: MDR <= mem_rdata;
+                        endcase
                     end
-            state <= isWB ? STATE_WRITE : STATE_FETCH;
-        end
+                    state <= isWB ? STATE_WRITE : STATE_FETCH;
+                end
             end
             
             state[STATE_WRITE_b]: begin
