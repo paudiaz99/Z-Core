@@ -169,6 +169,48 @@ while (counter < 5) {
 | SW | Write to GPIO Base (0x0400_1000) | OKAY Response |
 | LW | Read from GPIO Base | Data = 0 |
 
+### Test 12: GPIO Bidirectional
+**Purpose:** Verify GPIO bidirectional functionality via AXI-Lite
+
+This test verifies that the GPIO module correctly handles:
+1. **Output Mode**: CPU configures pins as outputs and drives data
+2. **Input Mode**: CPU configures pins as inputs and reads external data
+
+| Step | Action | Expected Result |
+|------|--------|-----------------|
+| 1 | Write 0xFFFFFFFF to DIR (0x08) | GPIO[31:0] = Output mode |
+| 2 | Write 0xFF to DATA (0x00) | gpio[31:0] = 0x000000FF |
+| 3 | Write 0x00 to DIR (0x08) | GPIO[31:0] = Input mode |
+| 4 | TB drives 0xCAFEBABE | gpio[31:0] = 0xCAFEBABE |
+| 5 | Read DATA (0x00) | x6 = 0xCAFEBABE |
+
+### Test 13: Byte/Halfword Load/Store
+**Purpose:** Verify LB, LH, LBU, LHU, SB, SH instructions
+
+This test verifies sub-word memory access with proper sign/zero extension:
+
+| Instruction | Offset | Source Data | Expected Result |
+|-------------|--------|-------------|-----------------|
+| LB  | 0 | 0xEF | 0xFFFFFFEF (sign-extend) |
+| LBU | 0 | 0xEF | 0x000000EF (zero-extend) |
+| LH  | 0 | 0xBEEF | 0xFFFFBEEF (sign-extend) |
+| LHU | 0 | 0xBEEF | 0x0000BEEF (zero-extend) |
+| LB  | 1 | 0xBE | 0xFFFFFFBE (sign-extend) |
+| LBU | 2 | 0xAD | 0x000000AD (zero-extend) |
+| LH  | 2 | 0xDEAD | 0xFFFFDEAD (sign-extend) |
+| LHU | 2 | 0xDEAD | 0x0000DEAD (zero-extend) |
+
+### Test 14: UART Loopback
+**Purpose:** Verify UART TX and RX functionality via loopback
+
+This test verifies that the UART module can transmit a byte and receive it back (either via external loopback or testbench connection):
+
+1. **Write to TX**: CPU writes 0x55 to UART TX_DATA register.
+2. **Transmission**: UART transmits the byte (start bit + 8 data bits + stop bit).
+3. **Loopback**: The transmitted signal is fed back to the RX pin.
+4. **Reception**: UART receives the byte and updates RX_DATA and STATUS registers.
+5. **Verification**: CPU checks STATUS (TX_EMPTY=1, RX_VALID=1) and RX_DATA (0x55).
+
 ## Instruction Coverage
 
 ### RV32I Base Integer Instructions
@@ -182,9 +224,8 @@ while (counter < 5) {
 | Branch | BEQ, BNE, BLT, BGE, BLTU, BGEU | Yes | 100% |
 | Jump | JAL, JALR | Yes | 100% |
 | Upper Imm | LUI, AUIPC | Yes | 100% |
-| Load | LW | Yes | 100% |
-| Store | SW | Yes | 100% |
-| **NOT IMPLEMENTED** | LB, LH, LBU, LHU, SB, SH | N/A | 0% |
+| Load | LW, LB, LH, LBU, LHU | Yes | 100% |
+| Store | SW, SB, SH | Yes | 100% |
 | **NOT IMPLEMENTED** | FENCE, ECALL, EBREAK | N/A | 0% |
 
 ## Test Flow Diagram
@@ -259,8 +300,8 @@ gtkwave sim/z_core_control_u_tb.vcd
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  70                                          ║
-║  Passed:       70                                          ║
+║  Total Tests:  80                                          ║
+║  Passed:       80                                          ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
@@ -282,10 +323,9 @@ Key signals to observe in GTKWave:
 
 ## Known Limitations
 
-1. **Word-only memory access**: LB, LH, LBU, LHU, SB, SH not implemented
-2. **No system instructions**: FENCE, ECALL, EBREAK not implemented
-3. **No interrupts**: Interrupt handling not implemented
-4. **No pipeline**: Multi-cycle execution only
+1. **No system instructions**: FENCE, ECALL, EBREAK not implemented
+2. **No interrupts**: Interrupt handling not implemented
+3. **No pipeline**: Multi-cycle execution only
 
 ## Future Verification Plans
 

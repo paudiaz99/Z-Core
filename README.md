@@ -34,21 +34,21 @@
 
 ```
                     ┌─────────────────────────────────────────────────────┐
-                    │                   Z-Core CPU                         │
+                    │                   Z-Core CPU                        │
                     │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐ │
                     │  │ Decoder │  │Reg File │  │ALU Ctrl │  │   ALU   │ │
-                    │  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘ │
-                    │       └────────────┼───────────┼────────────┘       │
-                    │                    │           │                     │
+                    │  └────┬────┘  └────┬────┘  └───┬─────┘  └────┬────┘ │
+                    │       └────────────┼───────────┼─────────────┘      │
+                    │                    │           │                    │
                     │            ┌───────┴───────────┴───────┐            │
-                    │            │    Control Unit (FSM)      │            │
-                    │            │  FETCH→DECODE→EXECUTE→WB   │            │
-                    │            └─────────────┬──────────────┘            │
-                    │                          │                           │
-                    │            ┌─────────────┴──────────────┐            │
-                    │            │      AXI-Lite Master       │            │
-                    │            └─────────────┬──────────────┘            │
-                    └──────────────────────────┼───────────────────────────┘
+                    │            │    Control Unit (FSM)     │            │
+                    │            │  FETCH→DECODE→EXECUTE→WB  │            │
+                    │            └─────────────┬─────────────┘            │
+                    │                          │                          │
+                    │            ┌─────────────┴──────────────┐           │
+                    │            │      AXI-Lite Master       │           │
+                    │            └─────────────┬──────────────┘           │
+                    └──────────────────────────┼──────────────────────────┘
                                                │ AXI-Lite Bus
                                                ▼
                                   ┌─────────────────────────┐
@@ -102,6 +102,8 @@ Z-Core/
 │
 └── doc/                       # Documentation
     ├── AXI_INTERFACE.md       # AXI protocol details
+    ├── GPIO.md                # GPIO module documentation
+    ├── UART.md                # UART module documentation
     ├── Z_CORE_ARCHITECTURE.md # Architecture overview
     └── VERIFICATION.md        # Verification details
 ```
@@ -152,8 +154,8 @@ vvp sim/z_core_control_u_tb.vvp
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  70                                          ║
-║  Passed:       70                                          ║
+║  Total Tests:  80                                          ║
+║  Passed:       80                                          ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
@@ -168,7 +170,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 
 ## Test Coverage
 
-The processor has been verified with **70 comprehensive tests** across 11 test suites:
+The processor has been verified with **80 comprehensive tests** across 14 test suites:
 
 | Test Suite | Description | Tests |
 |------------|-------------|-------|
@@ -182,7 +184,10 @@ The processor has been verified with **70 comprehensive tests** across 11 test s
 | Branches | BEQ, BNE, BLT, BGE, BLTU, BGEU | 7 |
 | Jumps | JAL, JALR, JALR+offset | 7 |
 | Loop | Backward branch (sum 0..4) | 3 |
-| IO Access | UART/GPIO Read/Write | 2 |
+| IO Access | UART STATUS register | 1 |
+| GPIO | Bidirectional GPIO | 2 |
+| Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
+| UART Loopback | TX→RX data verification | 1 |
 
 ## Performance
 
@@ -216,6 +221,8 @@ Detailed documentation is available in the `doc/` directory:
 
 - **[Architecture](doc/Z_CORE_ARCHITECTURE.md)** - Detailed architecture overview
 - **[AXI Interface](doc/AXI_INTERFACE.md)** - Complete AXI-Lite protocol documentation
+- **[GPIO](doc/GPIO.md)** - Bidirectional GPIO module
+- **[UART](doc/UART.md)** - Serial UART module
 - **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
 
 ## Roadmap
