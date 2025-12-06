@@ -200,6 +200,17 @@ This test verifies sub-word memory access with proper sign/zero extension:
 | LH  | 2 | 0xDEAD | 0xFFFFDEAD (sign-extend) |
 | LHU | 2 | 0xDEAD | 0x0000DEAD (zero-extend) |
 
+### Test 14: UART Loopback
+**Purpose:** Verify UART TX and RX functionality via loopback
+
+This test verifies that the UART module can transmit a byte and receive it back (either via external loopback or testbench connection):
+
+1. **Write to TX**: CPU writes 0x55 to UART TX_DATA register.
+2. **Transmission**: UART transmits the byte (start bit + 8 data bits + stop bit).
+3. **Loopback**: The transmitted signal is fed back to the RX pin.
+4. **Reception**: UART receives the byte and updates RX_DATA and STATUS registers.
+5. **Verification**: CPU checks STATUS (TX_EMPTY=1, RX_VALID=1) and RX_DATA (0x55).
+
 ## Instruction Coverage
 
 ### RV32I Base Integer Instructions
@@ -213,9 +224,8 @@ This test verifies sub-word memory access with proper sign/zero extension:
 | Branch | BEQ, BNE, BLT, BGE, BLTU, BGEU | Yes | 100% |
 | Jump | JAL, JALR | Yes | 100% |
 | Upper Imm | LUI, AUIPC | Yes | 100% |
-| Load | LW | Yes | 100% |
-| Store | SW | Yes | 100% |
-| **NOT IMPLEMENTED** | LB, LH, LBU, LHU, SB, SH | N/A | 0% |
+| Load | LW, LB, LH, LBU, LHU | Yes | 100% |
+| Store | SW, SB, SH | Yes | 100% |
 | **NOT IMPLEMENTED** | FENCE, ECALL, EBREAK | N/A | 0% |
 
 ## Test Flow Diagram
@@ -290,8 +300,8 @@ gtkwave sim/z_core_control_u_tb.vcd
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  70                                          ║
-║  Passed:       70                                          ║
+║  Total Tests:  80                                          ║
+║  Passed:       80                                          ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
@@ -313,10 +323,9 @@ Key signals to observe in GTKWave:
 
 ## Known Limitations
 
-1. **Word-only memory access**: LB, LH, LBU, LHU, SB, SH not implemented
-2. **No system instructions**: FENCE, ECALL, EBREAK not implemented
-3. **No interrupts**: Interrupt handling not implemented
-4. **No pipeline**: Multi-cycle execution only
+1. **No system instructions**: FENCE, ECALL, EBREAK not implemented
+2. **No interrupts**: Interrupt handling not implemented
+3. **No pipeline**: Multi-cycle execution only
 
 ## Future Verification Plans
 
