@@ -323,15 +323,55 @@ Key signals to observe in GTKWave:
 
 ## Known Limitations
 
-1. **No system instructions**: FENCE, ECALL, EBREAK not implemented
-2. **No interrupts**: Interrupt handling not implemented
-3. **No pipeline**: Multi-cycle execution only
+1. **No interrupts**: Interrupt handling not implemented
+2. **No pipeline**: Multi-cycle execution only
+
+## RISCOF Compliance Testing
+
+Z-Core includes infrastructure for RISC-V architectural compliance testing:
+
+### Setup Requirements
+
+1. **RISC-V GNU Toolchain** (`riscv32-unknown-elf-gcc`)
+2. **Spike** reference model (`riscv-isa-sim`)
+3. **RISCOF** Python package (`pip install riscof`)
+4. **riscv-arch-test** repository
+
+### Running RISCOF Tests
+
+```bash
+# Navigate to RISCOF directory
+cd riscof
+
+# Update config.ini with your Spike installation path
+
+# Validate configuration
+riscof validateyaml --config=config.ini
+
+# Run compliance tests
+riscof run --config=config.ini \
+  --suite=/path/to/riscv-arch-test/riscv-test-suite \
+  --env=/path/to/riscv-arch-test/riscv-test-suite/env
+```
+
+### RISCOF Files
+
+| File | Description |
+|------|-------------|
+| `riscof/config.ini` | RISCOF configuration |
+| `riscof/z_core/z_core_isa.yaml` | ISA specification |
+| `riscof/z_core/z_core_platform.yaml` | Platform specification |
+| `riscof/z_core/riscof_z_core.py` | DUT plugin |
+| `riscof/z_core/env/model_test.h` | Test macros |
+| `riscof/z_core/env/link.ld` | Linker script |
+| `tb/z_core_riscof_tb.sv` | RISCOF testbench |
 
 ## Future Verification Plans
 
-1. [ ] RISC-V official compliance tests (riscv-tests)
-2. [ ] Random instruction testing
-3. [ ] Stress testing with longer programs
-4. [ ] Formal verification of critical paths
-5. [ ] Coverage-driven verification
+1. [x] RISC-V official compliance tests (RISCOF infrastructure)
+2. [ ] Run full RISCOF test suite
+3. [ ] Random instruction testing
+4. [ ] Stress testing with longer programs
+5. [ ] Formal verification of critical paths
+6. [ ] Coverage-driven verification
 

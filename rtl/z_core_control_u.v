@@ -38,7 +38,10 @@ module z_core_control_u #(
     input  wire [DATA_WIDTH-1:0]  m_axil_rdata,
     input  wire [1:0]             m_axil_rresp,
     input  wire                   m_axil_rvalid,
-    output wire                   m_axil_rready
+    output wire                   m_axil_rready,
+
+    // Halt signal (ECALL/EBREAK detected - for RISCOF signature dump)
+    output wire                   halt
 );
 
 // **************************************************
@@ -61,6 +64,10 @@ localparam B_INST = 7'b1100011;
 localparam JAL_INST = 7'b1101111;
 localparam LUI_INST = 7'b0110111;
 localparam AUIPC_INST = 7'b0010111;
+
+// System Instructions
+localparam SYSTEM_INST = 7'b1110011;  // ECALL, EBREAK
+localparam FENCE_INST  = 7'b0001111;  // FENCE
 
 // **************************************************
 //              AXI-Lite Master Interface
@@ -300,8 +307,17 @@ wire isJALR = (op == JALR_INST);
 wire isLoad = (op == I_LOAD_INST);
 wire isStore = isSimm;
 
-// WriteBack Control
-wire isWB = ~(isSimm | isBimm);
+// System Instruction Control
+wire isFENCE  = (op == FENCE_INST);
+wire isSYSTEM = (op == SYSTEM_INST);
+wire isECALL  = isSYSTEM && (funct3 == 3'b000) && (IR[31:20] == 12'h000);
+wire isEBREAK = isSYSTEM && (funct3 == 3'b000) && (IR[31:20] == 12'h001);
+
+// WriteBack Control (no writeback for branches, stores, FENCE, ECALL, EBREAK)
+wire isWB = ~(isSimm | isBimm | isFENCE | isECALL | isEBREAK);
+
+// Halt signal for RISCOF compliance testing (ECALL/EBREAK triggers signature dump)
+assign halt = (isECALL | isEBREAK) & state[STATE_EXECUTE_b];
 
 // **************************************************
 //                   FSM - OneHot

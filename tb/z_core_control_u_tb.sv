@@ -165,6 +165,8 @@ module z_core_control_u_tb;
     );
 
     // Instantiate Control Unit (AXI-Lite Master)
+    wire cpu_halt;  // Halt signal from CPU (ECALL/EBREAK detected)
+    
     z_core_control_u #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
@@ -192,7 +194,10 @@ module z_core_control_u_tb;
         .m_axil_rdata(s_axil_rdata),
         .m_axil_rresp(s_axil_rresp),
         .m_axil_rvalid(s_axil_rvalid),
-        .m_axil_rready(s_axil_rready)
+        .m_axil_rready(s_axil_rready),
+        
+        // Halt signal for RISCOF
+        .halt(cpu_halt)
     );
 
     // Instantiate AXI-Lite RAM (Slave 0)
