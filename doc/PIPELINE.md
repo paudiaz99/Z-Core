@@ -188,23 +188,14 @@ assign write_addr = mem_wb_rd;
 
 ```mermaid
 graph TD
-    subgraph IF_ID["IF/ID Register"]
-        A1["pc: 32-bit"]
-        A2["ir: 32-bit instruction"]
-        A3["valid: 1-bit"]
-        A4["poisoned: 1-bit"]
+    subgraph MEM_WB["MEM/WB Register"]
+        D1["result: 32-bit"]
+        D2["pc: 32-bit (for debug)"]
+        D3["rd: 5-bit"]
+        D4["reg_write: 1-bit"]
+        D5["valid, poisoned: 1-bit"]
     end
-    
-    subgraph ID_EX["ID/EX Register"]
-        B1["pc: 32-bit"]
-        B2["rs1_data, rs2_data: 32-bit"]
-        B3["imm: 32-bit"]
-        B4["rd, rs1_addr, rs2_addr: 5-bit"]
-        B5["alu_op: 4-bit"]
-        B6["is_load, is_store, is_branch, is_jal, is_jalr, ..."]
-        B7["valid, poisoned: 1-bit"]
-    end
-    
+
     subgraph EX_MEM["EX/MEM Register"]
         C1["pc: 32-bit"]
         C2["alu_result: 32-bit"]
@@ -214,13 +205,22 @@ graph TD
         C6["is_load, is_store, reg_write"]
         C7["valid, poisoned: 1-bit"]
     end
-    
-    subgraph MEM_WB["MEM/WB Register"]
-        D1["result: 32-bit"]
-        D2["pc: 32-bit (for debug)"]
-        D3["rd: 5-bit"]
-        D4["reg_write: 1-bit"]
-        D5["valid, poisoned: 1-bit"]
+
+    subgraph ID_EX["ID/EX Register"]
+        B1["pc: 32-bit"]
+        B2["rs1_data, rs2_data: 32-bit"]
+        B3["imm: 32-bit"]
+        B4["rd, rs1_addr, rs2_addr: 5-bit"]
+        B5["alu_op: 4-bit"]
+        B6["is_load, is_store, is_branch, is_jal, is_jalr, ..."]
+        B7["valid, poisoned: 1-bit"]
+    end
+
+    subgraph IF_ID["IF/ID Register"]
+        A1["pc: 32-bit"]
+        A2["ir: 32-bit instruction"]
+        A3["valid: 1-bit"]
+        A4["poisoned: 1-bit"]
     end
 ```
 
