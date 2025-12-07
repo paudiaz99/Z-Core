@@ -154,8 +154,8 @@ vvp sim/z_core_control_u_tb.vvp
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  80                                          ║
-║  Passed:       80                                          ║
+║  Total Tests:  133                                         ║
+║  Passed:       133                                         ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
@@ -170,7 +170,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 
 ## Test Coverage
 
-The processor has been verified with **80 comprehensive tests** across 14 test suites:
+The processor has been verified with **133 comprehensive tests** across 15 test suites:
 
 | Test Suite | Description | Tests |
 |------------|-------------|-------|
@@ -188,7 +188,7 @@ The processor has been verified with **80 comprehensive tests** across 14 test s
 | GPIO | Bidirectional GPIO | 2 |
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
-| Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 5 |
+| Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 53 |
 
 ## Performance
 
