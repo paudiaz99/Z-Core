@@ -1,6 +1,6 @@
 // **************************************************
 //                 Z-Core Control Unit
-//
+//        5-Stage Pipelined RISC-V RV32I Processor
 // **************************************************
 
 `timescale 1ns / 1ns
@@ -45,45 +45,46 @@ module z_core_control_u #(
 //                Instructions OP
 // **************************************************
 
-// R-Type Instructions
-localparam R_INST = 7'b0110011;
-
-// I-Type Instructions
-localparam I_INST = 7'b0010011;
+localparam R_INST      = 7'b0110011;
+localparam I_INST      = 7'b0010011;
 localparam I_LOAD_INST = 7'b0000011;
-localparam JALR_INST = 7'b1100111;
-
-// S/B-Type Instructions
-localparam S_INST = 7'b0100011;
-localparam B_INST = 7'b1100011;
-
-// J/U-Type Instructions
-localparam JAL_INST = 7'b1101111;
-localparam LUI_INST = 7'b0110111;
-localparam AUIPC_INST = 7'b0010111;
+localparam JALR_INST   = 7'b1100111;
+localparam S_INST      = 7'b0100011;
+localparam B_INST      = 7'b1100011;
+localparam JAL_INST    = 7'b1101111;
+localparam LUI_INST    = 7'b0110111;
+localparam AUIPC_INST  = 7'b0010111;
 
 // **************************************************
 //              AXI-Lite Master Interface
 // **************************************************
 
-// Internal memory interface signals
 reg  [ADDR_WIDTH-1:0] mem_addr;
 wire [DATA_WIDTH-1:0] mem_rdata;
 wire                  mem_ready;
 wire                  mem_busy;
-reg                   mem_req;
-reg                   mem_wen;
 
-// Memory write data register
-reg [31:0] mem_data_out_r;
+// mem_addr is reg (defined at top), driven by arbiter
+reg                   mem_wen_comb;
+reg                   mem_req_comb;
 
-// Memory write strobe register (for byte/halfword stores)
-reg [STRB_WIDTH-1:0] mem_wstrb_r;
+assign mem_req = mem_req_comb;
+assign mem_wen = mem_wen_comb;
 
-// Saved funct3 for load/store operations
-reg [2:0] funct3_r;
+// Previous always @* block for mem_addr removed (redundant)
 
-// AXI-Lite Master Instance
+
+// We need to re-declare mem_addr as reg locally for invalidation?
+// The port is reg [ADDR_WIDTH-1:0] mem_addr; defined above.
+// Wait, port definition:
+// reg  [ADDR_WIDTH-1:0] mem_addr;
+// So I can't assign it in always @* AND have it be a reg?
+// Verilog allow reg to be driven by always @*.
+// But I need to remove "reg mem_req" etc from top.
+
+reg  [31:0]           mem_data_out_r;
+reg  [STRB_WIDTH-1:0] mem_wstrb_r;
+
 axil_master #(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(ADDR_WIDTH),
@@ -91,18 +92,14 @@ axil_master #(
 ) u_axil_master (
     .clk(clk),
     .rstn(rstn),
-    
-    // Simple memory interface
     .mem_req(mem_req),
     .mem_wen(mem_wen),
     .mem_addr(mem_addr),
     .mem_wdata(mem_data_out_r),
-    .mem_wstrb(mem_wstrb_r),  // Dynamic byte strobe for partial writes
+    .mem_wstrb(mem_wstrb_r),
     .mem_rdata(mem_rdata),
     .mem_ready(mem_ready),
     .mem_busy(mem_busy),
-    
-    // AXI-Lite signals
     .m_axil_awaddr(m_axil_awaddr),
     .m_axil_awprot(m_axil_awprot),
     .m_axil_awvalid(m_axil_awvalid),
@@ -125,404 +122,604 @@ axil_master #(
 );
 
 // **************************************************
-//                 Memory Data Registers
-// **************************************************
-
-reg [31:0] MDR;
-
-// **************************************************
-//              Instruction Register
-// **************************************************
-
-reg [31:0] IR;
-
-// **************************************************
 //                 Program Counter
 // **************************************************
 
 localparam PC_INIT = 32'd0;
-
-// Program Counter Register
 reg [31:0] PC;
 
-// Saved PC for AUIPC and return address calculation
-reg [31:0] PC_saved;
-
-reg [31:0] PC_execute_stage;
-
-// Program Counter Plus 
-wire [31:0] PC_plus4       = PC + 4;
-wire [31:0] PC_plus_Imm    = PC + Imm_r;
-wire [31:0] PC_saved_plus4 = PC_saved + 4;
-wire [31:0] PC_saved_plus_Imm = PC_saved + Imm_r;
-
-// Program Counter Mux
-// Note: Use alu_branch (current output) not alu_branch_r (registered) for branches
-wire [31:0] PC_mux = (isJALR) ? alu_out :
-                          isBimm           ? (alu_branch ? PC_plus_Imm : PC_plus4) :
-                          isJAL            ? PC_plus_Imm :
-                          PC_plus4;
-
-
 // ##################################################
-//                   Fetch Stage
+//              PIPELINE REGISTERS
 // ##################################################
 
+// --- IF/ID Pipeline Register ---
+reg [31:0] if_id_pc;
+reg [31:0] if_id_ir;
+reg        if_id_valid;
+reg        if_id_poisoned;  // Instruction should not write back
 
+// --- Skid Buffer for Fetch ---
+reg [31:0] fetch_buffer_ir;
+reg [31:0] fetch_buffer_pc;
+reg        fetch_buffer_valid;
+reg        fetch_buffer_poisoned;
+
+// --- ID/EX Pipeline Register ---
+reg [31:0] id_ex_pc;
+reg [31:0] id_ex_rs1_data;
+reg [31:0] id_ex_rs2_data;
+reg [31:0] id_ex_imm;
+reg [4:0]  id_ex_rd;
+reg [4:0]  id_ex_rs1_addr;
+reg [4:0]  id_ex_rs2_addr;
+reg [3:0]  id_ex_alu_op;
+reg [2:0]  id_ex_funct3;
+reg        id_ex_is_load, id_ex_is_store, id_ex_is_branch;
+reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc;
+reg        id_ex_is_r_type, id_ex_is_i_alu;
+reg        id_ex_reg_write;
+reg        id_ex_valid;
+reg        id_ex_poisoned;  // Instruction should not write back
+
+// --- EX/MEM Pipeline Register ---
+reg [31:0] ex_mem_pc;
+reg [31:0] ex_mem_alu_result;
+reg [31:0] ex_mem_rs2_data;
+reg [4:0]  ex_mem_rd;
+reg [2:0]  ex_mem_funct3;
+reg        ex_mem_is_load, ex_mem_is_store;
+reg        ex_mem_reg_write;
+reg        ex_mem_valid;
+reg        ex_mem_poisoned;  // Instruction should not write back
+
+// --- MEM/WB Pipeline Register ---
+reg [31:0] mem_wb_result;
+reg [31:0] mem_wb_pc;  // PC for debug tracing
+reg [4:0]  mem_wb_rd;
+reg        mem_wb_reg_write;
+reg        mem_wb_valid;
+reg        mem_wb_poisoned;  // Instruction should not write back
 
 // ##################################################
-//                 Wait Fetch Stage
+//             INSTRUCTION DECODER (uses z_core_decoder)
 // ##################################################
 
-
-
-// **************************************************
-//             Instruction Decoder
-// **************************************************
-
-// Outputs
-wire [6:0] op;
-wire [4:0] rs1;
-wire [4:0] rs2;
-wire [4:0] rd;
-wire [31:0] Iimm;
-wire [31:0] Simm;
-wire [31:0] Uimm;
-wire [31:0] Bimm;
-wire [31:0] Jimm;
-wire [2:0] funct3;
-wire [6:0] funct7;
+wire [6:0]  dec_op;
+wire [4:0]  dec_rs1, dec_rs2, dec_rd;
+wire [31:0] dec_Iimm, dec_Simm, dec_Uimm, dec_Bimm, dec_Jimm;
+wire [2:0]  dec_funct3;
+wire [6:0]  dec_funct7;
 
 z_core_decoder decoder (
-    .inst(IR)
-    ,.op(op)
-    ,.rs1(rs1)
-    ,.rs2(rs2)
-    ,.rd(rd)
-    ,.Iimm(Iimm)
-    ,.Simm(Simm)
-    ,.Uimm(Uimm)
-    ,.Bimm(Bimm)
-    ,.Jimm(Jimm)
-    ,.funct3(funct3)
-    ,.funct7(funct7)
+    .inst(if_id_ir),
+    .op(dec_op),
+    .rs1(dec_rs1),
+    .rs2(dec_rs2),
+    .rd(dec_rd),
+    .Iimm(dec_Iimm),
+    .Simm(dec_Simm),
+    .Uimm(dec_Uimm),
+    .Bimm(dec_Bimm),
+    .Jimm(dec_Jimm),
+    .funct3(dec_funct3),
+    .funct7(dec_funct7)
 );
 
-// Decoder Combinational Logic
-wire [31:0] Imm_mux_out = isIimm ? Iimm :
-                          isSimm ? Simm :
-                          isBimm ? Bimm :
-                          isJAL  ? Jimm :
-                          isUimm ? Uimm :
-                          32'h0;
+// Control signal decode (from current IF/ID instruction)
+wire dec_is_load   = (dec_op == I_LOAD_INST);
+wire dec_is_store  = (dec_op == S_INST);
+wire dec_is_branch = (dec_op == B_INST);
+wire dec_is_jal    = (dec_op == JAL_INST);
+wire dec_is_jalr   = (dec_op == JALR_INST);
+wire dec_is_lui    = (dec_op == LUI_INST);
+wire dec_is_auipc  = (dec_op == AUIPC_INST);
+wire dec_is_r_type = (dec_op == R_INST);
+wire dec_is_i_alu  = (dec_op == I_INST);
+wire dec_reg_write = dec_is_r_type | dec_is_i_alu | dec_is_load | 
+                     dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc;
 
-// Immediate Register
-reg [31:0] Imm_r;
-
+// Immediate mux
+wire [31:0] dec_imm = dec_is_i_alu | dec_is_load | dec_is_jalr ? dec_Iimm :
+                      dec_is_store  ? dec_Simm :
+                      dec_is_branch ? dec_Bimm :
+                      dec_is_jal    ? dec_Jimm :
+                      dec_Uimm;
 
 // ##################################################
-//                  Decode Stage
+//              REGISTER FILE (uses z_core_reg_file)
 // ##################################################
 
-
-
-// **************************************************
-//                  Register File
-// **************************************************
-
-// RD_In Multiplexer
-// Note: PC_saved is used for JAL/JALR/AUIPC since PC updates in EXECUTE before WRITE
-wire [31:0] rd_in_mux = isLoad   ? MDR :
-                        isJAL    ? PC_saved_plus4 :
-                        isJALR   ? PC_saved_plus4 :
-                        isLUI    ? Imm_r :
-                        isAUIPC  ? PC_saved_plus_Imm :
-                        ALUOut_r;
-
-// Outputs
-wire [31:0] rs1_out;
-wire [31:0] rs2_out;
+wire [31:0] rf_rs1_data, rf_rs2_data;
 
 z_core_reg_file reg_file (
-    .clk(clk)
-    ,.rd(rd)
-    ,.rd_in(rd_in_mux)
-    ,.rs1(rs1)
-    ,.rs2(rs2)
-    ,.write_enable(write_enable)
-    ,.reset(~rstn)
-    ,.rs1_out(rs1_out)
-    ,.rs2_out(rs2_out)
+    .clk(clk),
+    .reset(~rstn),
+    .rd(mem_wb_rd),
+    .rd_in(mem_wb_result),
+    .write_enable(mem_wb_valid && mem_wb_reg_write && mem_wb_rd != 5'b0),
+    .rs1(dec_rs1),
+    .rs2(dec_rs2),
+    .rs1_out(rf_rs1_data),
+    .rs2_out(rf_rs2_data)
 );
 
-// Write Enable Control
-wire write_enable = state[STATE_WRITE_b];
+// ##################################################
+//              ALU CONTROL (uses z_core_alu_ctrl)
+// ##################################################
 
-// **************************************************
-//                    ALU Control
-// **************************************************
-
-wire [3:0] alu_inst_type;
+wire [3:0] dec_alu_op;
 
 z_core_alu_ctrl alu_ctrl (
-    .alu_op(op)
-    ,.alu_funct3(funct3)
-    ,.alu_funct7(funct7)
-    ,.alu_inst_type(alu_inst_type)
+    .alu_op(dec_op),
+    .alu_funct3(dec_funct3),
+    .alu_funct7(dec_funct7),
+    .alu_inst_type(dec_alu_op)
 );
 
-// **************************************************
-//                       ALU
-// **************************************************
+// ##################################################
+//                   ALU (uses z_core_alu)
+// ##################################################
 
-// Output Register
-reg [31:0] ALUOut_r;
-reg alu_branch_r;
+// ALU inputs from ID/EX registers with forwarding
+wire [31:0] alu_in1 = id_ex_is_auipc ? id_ex_pc : 
+                      id_ex_is_lui   ? 32'b0 : 
+                      fwd_rs1_data;
 
-// Outputs
+wire [31:0] alu_in2 = (id_ex_is_load | id_ex_is_store | id_ex_is_lui | 
+                       id_ex_is_auipc | id_ex_is_jal | id_ex_is_jalr | id_ex_is_i_alu) ? id_ex_imm :
+                      id_ex_is_branch ? fwd_rs2_data :
+                      fwd_rs2_data;  // R-type
+
 wire [31:0] alu_out;
-wire alu_branch;
+wire        alu_branch;
 
 z_core_alu alu (
-    .alu_in1(alu_in1_r)
-    ,.alu_in2(alu_in2_r)
-    ,.alu_inst_type(alu_inst_type_r)
-    ,.alu_out(alu_out)
-    ,.alu_branch(alu_branch)
+    .alu_in1(alu_in1),
+    .alu_in2(alu_in2),
+    .alu_inst_type(id_ex_alu_op),
+    .alu_out(alu_out),
+    .alu_branch(alu_branch)
 );
 
-// ALU Input 2 Mux
-wire [31:0] alu_in2_mux = isIimm ? Iimm :
-                          isSimm ? Simm :
-                          isBimm ? rs2_out :
-                          isJAL  ? Jimm :
-                          isUimm ? Uimm :
-                          rs2_out;
-
-// ALU Input Registers
-reg [31:0] alu_in1_r;
-reg [31:0] alu_in2_r;
-reg [3:0] alu_inst_type_r;
-
-
-
 // ##################################################
-//                  Execute Stage
+//              DATA FORWARDING
 // ##################################################
 
+// Forward from EX/MEM or MEM/WB to resolve RAW hazards
+wire [31:0] fwd_rs1_data = 
+    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
+    id_ex_rs1_data;
 
-
-// **************************************************
-//                 Control Signals
-// **************************************************
-
-// Immediate Control
-wire isIimm = (op == I_INST) || (op == I_LOAD_INST) || (op == JALR_INST);
-wire isSimm = (op == S_INST);
-wire isBimm = (op == B_INST);
-wire isUimm = (op == LUI_INST) || (op == AUIPC_INST);
-wire isLUI = (op == LUI_INST);
-wire isAUIPC = (op == AUIPC_INST);
-wire isJAL = (op == JAL_INST);
-wire isJALR = (op == JALR_INST);
-
-// Memory Control
-wire isLoad = (op == I_LOAD_INST);
-wire isStore = isSimm;
-
-// WriteBack Control
-wire isWB = ~(isSimm | isBimm);
+wire [31:0] fwd_rs2_data = 
+    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs2_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
+    id_ex_rs2_data;
 
 // ##################################################
-//                  Write Back Stage
+//              HAZARD DETECTION
 // ##################################################
 
+// Load-use hazard: need to stall one cycle
+wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
+    ((id_ex_rd == dec_rs1 && dec_rs1 != 5'b0) ||
+     (id_ex_rd == dec_rs2 && dec_rs2 != 5'b0 && (dec_is_r_type || dec_is_store || dec_is_branch)));
 
+// Memory operation in progress - stall whole pipeline  
+wire mem_stall = mem_op_pending && !mem_ready;
+
+// Need to stall EX stage if MEM stage is busy
+wire ex_stall = mem_stall || (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending);
+
+// Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
+wire stall = load_use_hazard || ex_stall;
 
 // ##################################################
-//                  Memory Stage
+//              BRANCH/JUMP CONTROL
 // ##################################################
 
+wire branch_taken = id_ex_valid && id_ex_is_branch && alu_branch;
+wire jump_taken   = id_ex_valid && (id_ex_is_jal || id_ex_is_jalr);
 
+// Flush = control transfer detected in EX stage
+// Need to squash the instruction that was in IF/ID when JAL entered ID/EX
+wire flush        = branch_taken || jump_taken;
 
-// **************************************************
-//                   FSM - OneHot
-// **************************************************
+// Track if we need to squash the NEXT instruction entering id_ex
+// This is set when the CURRENT if_id contains a jump being decoded into id_ex
+wire if_id_is_jump = if_id_valid && (dec_is_jal || dec_is_jalr);
+wire if_id_is_branch = if_id_valid && dec_is_branch;
+
+wire [31:0] branch_target = id_ex_pc + id_ex_imm;
+wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
+wire [31:0] next_pc       = flush ? (id_ex_is_jalr ? jalr_target : branch_target) :
+                            stall ? PC : PC + 4;
+
+// ##################################################
+//              PIPELINE STAGE: FETCH
+// ##################################################
+
+reg fetch_wait;
+reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
+reg mem_op_pending;
+reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
+reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
+reg poison_next_fetch;  // Set when flush happens, poison the NEXT instruction that completes fetch
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        PC <= PC_INIT;
+        fetch_wait <= 1'b0;
+        fetch_pc <= PC_INIT;
+        if_id_ir <= 32'h00000013;  // NOP
+        if_id_pc <= 32'b0;
+        if_id_valid <= 1'b0;
+        squash_now <= 1'b0;
+        flush_r <= 1'b0;
+        if_id_poisoned <= 1'b0;
+        poison_next_fetch <= 1'b0;
+        fetch_buffer_valid <= 1'b0;
+        fetch_buffer_ir <= 32'b0;
+        fetch_buffer_pc <= 32'b0;
+        fetch_buffer_poisoned <= 1'b0;
+    end else begin
+        if (flush) begin
+            // Flush: invalidate IF/ID (delay slot) and redirect PC to target
+            // The delay slot is invalidated by if_id_valid=0
+            // The TARGET should NOT be poisoned - it should execute normally
+            if_id_valid <= 1'b0;
+            if_id_ir <= 32'h00000013;
+            if_id_poisoned <= 1'b0;  // Clear poisoned for any garbage instruction
+            // Also invalidate the fetch buffer to prevent stale instructions from being loaded
+            fetch_buffer_valid <= 1'b0;
+            // Do NOT set poison_next_fetch - TARGET should execute
+            PC <= next_pc;
+            fetch_wait <= 1'b0;
+            // mem_req cleanup removed
+            flush_r <= 1'b1;  // Register that flush happened
+        end else begin
+            // Clear if_id_valid when instruction is consumed by decode stage
+            // (unless a new instruction is arriving to replace it)
+            // new_instr_from_buffer: !stall && fetch_buffer_valid
+            // new_instr_from_fetch: fetch_wait && mem_ready && !stall && !fetch_buffer_valid
+            if (!stall && if_id_valid && 
+                !(!stall && fetch_buffer_valid) && 
+                !(fetch_wait && mem_ready && !stall && !fetch_buffer_valid)) begin
+                // Instruction consumed by decode, no new instruction arriving
+                if_id_valid <= 1'b0;
+            end
+            
+            // Move buffer to IF/ID if not stalled and buffer valid
+            if (!stall && fetch_buffer_valid) begin
+                if_id_ir <= fetch_buffer_ir;
+                if_id_pc <= fetch_buffer_pc;
+                if_id_valid <= 1'b1;
+                if_id_poisoned <= fetch_buffer_poisoned;
+                fetch_buffer_valid <= 1'b0;
+            end
+            
+            // Check if we can start a new fetch:
+            // 1. Not currently waiting for a fetch
+            // 2. Memory bus not busy with data access (mem_op_pending)
+            // 3. AXI master not busy (prevents overlap with cancelled fetch)
+            // 4. Either buffer is empty OR (buffer will be emptied this cycle because !stall)
+            // 5. EX stage does not need memory (prevent structural hazard)
+            if (!fetch_wait && !mem_op_pending && !mem_busy &&
+                !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !ex_mem_poisoned) && 
+                (!fetch_buffer_valid || !stall)) begin
+                 // Start fetch - capture the PC we're fetching from
+                 fetch_wait <= 1'b1;
+                 fetch_pc <= PC;  // Capture PC for this fetch
+            end else if (fetch_wait && mem_ready) begin
+                // Fetch complete - use fetch_pc for the address, not current PC
+                if (!stall && !fetch_buffer_valid) begin
+                    // Pipeline active and buffer empty: load directly to IF/ID
+                    if_id_ir <= mem_rdata;
+                    if_id_pc <= fetch_pc;  // Use the PC that was captured when fetch started
+                    if_id_valid <= 1'b1;
+                    if_id_poisoned <= poison_next_fetch;
+                end else begin
+                    // Pipeline stalled or buffer full: load to buffer
+                    fetch_buffer_ir <= mem_rdata;
+                    fetch_buffer_pc <= fetch_pc;  // Use the PC that was captured when fetch started
+                    fetch_buffer_valid <= 1'b1;
+                    fetch_buffer_poisoned <= poison_next_fetch;
+                end
+                
+                // Advance PC from the address we just fetched and clear flags
+                poison_next_fetch <= 1'b0;
+                PC <= fetch_pc + 4;
+                fetch_wait <= 1'b0;
+                // mem_req removal
+            end else if (!fetch_wait) begin
+                // mem_req removal
+            end
+            
+            // Handle flush_r clearing (legacy from original code logic)
+            flush_r <= 1'b0;
+        end
+    end
+end
+
+// ##################################################
+//              PIPELINE STAGE: DECODE
+// ##################################################
+
+// Forwarding for decode stage (into ID/EX)
+wire [31:0] dec_fwd_rs1 = 
+    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == dec_rs1 && dec_rs1 != 5'b0) ? ex_mem_alu_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs1 && mem_wb_rd != 5'b0) ? mem_wb_result :
+    rf_rs1_data;
+
+wire [31:0] dec_fwd_rs2 = 
+    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == dec_rs2 && dec_rs2 != 5'b0) ? ex_mem_alu_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs2 && mem_wb_rd != 5'b0) ? mem_wb_result :
+    rf_rs2_data;
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        id_ex_valid <= 1'b0;
+        id_ex_pc <= 32'b0;
+        id_ex_rs1_data <= 32'b0;
+        id_ex_rs2_data <= 32'b0;
+        id_ex_imm <= 32'b0;
+        id_ex_rd <= 5'b0;
+        id_ex_rs1_addr <= 5'b0;
+        id_ex_rs2_addr <= 5'b0;
+        id_ex_alu_op <= 4'b0;
+        id_ex_funct3 <= 3'b0;
+        id_ex_is_load <= 1'b0;
+        id_ex_is_store <= 1'b0;
+        id_ex_is_branch <= 1'b0;
+        id_ex_is_jal <= 1'b0;
+        id_ex_is_jalr <= 1'b0;
+        id_ex_is_lui <= 1'b0;
+        id_ex_is_auipc <= 1'b0;
+        id_ex_is_r_type <= 1'b0;
+        id_ex_is_i_alu <= 1'b0;
+        id_ex_reg_write <= 1'b0;
+        id_ex_poisoned <= 1'b0;
+    end else if (flush || load_use_hazard) begin
+        // Insert bubble - flush handles current cycle squash
+        id_ex_valid <= 1'b0;
+        id_ex_reg_write <= 1'b0;
+        id_ex_is_load <= 1'b0;
+        id_ex_is_store <= 1'b0;
+        id_ex_is_branch <= 1'b0;
+        id_ex_is_jal <= 1'b0;
+        id_ex_is_jalr <= 1'b0;
+        id_ex_is_lui <= 1'b0;
+        id_ex_is_auipc <= 1'b0;
+        id_ex_poisoned <= 1'b0;  // Clear poisoned bit for bubble
+        // Set squash_now for delayed squash on next cycle
+        if (flush) squash_now <= 1'b1;
+    end else if (squash_now) begin
+        // Squash instruction that was in IF/ID when jump entered ID/EX
+        // Don't load if_id into id_ex, just invalidate
+        id_ex_valid <= 1'b0;
+        id_ex_poisoned <= 1'b0;
+        squash_now <= 1'b0;  // Clear after single use
+    end else if (!stall && if_id_valid) begin
+        id_ex_pc <= if_id_pc;
+        id_ex_rs1_data <= dec_fwd_rs1;
+        id_ex_rs2_data <= dec_fwd_rs2;
+        id_ex_imm <= dec_imm;
+        id_ex_rd <= dec_rd;
+        id_ex_rs1_addr <= dec_rs1;
+        id_ex_rs2_addr <= dec_rs2;
+        id_ex_alu_op <= dec_alu_op;
+        id_ex_funct3 <= dec_funct3;
+        id_ex_is_load <= dec_is_load;
+        id_ex_is_store <= dec_is_store;
+        id_ex_is_branch <= dec_is_branch;
+        id_ex_is_jal <= dec_is_jal;
+        id_ex_is_jalr <= dec_is_jalr;
+        id_ex_is_lui <= dec_is_lui;
+        id_ex_is_auipc <= dec_is_auipc;
+        id_ex_is_r_type <= dec_is_r_type;
+        id_ex_is_i_alu <= dec_is_i_alu;
+        id_ex_reg_write <= dec_reg_write;
+        id_ex_valid <= 1'b1;
+        id_ex_poisoned <= if_id_poisoned;  // Propagate poisoned bit
+        // Only set squash_now for JAL/JALR detected in if_id (unconditional jumps)
+        // Branch squash is handled by flush -> squash_now path (lines 415-420)
+        squash_now <= if_id_is_jump;
+    end else if (!stall) begin
+        id_ex_valid <= 1'b0;
+        squash_now <= 1'b0;
+    end else begin
+        // On stall, clear squash_now since we already handled it
+        squash_now <= 1'b0;
+    end
+end
+
+// ##################################################
+//              PIPELINE STAGE: EXECUTE
+// ##################################################
+
+wire [31:0] ex_result = id_ex_is_lui   ? id_ex_imm :
+                        id_ex_is_auipc ? (id_ex_pc + id_ex_imm) :
+                        (id_ex_is_jal || id_ex_is_jalr) ? (id_ex_pc + 4) :
+                        alu_out;
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        ex_mem_valid <= 1'b0;
+        ex_mem_pc <= 32'b0;
+        ex_mem_alu_result <= 32'b0;
+        ex_mem_rs2_data <= 32'b0;
+        ex_mem_rd <= 5'b0;
+        ex_mem_funct3 <= 3'b0;
+        ex_mem_is_load <= 1'b0;
+        ex_mem_is_store <= 1'b0;
+        ex_mem_reg_write <= 1'b0;
+        ex_mem_poisoned <= 1'b0;
+    end else if (!mem_stall && !ex_stall) begin
+        ex_mem_pc <= id_ex_pc;
+        ex_mem_alu_result <= ex_result;
+        ex_mem_rs2_data <= fwd_rs2_data;
+        ex_mem_rd <= id_ex_rd;
+        ex_mem_funct3 <= id_ex_funct3;
+        ex_mem_is_load <= id_ex_is_load;
+        ex_mem_is_store <= id_ex_is_store;
+        ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store;
+        ex_mem_valid <= id_ex_valid && !id_ex_is_branch;
+        ex_mem_poisoned <= id_ex_poisoned;  // Propagate poisoned bit
+    end
+end
+
+// ##################################################
+//              PIPELINE STAGE: MEMORY
+// ##################################################
+
+// Combinational load data extraction from mem_rdata
+// This allows WB stage to use the correct data immediately
+reg [31:0] mem_load_data;
+always @* begin
+    case (ex_mem_funct3)
+        3'b000: case (ex_mem_alu_result[1:0])  // LB (signed)
+            2'b00: mem_load_data = {{24{mem_rdata[7]}}, mem_rdata[7:0]};
+            2'b01: mem_load_data = {{24{mem_rdata[15]}}, mem_rdata[15:8]};
+            2'b10: mem_load_data = {{24{mem_rdata[23]}}, mem_rdata[23:16]};
+            2'b11: mem_load_data = {{24{mem_rdata[31]}}, mem_rdata[31:24]};
+        endcase
+        3'b001: case (ex_mem_alu_result[1])  // LH (signed)
+            1'b0: mem_load_data = {{16{mem_rdata[15]}}, mem_rdata[15:0]};
+            1'b1: mem_load_data = {{16{mem_rdata[31]}}, mem_rdata[31:16]};
+        endcase
+        3'b010: mem_load_data = mem_rdata;  // LW
+        3'b100: case (ex_mem_alu_result[1:0])  // LBU (unsigned)
+            2'b00: mem_load_data = {24'b0, mem_rdata[7:0]};
+            2'b01: mem_load_data = {24'b0, mem_rdata[15:8]};
+            2'b10: mem_load_data = {24'b0, mem_rdata[23:16]};
+            2'b11: mem_load_data = {24'b0, mem_rdata[31:24]};
+        endcase
+        3'b101: case (ex_mem_alu_result[1])  // LHU (unsigned)
+            1'b0: mem_load_data = {16'b0, mem_rdata[15:0]};
+            1'b1: mem_load_data = {16'b0, mem_rdata[31:16]};
+        endcase
+        default: mem_load_data = mem_rdata;
+    endcase
+end
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        mem_op_pending <= 1'b0;
+        mem_data_out_r <= 32'b0;
+        mem_wstrb_r <= 4'b1111;
+    end else begin
+        // Don't do memory operations for poisoned instructions
+        // Also ensure we don't interfere with an active instruction fetch
+        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !ex_mem_poisoned && !fetch_wait) begin
+            // mem_addr assignment removed
+            // mem_wen assignment removed
+            // mem_req assignment removed
+            mem_op_pending <= 1'b1;
+            
+            if (ex_mem_is_store) begin
+                case (ex_mem_funct3[1:0])
+                    2'b00: begin
+                        mem_data_out_r <= {4{ex_mem_rs2_data[7:0]}};
+                        mem_wstrb_r <= 4'b0001 << ex_mem_alu_result[1:0];
+                    end
+                    2'b01: begin
+                        mem_data_out_r <= {2{ex_mem_rs2_data[15:0]}};
+                        mem_wstrb_r <= 4'b0011 << ex_mem_alu_result[1:0];
+                    end
+                    default: begin
+                        mem_data_out_r <= ex_mem_rs2_data;
+                        mem_wstrb_r <= 4'b1111;
+                    end
+                endcase
+            end
+        end else if (mem_op_pending && mem_ready) begin
+            mem_op_pending <= 1'b0;
+            // mem_req removal
+        end else if (!mem_op_pending) begin
+            // mem_req removal
+        end
+    end
+end
+
+// ##################################################
+//              PIPELINE STAGE: WRITEBACK
+// ##################################################
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        mem_wb_valid <= 1'b0;
+        mem_wb_result <= 32'b0;
+        mem_wb_pc <= 32'b0;
+        mem_wb_rd <= 5'b0;
+        mem_wb_reg_write <= 1'b0;
+        mem_wb_poisoned <= 1'b0;
+    end else if (!mem_stall || (mem_op_pending && mem_ready)) begin
+        mem_wb_rd <= ex_mem_rd;
+        mem_wb_pc <= ex_mem_pc;
+        // Don't write back for poisoned instructions
+        mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store && !ex_mem_poisoned;
+        mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
+        mem_wb_poisoned <= ex_mem_poisoned;  // Propagate for debugging
+        
+        if (ex_mem_is_load && mem_op_pending && mem_ready) begin
+            mem_wb_result <= mem_load_data;
+        end else begin
+            mem_wb_result <= ex_mem_alu_result;
+        end
+    end else begin
+        mem_wb_valid <= 1'b0;
+    end
+end
+
+// ##################################################
+//           STATE FOR TESTBENCH COMPATIBILITY
+// ##################################################
 
 localparam N_STATES = 6;
-
-localparam STATE_FETCH_b      = 0;
+localparam STATE_FETCH_b = 0;
 localparam STATE_FETCH_WAIT_b = 1;
-localparam STATE_DECODE_b     = 2;
-localparam STATE_EXECUTE_b    = 3;
-localparam STATE_MEM_b        = 4;
-localparam STATE_WRITE_b      = 5;
-
-localparam STATE_FETCH      = 1 << STATE_FETCH_b;
-localparam STATE_FETCH_WAIT = 1 << STATE_FETCH_WAIT_b;
-localparam STATE_DECODE     = 1 << STATE_DECODE_b;
-localparam STATE_EXECUTE    = 1 << STATE_EXECUTE_b;
-localparam STATE_MEM        = 1 << STATE_MEM_b;
-localparam STATE_WRITE      = 1 << STATE_WRITE_b;
+localparam STATE_DECODE_b = 2;
+localparam STATE_EXECUTE_b = 3;
+localparam STATE_MEM_b = 4;
+localparam STATE_WRITE_b = 5;
 
 reg [N_STATES-1:0] state;
 
 always @(posedge clk) begin
+    if (~rstn)
+        state <= 6'b000001;
+    else if (mem_wb_valid)
+        state <= 6'b100000;
+    else if (mem_op_pending)
+        state <= 6'b010000;
+    else if (ex_mem_valid)
+        state <= 6'b001000;
+    else if (id_ex_valid)
+        state <= 6'b000100;
+    else if (fetch_wait)
+        state <= 6'b000010;
+    else
+        state <= 6'b000001;
+end
 
-    if (~rstn) begin 
-        state <= STATE_FETCH;
-        PC <= PC_INIT;
-        mem_req <= 1'b0;
-        mem_wen <= 1'b0;
-        mem_addr <= {ADDR_WIDTH{1'b0}};
-        IR <= 32'h0;
-        MDR <= 32'h0;
-        PC_saved <= 32'h0;
-        ALUOut_r <= 32'h0;
-        alu_branch_r <= 1'b0;
-        alu_in1_r <= 32'h0;
-        alu_in2_r <= 32'h0;
-        alu_inst_type_r <= 4'h0;
-        Imm_r <= 32'h0;
-        mem_data_out_r <= 32'h0;
-        mem_wstrb_r <= {STRB_WIDTH{1'b1}};
-        funct3_r <= 3'b0;
+// Unified Memory Request Logic (Arbiter)
+// mem_addr is defined as reg above but driven combinationally here.
+// IMPORTANT: Don't assert mem_req when mem_ready is high to avoid race condition
+// where the AXI master starts a new transaction while we're processing the old one.
+always @* begin
+    if (mem_op_pending && !mem_ready) begin
+        mem_req_comb = 1'b1;
+        mem_wen_comb = ex_mem_is_store;
+        mem_addr = ex_mem_alu_result;
+    end else if (fetch_wait && !mem_ready) begin
+        mem_req_comb = 1'b1;
+        mem_wen_comb = 1'b0;
+        mem_addr = fetch_pc;  // Use captured fetch_pc, not current PC
+    end else begin
+        mem_req_comb = 1'b0;
+        mem_wen_comb = 1'b0;
+        mem_addr = 32'b0;
     end
-    else begin
-        // Default: clear memory request after one cycle
-        mem_req <= 1'b0;
-        
-        case (1'b1)
-            state[STATE_FETCH_b]: begin
-                // Set address and initiate instruction fetch
-                mem_addr <= PC;
-                mem_wen <= 1'b0;  // Read
-                mem_req <= 1'b1;
-                state <= STATE_FETCH_WAIT;
-            end
-            
-            state[STATE_FETCH_WAIT_b]: begin
-                // Wait for memory to respond
-                if (mem_ready) begin
-                    IR <= mem_rdata;
-            state <= STATE_DECODE;
-        end
-            end
-            
-            state[STATE_DECODE_b]: begin
-                // Save current PC for AUIPC/JAL/JALR (before it gets updated)
-                PC_saved <= PC;
-                
-                // Update ALU Registers
-                alu_in1_r <= rs1_out;
-                alu_in2_r <= alu_in2_mux;
-                alu_inst_type_r <= alu_inst_type;
-
-                // Store Immediate for later use
-                Imm_r <= Imm_mux_out;
-
-                // Save funct3 for memory operations (load/store size)
-                funct3_r <= funct3;
-
-                // Position store data in correct byte lanes based on funct3
-                // Byte: replicate across all lanes
-                // Halfword: replicate in both halves
-                // Word: pass through
-                case (funct3[1:0])
-                    2'b00: mem_data_out_r <= {4{rs2_out[7:0]}};   // SB: replicate byte
-                    2'b01: mem_data_out_r <= {2{rs2_out[15:0]}};  // SH: replicate halfword
-                    default: mem_data_out_r <= rs2_out;            // SW: full word
-                endcase
-
-                state <= STATE_EXECUTE;
-            end
-            
-            state[STATE_EXECUTE_b]: begin
-                // Update Program Counter
-                PC <= PC_mux;
-
-                // Store ALU Results
-                ALUOut_r <= alu_out;
-                alu_branch_r <= alu_branch;
-
-                if (isLoad) begin
-                    // Setup for load
-                    mem_addr <= alu_out;
-                    mem_wen <= 1'b0;  // Read
-                    mem_req <= 1'b1;
-                    mem_wstrb_r <= 4'b1111;  // Full word read (strobe doesn't matter for reads)
-                    state <= STATE_MEM;
-                end else if (isStore) begin
-                    // Setup for store with proper byte strobe
-                    mem_addr <= alu_out;
-                    mem_wen <= 1'b1;  // Write
-                    mem_req <= 1'b1;
-                    // Generate byte strobe based on funct3 and address bits [1:0]
-                    case (funct3_r[1:0])
-                        2'b00: mem_wstrb_r <= 4'b0001 << alu_out[1:0];  // SB
-                        2'b01: mem_wstrb_r <= 4'b0011 << alu_out[1:0];  // SH
-                        default: mem_wstrb_r <= 4'b1111;                 // SW
-                    endcase
-                    state <= STATE_MEM;
-                end else if (isWB) begin
-                    state <= STATE_WRITE;
-                end else begin
-                    state <= STATE_FETCH;
-                end
-            end
-            
-            state[STATE_MEM_b]: begin
-                // Wait for memory operation to complete
-                if (mem_ready) begin
-                    if (isLoad) begin
-                        // Sign/zero extend loaded data based on funct3 and address
-                        case (funct3_r)
-                            3'b000: begin // LB (sign-extend byte)
-                                case (ALUOut_r[1:0])
-                                    2'b00: MDR <= {{24{mem_rdata[7]}}, mem_rdata[7:0]};
-                                    2'b01: MDR <= {{24{mem_rdata[15]}}, mem_rdata[15:8]};
-                                    2'b10: MDR <= {{24{mem_rdata[23]}}, mem_rdata[23:16]};
-                                    2'b11: MDR <= {{24{mem_rdata[31]}}, mem_rdata[31:24]};
-                                endcase
-                            end
-                            3'b001: begin // LH (sign-extend halfword)
-                                case (ALUOut_r[1])
-                                    1'b0: MDR <= {{16{mem_rdata[15]}}, mem_rdata[15:0]};
-                                    1'b1: MDR <= {{16{mem_rdata[31]}}, mem_rdata[31:16]};
-                                endcase
-                            end
-                            3'b010: MDR <= mem_rdata; // LW
-                            3'b100: begin // LBU (zero-extend byte)
-                                case (ALUOut_r[1:0])
-                                    2'b00: MDR <= {24'b0, mem_rdata[7:0]};
-                                    2'b01: MDR <= {24'b0, mem_rdata[15:8]};
-                                    2'b10: MDR <= {24'b0, mem_rdata[23:16]};
-                                    2'b11: MDR <= {24'b0, mem_rdata[31:24]};
-                                endcase
-                            end
-                            3'b101: begin // LHU (zero-extend halfword)
-                                case (ALUOut_r[1])
-                                    1'b0: MDR <= {16'b0, mem_rdata[15:0]};
-                                    1'b1: MDR <= {16'b0, mem_rdata[31:16]};
-                                endcase
-                            end
-                            default: MDR <= mem_rdata;
-                        endcase
-                    end
-                    state <= isWB ? STATE_WRITE : STATE_FETCH;
-                end
-            end
-            
-            state[STATE_WRITE_b]: begin
-                state <= STATE_FETCH;
-            end
-            
-            default: begin
-            state <= STATE_FETCH;
-        end
-        endcase
-    end
-
 end
 
 endmodule

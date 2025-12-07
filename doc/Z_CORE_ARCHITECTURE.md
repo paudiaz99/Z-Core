@@ -112,12 +112,16 @@ Performs arithmetic, logical, and comparison operations.
 
 Multi-cycle FSM that orchestrates instruction execution.
 
-**FSM States:**
+**FSM States with Inter-Stage Registers:**
 ```
-FETCH ──► FETCH_WAIT ──► DECODE ──► EXECUTE ──► WRITE
-                                        │
-                                        ▼
-                                   AXI ACCESS
+                ┌────┐         ┌─────────┐         ┌────────┐         ┌─────┐
+  FETCH ──► FETCH_WAIT ──► │   IR    │ ──► DECODE ──► │alu_in* │ ──► EXECUTE ──► │ALUOut│ ──► WRITE
+                           │         │               │ Imm_r  │          │       │ MDR  │
+                           │         │               │PC_saved│          ▼       └──────┘
+                           └─────────┘               └────────┘    ┌─────────┐
+                                                                   │   MEM   │
+                                                                   │(ld/st) │
+                                                                   └─────────┘
 ```
 
 | State      | Description                                    |
@@ -250,11 +254,11 @@ gtkwave sim/z_core_control_u_tb.vcd
 
 ## Future Enhancements
 
-1. **Multiple Data Sizes**: Support for byte/halfword load/store
-2. **Pipeline**: Convert to pipelined architecture for higher throughput
+1. ~~**Multiple Data Sizes**: Support for byte/halfword load/store~~ ✓ Implemented
+2. **Pipeline**: Convert to pipelined architecture for higher throughput (current design is multi-cycle FSM)
 3. **Caching**: Add instruction and data caches
 4. **Interrupts**: Exception and interrupt handling
 5. **M Extension**: Multiply/divide instructions
 6. **C Extension**: Compressed instructions
-7. **Peripherals**: Capability to talk to the outter world
+7. ~~**Peripherals**: Capability to talk to the outter world~~ ✓ Implemented (UART, GPIO)
 

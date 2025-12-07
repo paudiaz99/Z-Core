@@ -164,6 +164,13 @@ module z_core_control_u_tb;
         .m_axil_rready(m_axil_rready)
     );
 
+    // Safety Timeout
+    initial begin
+        #5000000; // 5ms timeout
+        $display("\n[ERROR] Simulation Timeout!");
+        $finish;
+    end
+
     // Instantiate Control Unit (AXI-Lite Master)
     z_core_control_u #(
         .DATA_WIDTH(DATA_WIDTH),
@@ -385,9 +392,9 @@ module z_core_control_u_tb;
     task reset_cpu;
         begin
             rstn = 0;
-            wait_cycles(4);
+            wait_cycles(10);  // Increased from 4 to allow pipeline flush
             rstn = 1;
-            wait_cycles(2);
+            wait_cycles(5);   // Increased from 2 to allow pipeline fill
         end
     endtask
 
@@ -577,8 +584,14 @@ module z_core_control_u_tb;
     endtask
 
     task load_test8_branches;
+        integer i;
         begin
             $display("\n--- Loading Test 8: Branch Operations ---");
+            // Clear memory first to avoid contamination from previous tests
+            for (i = 0; i < 64; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
             // This test verifies all branch instructions
             // We use x10 as a result accumulator, incrementing on correct paths
             
@@ -822,8 +835,8 @@ module z_core_control_u_tb;
     // ==========================================
     
     initial begin
-        $dumpfile("z_core_control_u_tb.vcd");
-        $dumpvars(0, z_core_control_u_tb);
+        // $dumpfile("z_core_control_u_tb.vcd");
+        // $dumpvars(0, z_core_control_u_tb);
 
         // Initialize UART testbench signals
         uart_rx_tb_drive = 1'b1;  // Idle high
