@@ -308,8 +308,12 @@ wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
 // Memory operation in progress - stall whole pipeline  
 wire mem_stall = mem_op_pending && !mem_ready;
 
-// Need to stall EX stage if MEM stage is busy
-wire ex_stall = mem_stall || (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending);
+// Need to stall EX stage if:
+// 1. MEM stage has pending operation waiting for completion (mem_stall)
+// 2. EX/MEM has load/store but can't start yet (waiting for AXI bus to be free)
+wire ex_stall = mem_stall || 
+                (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !ex_mem_poisoned && 
+                 (!mem_op_pending || mem_busy));
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
 wire stall = load_use_hazard || ex_stall;
@@ -609,8 +613,11 @@ always @(posedge clk) begin
         mem_wstrb_r <= 4'b1111;
     end else begin
         // Don't do memory operations for poisoned instructions
-        // Also ensure we don't interfere with an active instruction fetch
-        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !ex_mem_poisoned && !fetch_wait) begin
+        // Start mem_op_pending when:
+        // - Not currently pending
+        // - mem_busy is false (AXI bus available - either idle or just completed)
+        // This allows stores to be queued while waiting for fetch to complete
+        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !ex_mem_poisoned && !mem_busy) begin
             // mem_addr assignment removed
             // mem_wen assignment removed
             // mem_req assignment removed
@@ -653,7 +660,7 @@ always @(posedge clk) begin
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
         mem_wb_poisoned <= 1'b0;
-    end else if (!mem_stall || (mem_op_pending && mem_ready)) begin
+    end else if (!ex_stall || (mem_op_pending && mem_ready)) begin
         mem_wb_rd <= ex_mem_rd;
         mem_wb_pc <= ex_mem_pc;
         // Don't write back for poisoned instructions
@@ -663,13 +670,23 @@ always @(posedge clk) begin
         
         if (ex_mem_is_load && mem_op_pending && mem_ready) begin
             mem_wb_result <= mem_load_data;
+            // synthesis translate_off
+            // Debug print block removed
+            // synthesis translate_on
         end else begin
             mem_wb_result <= ex_mem_alu_result;
         end
     end else begin
         mem_wb_valid <= 1'b0;
+        mem_wb_reg_write <= 1'b0; // IMPORTANT: Must clear to prevent incorrect forwarding
+        mem_wb_rd <= 5'b0;        // Safer to clear destination too
+        mem_wb_poisoned <= 1'b0;
     end
 end
+
+// synthesis translate_off
+// Debug blocks removed
+// synthesis translate_on
 
 // ##################################################
 //           STATE FOR TESTBENCH COMPATIBILITY

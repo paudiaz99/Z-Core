@@ -256,8 +256,13 @@ fwd_rs1_data = (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1_addr 
                  ? ex_mem_alu_result :
                (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 0) 
                  ? mem_wb_result :
-               id_ex_rs1_data;
+                (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 0) 
+                  ? mem_wb_result :
+                id_ex_rs1_data;
 ```
+
+> **Critical Fix**: `mem_wb_reg_write` must be explicitly cleared when the pipeline stalls (inserting a bubble). Otherwise, stalled, invalid instructions in the pipeline could be interpreted as valid writes, causing incorrect forwarding of "ghost" data.
+
 
 ### Load-Use Hazard (Stall)
 
@@ -421,7 +426,7 @@ Target:                  IF             ID   EX   MEM  WB
 | `flush` | Invalidates IF/ID, redirects PC (branch taken / jump) |
 | `squash_now` | Set for one cycle after JAL/JALR enters ID/EX |
 | `mem_stall` | Stalls when load/store in progress |
-| `ex_stall` | Stalls EX when MEM is busy |
+| `ex_stall` | Stalls EX when MEM is busy or waiting for AXI (`mem_stall` OR `mem_busy`) |
 
 ### Memory Control
 
@@ -460,7 +465,7 @@ All RV32I instructions are fully supported:
 
 ## Test Status
 
-All 13 tests pass:
+All 19 tests pass:
 
 | Test | Description | Status |
 |------|-------------|--------|
@@ -474,9 +479,15 @@ All 13 tests pass:
 | 8 | Branches (BEQ, BNE, BLT, BGE, BLTU, BGEU) | ✅ PASS |
 | 9 | Jumps (JAL, JALR) | ✅ PASS |
 | 10 | Backward Branch Loop | ✅ PASS |
-| 11 | GPIO I/O | ✅ PASS |
-| 12 | Byte/Halfword Loads (LB, LBU, LH, LHU) | ✅ PASS |
-| 13 | UART Loopback | ✅ PASS |
+| 11 | IO Access (UART/GPIO) | ✅ PASS |
+| 12 | GPIO Bidirectional | ✅ PASS |
+| 13 | Byte/Halfword Load/Store | ✅ PASS |
+| 14 | UART Loopback | ✅ PASS |
+| 15 | RAW Hazard Stress | ✅ PASS |
+| 16 | Full ALU Coverage | ✅ PASS |
+| 17 | Nested Loops | ✅ PASS |
+| 18 | Memory Access Pattern Stress | ✅ PASS |
+| 19 | Mixed Instruction Stress | ✅ PASS |
 
 ---
 
@@ -517,6 +528,7 @@ The pipeline required several non-obvious timing fixes:
 3. **AXI Busy Check**: New fetches wait for `!mem_busy` to prevent overlap
 4. **Combinational Load Data**: `mem_load_data` is combinational for same-cycle WB use
 5. **STATE_READ_DONE**: AXI master ensures data stable before ready assertion
+6. **Bubble Signal Clearing**: `reg_write` signals must be cleared when stalling to prevent incorrect forwarding.
 
 For detailed explanations, see [PIPELINE_BUGS.md](PIPELINE_BUGS.md).
 
