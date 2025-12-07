@@ -2,7 +2,7 @@
 
 ## Overview
 
-Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruction set. It uses a 6-stage multi-cycle architecture with an AXI4-Lite memory interface.
+Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruction set. It uses a **5-stage pipelined architecture** (IF, ID, EX, MEM, WB) with an AXI4-Lite memory interface.
 
 ## Block Diagram
 
@@ -12,9 +12,9 @@ Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruct
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐ │
 │  │                        Control Unit (FSM)                           │ │
-│  │  ┌────────┐  ┌────────────┐  ┌─────────┐  ┌──────────┐  ┌─────────┐ │ │
-│  │  │ FETCH  │──│ FETCH_WAIT │──│ DECODE  │──│ EXECUTE  │──│  WRITE  │ │ │
-│  │  └────────┘  └────────────┘  └─────────┘  └────┬─────┘  └─────────┘ │ │
+│  │  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌───────────┐  ┌──────────┐ │ │
+│  │  │ IF Stage │►│ ID Stage  │►│ EX Stage │►│ MEM Stage │►│ WB Stage │ │ │
+│  │  └──────────┘  └───────────┘  └────┬─────┘  └───────────┘  └──────────┘ │ │
 │  │                                                │                    │ │
 │  │                                           ┌────┴────┐               │ │
 │  │                                           │ AXI Mst │               │ │
@@ -110,28 +110,28 @@ Performs arithmetic, logical, and comparison operations.
 
 ### 5. Control Unit (`z_core_control_u`)
 
-Multi-cycle FSM that orchestrates instruction execution.
+Pipelined control unit with Hazard Detection and Forwarding Unit.
 
-**FSM States with Inter-Stage Registers:**
+**Pipeline Stages:**
 ```
-                ┌────┐         ┌─────────┐         ┌────────┐         ┌─────┐
-  FETCH ──► FETCH_WAIT ──► │   IR    │ ──► DECODE ──► │alu_in* │ ──► EXECUTE ──► │ALUOut│ ──► WRITE
-                           │         │               │ Imm_r  │          │       │ MDR  │
-                           │         │               │PC_saved│          ▼       └──────┘
-                           └─────────┘               └────────┘    ┌─────────┐
-                                                                   │   MEM   │
-                                                                   │(ld/st) │
-                                                                   └─────────┘
+   ┌──────┐      ┌──────┐      ┌──────┐       ┌───────┐      ┌──────┐
+──►│  IF  │─────►│  ID  │─────►│  EX  │──────►│  MEM  │─────►│  WB  │──►
+   └──────┘      └──────┘      └──────┘       └───────┘      └──────┘
+   Fetch         Decode        Execute        Memory         Writeback
 ```
 
-| State      | Description                                    |
-|------------|------------------------------------------------|
-| FETCH      | Issue instruction fetch request                |
-| FETCH_WAIT | Wait for memory response                       |
-| DECODE     | Decode instruction, read registers             |
-| EXECUTE    | Execute ALU operation, compute address/branch  |
-| MEM        | Perform load/store memory operation            |
-| WRITE      | Write result to register file                  |
+| Stage | Description                                      |
+|-------|--------------------------------------------------|
+| IF    | Instruction Fetch from memory                    |
+| ID    | Instruction Decode & Register Read               |
+| EX    | ALU Operation / Address Calculation              |
+| MEM   | Data Memory Access (Load/Store)                  |
+| WB    | Write Back result to Register File               |
+
+**Hazard Handling:**
+- **Data Hazards**: Forwarding (EX->EX, MEM->EX) and Stalling (Load-Use)
+- **Control Hazards**: Branch prediction (not implemented) / Flush on taken branch
+- **Structural Hazards**: Memory arbiter for IF/MEM conflict
 
 ### 6. AXI-Lite Interconnect (`axil_interconnect`)
 
@@ -207,14 +207,14 @@ The processor uses a unified address space for instructions and data:
 
 Each instruction takes multiple clock cycles:
 
-| Instruction Type | Cycles | States                              |
-|------------------|--------|-------------------------------------|
-| R-Type           | ~6     | FETCH→WAIT→DECODE→EXECUTE→WRITE    |
-| I-Type (ALU)     | ~6     | FETCH→WAIT→DECODE→EXECUTE→WRITE    |
-| Load             | ~10    | FETCH→WAIT→DECODE→EXECUTE→MEM→WRITE|
-| Store            | ~8     | FETCH→WAIT→DECODE→EXECUTE→MEM      |
-| Branch           | ~5     | FETCH→WAIT→DECODE→EXECUTE          |
-| JAL/JALR         | ~6     | FETCH→WAIT→DECODE→EXECUTE→WRITE    |
+| Instruction Type | Throughput | Latency |
+|------------------|------------|---------|
+| R-Type           | 1 cycle    | 5 cycles|
+| I-Type (ALU)     | 1 cycle    | 5 cycles|
+| Load             | 1 cycle    | 5 cycles|
+| Store            | 1 cycle    | 5 cycles|
+| Branch           | 1-3 cycles | 3 cycles|
+| JAL/JALR         | 2 cycles   | 3 cycles|
 
 ## Files
 
@@ -255,7 +255,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 ## Future Enhancements
 
 1. ~~**Multiple Data Sizes**: Support for byte/halfword load/store~~ ✓ Implemented
-2. **Pipeline**: Convert to pipelined architecture for higher throughput (current design is multi-cycle FSM)
+2. ~~**Pipeline**: Convert to pipelined architecture for higher throughput~~ ✓ Implemented
 3. **Caching**: Add instruction and data caches
 4. **Interrupts**: Exception and interrupt handling
 5. **M Extension**: Multiply/divide instructions

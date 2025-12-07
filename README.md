@@ -1,5 +1,3 @@
-# Z-Core
-
 <div align="center">
 
 ```
@@ -23,7 +21,7 @@
 
 ## Features
 
-- **Full RV32I Implementation** - Complete base integer instruction set
+- **5-Stage Pipeline** - Classic RISC-V 5-stage pipeline implementation
 - **AXI4-Lite Interface** - Industry-standard memory bus protocol
 - **Modular Design** - Clean separation of concerns with individual modules
 - **Comprehensive Testbenches** - Automated testing for all components
@@ -40,10 +38,12 @@
                     │  └────┬────┘  └────┬────┘  └───┬─────┘  └────┬────┘ │
                     │       └────────────┼───────────┼─────────────┘      │
                     │                    │           │                    │
-                    │            ┌───────┴───────────┴───────┐            │
-                    │            │    Control Unit (FSM)     │            │
-                    │            │  FETCH→DECODE→EXECUTE→WB  │            │
-                    │            └─────────────┬─────────────┘            │
+                    │        ┌───►┌────────┐──►┌────────┐──►┌────────┐──►┌────────┐ │
+                    │        │    │ FETCH  │   │ DECODE │   │EXECUTE │   │WB/MEM  │ │
+                    │        │    └────────┘   └────────┘   └────────┘   └────────┘ │
+                    │        │         ▲            ▲            ▲            ▲     │
+                    │        └─────────┴────────────┴────────────┴────────────┘     │
+                    │                      Control Unit (Pipeline)                  │
                     │                          │                          │
                     │            ┌─────────────┴──────────────┐           │
                     │            │      AXI-Lite Master       │           │
@@ -188,13 +188,14 @@ The processor has been verified with **80 comprehensive tests** across 14 test s
 | GPIO | Bidirectional GPIO | 2 |
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
+| Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 5 |
 
 ## Performance
 
 | Metric | Value |
 |--------|-------|
-| Pipeline Stages | Multi-cycle (5-6 stages) |
-| Clock Cycles per Instruction | 5-10 (varies by type) |
+| Pipeline Stages | 5-Stage (IF, ID, EX, MEM, WB) |
+| Throughput | ~1 cycle per instruction (ideal) |
 | Register File | 32 x 32-bit |
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
@@ -231,7 +232,7 @@ Detailed documentation is available in the `doc/` directory:
 - [x] AXI4-Lite memory interface
 - [x] Comprehensive testbench
 - [x] Modular IO (UART, GPIO)
-- [ ] Pipelining for improved throughput
+- [x] Pipelining for improved throughput
 - [ ] Branch prediction
 - [ ] M extension (multiply/divide)
 - [ ] C extension (compressed instructions)
