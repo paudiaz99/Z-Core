@@ -1,8 +1,11 @@
-# RISCOF working directory
+# RISCOF testing infrastructure (keep local only)
 riscof/
 
-# Simulation artifacts
+# Simulation build artifacts
 *.vcd
 *.log
-sim/*syntax_check.vvp
-sim/z_core_riscof.vvp
+sim/*.vvp
+
+# Python cache
+__pycache__/
+*.pyc
