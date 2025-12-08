@@ -41,9 +41,7 @@ module axil_ram #
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     // Extra pipeline register on output
     // Extra pipeline register on output
-    parameter PIPELINE_OUTPUT = 0,
-    // Initialization file for memory (optional)
-    parameter INIT_FILE = ""
+    parameter PIPELINE_OUTPUT = 0
 )
 (
     input  wire                   clk,
@@ -52,6 +50,7 @@ module axil_ram #
     input  wire [ADDR_WIDTH-1:0]  s_axil_awaddr,
     input  wire [2:0]             s_axil_awprot,
     input  wire                   s_axil_awvalid,
+
     output wire                   s_axil_awready,
     input  wire [DATA_WIDTH-1:0]  s_axil_wdata,
     input  wire [STRB_WIDTH-1:0]  s_axil_wstrb,
@@ -112,9 +111,7 @@ initial begin
         end
     end
 
-    if (INIT_FILE != "") begin
-        $readmemh(INIT_FILE, mem);
-    end
+
 end
 
 always @* begin

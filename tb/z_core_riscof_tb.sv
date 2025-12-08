@@ -97,6 +97,8 @@ module z_core_riscof_tb;
     wire [N_GPIO-1:0] gpio_wiring;
     assign gpio_wiring = {N_GPIO{1'bz}};
 
+
+
     // CPU Halt signal
     wire cpu_halt;
 
@@ -213,17 +215,14 @@ module z_core_riscof_tb;
         .s_axil_rready(m_axil_rready[0])
     );
 
-    // Instantiate UART (minimal - just responds to prevent hangs)
+    // Instantiate AXI-Lite UART
     axil_uart #(
         .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(12),  // 4KB
-        .STRB_WIDTH(STRB_WIDTH),
-        .DEFAULT_BAUD_DIV(16'd10)
-    ) u_uart (
+        .ADDR_WIDTH(12), // 4KB
+        .STRB_WIDTH(STRB_WIDTH)
+    ) u_axil_uart (
         .clk(clk),
         .rst(~rstn),
-        .uart_tx(),
-        .uart_rx(1'b1),
         .s_axil_awaddr(m_axil_awaddr[1*ADDR_WIDTH +: 12]),
         .s_axil_awprot(m_axil_awprot[1*3 +: 3]),
         .s_axil_awvalid(m_axil_awvalid[1]),
@@ -245,13 +244,13 @@ module z_core_riscof_tb;
         .s_axil_rready(m_axil_rready[1])
     );
 
-    // Instantiate GPIO
+    // Instantiate AXI-Lite GPIO
     axil_gpio #(
         .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(12),
+        .ADDR_WIDTH(12), // 4KB
         .STRB_WIDTH(STRB_WIDTH),
         .N_GPIO(N_GPIO)
-    ) u_gpio (
+    ) u_axil_gpio (
         .clk(clk),
         .rst(~rstn),
         .s_axil_awaddr(m_axil_awaddr[2*ADDR_WIDTH +: 12]),

@@ -24,8 +24,7 @@ module z_core_top #(
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     parameter MEM_ADDR_WIDTH = 16,      // 64KB memory
     parameter N_GPIO = 8,
-    parameter PIPELINE_OUTPUT = 0,
-    parameter INIT_FILE = ""
+    parameter PIPELINE_OUTPUT = 0
 )(
     input wire clk,
     input wire rstn,
@@ -210,8 +209,7 @@ axil_ram #(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(26), // 64MB
     .STRB_WIDTH(STRB_WIDTH),
-    .PIPELINE_OUTPUT(PIPELINE_OUTPUT),
-    .INIT_FILE(INIT_FILE)
+    .PIPELINE_OUTPUT(PIPELINE_OUTPUT)
 ) u_memory (
     .clk(clk),
     .rstn(rstn),
@@ -237,6 +235,9 @@ axil_ram #(
     .s_axil_rvalid(m_axil_rvalid[0]),
     .s_axil_rready(m_axil_rready[0])
 );
+
+
+
 
 // **************************************************
 //              UART (Slave 1)
