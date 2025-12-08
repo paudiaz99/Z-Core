@@ -98,15 +98,13 @@ Z-Core/
 │   ├── z_core_decoder_tb.v    # Decoder test
 │   └── z_core_reg_file_tb.v   # Register file test
 │
-├── sim/                       # Simulation outputs
-│   ├── *.vvp                  # Compiled simulations
-│   └── *.vcd                  # Waveform files
-│
 └── doc/                       # Documentation
     ├── AXI_INTERFACE.md       # AXI protocol details
     ├── GPIO.md                # GPIO module documentation
     ├── UART.md                # UART module documentation
     ├── Z_CORE_ARCHITECTURE.md # Architecture overview
+    ├── PIPELINE.md            # Pipeline implementation details
+    ├── RISCOF_COMPLIANCE_REPORT.md # Compliance verification
     └── VERIFICATION.md        # Verification details
 ```
 
