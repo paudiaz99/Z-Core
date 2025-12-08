@@ -23,10 +23,19 @@ module z_core_top #(
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     parameter MEM_ADDR_WIDTH = 16,      // 64KB memory
-    parameter PIPELINE_OUTPUT = 0
+    parameter N_GPIO = 8,
+    parameter PIPELINE_OUTPUT = 0,
+    parameter INIT_FILE = ""
 )(
     input wire clk,
-    input wire rstn
+    input wire rstn,
+
+    // UART
+    input  wire uart_rx,
+    output wire uart_tx,
+
+    // GPIO
+    inout  wire [N_GPIO-1:0] gpio_pins
 );
 
 // **************************************************
@@ -201,7 +210,8 @@ axil_ram #(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(26), // 64MB
     .STRB_WIDTH(STRB_WIDTH),
-    .PIPELINE_OUTPUT(PIPELINE_OUTPUT)
+    .PIPELINE_OUTPUT(PIPELINE_OUTPUT),
+    .INIT_FILE(INIT_FILE)
 ) u_memory (
     .clk(clk),
     .rstn(rstn),
@@ -258,7 +268,11 @@ axil_uart #(
     .s_axil_rdata(m_axil_rdata[1*DATA_WIDTH +: DATA_WIDTH]),
     .s_axil_rresp(m_axil_rresp[1*2 +: 2]),
     .s_axil_rvalid(m_axil_rvalid[1]),
-    .s_axil_rready(m_axil_rready[1])
+    .s_axil_rready(m_axil_rready[1]),
+    
+    // External Interface
+    .uart_tx(uart_tx),
+    .uart_rx(uart_rx)
 );
 
 // **************************************************
@@ -268,7 +282,8 @@ axil_uart #(
 axil_gpio #(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(12), // 4KB
-    .STRB_WIDTH(STRB_WIDTH)
+    .STRB_WIDTH(STRB_WIDTH),
+    .N_GPIO(N_GPIO)
 ) u_gpio (
     .clk(clk),
     .rst(~rstn), // Active high reset
@@ -291,7 +306,10 @@ axil_gpio #(
     .s_axil_rdata(m_axil_rdata[2*DATA_WIDTH +: DATA_WIDTH]),
     .s_axil_rresp(m_axil_rresp[2*2 +: 2]),
     .s_axil_rvalid(m_axil_rvalid[2]),
-    .s_axil_rready(m_axil_rready[2])
+    .s_axil_rready(m_axil_rready[2]),
+    
+    // External Interface
+    .gpio(gpio_pins)
 );
 
 endmodule

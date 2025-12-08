@@ -40,7 +40,10 @@ module axil_ram #
     // Width of wstrb (width of data bus in words)
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     // Extra pipeline register on output
-    parameter PIPELINE_OUTPUT = 0
+    // Extra pipeline register on output
+    parameter PIPELINE_OUTPUT = 0,
+    // Initialization file for memory (optional)
+    parameter INIT_FILE = ""
 )
 (
     input  wire                   clk,
@@ -107,6 +110,10 @@ initial begin
         for (j = i; j < i + 2**(VALID_ADDR_WIDTH/2); j = j + 1) begin
             mem[j] = 0;
         end
+    end
+
+    if (INIT_FILE != "") begin
+        $readmemh(INIT_FILE, mem);
     end
 end
 
