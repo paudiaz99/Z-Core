@@ -1,1 +1,8 @@
+# RISCOF working directory
 riscof/
+
+# Simulation artifacts
+*.vcd
+*.log
+sim/*syntax_check.vvp
+sim/z_core_riscof.vvp

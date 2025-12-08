@@ -1,6 +1,7 @@
 # Z-Core RISC-V Compliance Verification Report
 
-**Date:** December 8, 2025
+**Date:** December 8, 2025  
+**Architecture:** 5-Stage Pipelined Processor  
 **Status:** PASSED (RV32I Base Integer Instruction Set)
 
 ## 1. Objective

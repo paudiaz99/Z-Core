@@ -316,8 +316,8 @@ wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
 wire mem_stall = mem_op_pending && !mem_ready;
 
 // System Instruction Detection (for RISCOF halt signal)
-wire dec_is_ecall  = (dec_opcode == 7'b1110011) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h000);
-wire dec_is_ebreak = (dec_opcode == 7'b1110011) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
+wire dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h000);
+wire dec_is_ebreak = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
 
 // Halt signal for RISCOF compliance testing (ECALL/EBREAK detection in ID stage)
 assign halt = if_id_valid && !if_id_poisoned && (dec_is_ecall || dec_is_ebreak);
