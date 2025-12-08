@@ -1,200 +1,142 @@
-"""
-Z-Core RISCOF DUT Plugin
-
-This plugin handles building and running RISCOF architectural tests
-on the Z-Core RISC-V processor using Icarus Verilog simulation.
-"""
-
 import os
 import re
 import shutil
 import subprocess
+import shlex
 import logging
+import random
+import string
+from string import Template
+import sys
 
 import riscof.utils as utils
+import riscof.constants as constants
 from riscof.pluginTemplate import pluginTemplate
 
 logger = logging.getLogger()
 
-
 class z_core(pluginTemplate):
-    """RISCOF DUT plugin for Z-Core RISC-V processor."""
-
     __model__ = "z_core"
-    __version__ = "1.0.0"
+    __version__ = "1.0"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Configuration populated by RISCOF
-        self.dut_exe = ""
-        self.num_jobs = 1
-        self.pluginpath = os.path.dirname(__file__)
-        self.isa_spec = os.path.join(self.pluginpath, "z_core_isa.yaml")
-        self.platform_spec = os.path.join(self.pluginpath, "z_core_platform.yaml")
 
-    def initialise(self, suite, work_dir, compliance_env):
-        """
-        Initialize the DUT plugin.
+        config = kwargs.get('config')
 
-        Args:
-            suite: Path to the test suite
-            work_dir: Working directory for test execution
-            compliance_env: Environment variables for test compliance
-        """
-        self.suite = suite
+        if config is None:
+            print("Please enter input file paths in configuration.")
+            raise SystemExit(1)
+
+        # Path to the Z-Core project root
+        self.pluginpath = os.path.abspath(config['pluginpath'])
+        self.project_root = os.path.dirname(os.path.dirname(self.pluginpath))
+
+        # Number of parallel jobs
+        self.num_jobs = str(config['jobs'] if 'jobs' in config else 1)
+
+        # ISA and platform spec paths
+        self.isa_spec = os.path.abspath(config['ispec'])
+        self.platform_spec = os.path.abspath(config['pspec'])
+
+        # Whether to run tests or just compile
+        if 'target_run' in config and config['target_run'] == '0':
+            self.target_run = False
+        else:
+            self.target_run = True
+
+    def initialise(self, suite, work_dir, archtest_env):
         self.work_dir = work_dir
-        self.compile_cmd = self.dut_exe if self.dut_exe else "riscv32-unknown-elf-gcc"
+        self.suite_dir = suite
 
-        # Path to Z-Core RTL and testbench
-        self.rtl_path = os.path.abspath(os.path.join(self.pluginpath, "..", "..", "rtl"))
-        self.tb_path = os.path.abspath(os.path.join(self.pluginpath, "..", "..", "tb"))
+        # Compile command template for RISC-V GCC
+        self.compile_cmd = 'riscv{1}-unknown-elf-gcc -march={0} \
+          -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles -g \
+          -T ' + self.pluginpath + '/env/link.ld \
+          -I ' + self.pluginpath + '/env/ \
+          -I ' + archtest_env + ' {2} -o {3} {4}'
 
-        # Environment files
-        self.env_dir = os.path.join(self.pluginpath, "env")
+        # Build the testbench executable once
+        self.build_testbench()
+        
+        # Make the simulation wrapper script executable
+        self.sim_script = os.path.join(self.pluginpath, 'run_sim.sh')
+        os.chmod(self.sim_script, 0o755)
+
+    def build_testbench(self):
+        """Build the Icarus Verilog testbench for RISCOF"""
+        self.tb_exe = os.path.join(self.work_dir, "z_core_riscof_tb.vvp")
+        tb_file = os.path.join(self.project_root, "tb", "z_core_riscof_tb.sv")
+        
+        if not os.path.exists(tb_file):
+            logger.error(f"Testbench not found: {tb_file}")
+            raise SystemExit(1)
+
+        # Compile testbench with Icarus Verilog
+        compile_cmd = f"iverilog -g2012 -I{self.project_root} -o {self.tb_exe} {tb_file}"
+        logger.info(f"Compiling testbench: {compile_cmd}")
+        
+        result = subprocess.run(compile_cmd, shell=True, cwd=self.project_root,
+                               capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"Testbench compile failed: {result.stderr}")
+            raise SystemExit(1)
+        logger.info("Testbench compiled successfully")
 
     def build(self, isa_yaml, platform_yaml):
-        """
-        Build the DUT simulator if needed.
+        ispec = utils.load_yaml(isa_yaml)['hart0']
+        self.xlen = ('64' if 64 in ispec['supported_xlen'] else '32')
+        self.isa = 'rv' + self.xlen
         
-        For Z-Core, we compile the Icarus Verilog testbench once.
-        """
-        # The RISCOF testbench is separate from the main testbench
-        self.riscof_tb = os.path.join(self.tb_path, "z_core_riscof_tb.sv")
+        if "I" in ispec["ISA"]:
+            self.isa += 'i'
+        if "M" in ispec["ISA"]:
+            self.isa += 'm'
+        if "F" in ispec["ISA"]:
+            self.isa += 'f'
+        if "D" in ispec["ISA"]:
+            self.isa += 'd'
+        if "C" in ispec["ISA"]:
+            self.isa += 'c'
 
-        if not os.path.exists(self.riscof_tb):
-            logger.warning(f"RISCOF testbench not found at {self.riscof_tb}")
-            logger.warning("Using main testbench - manual signature extraction required")
-            return
+        self.compile_cmd = self.compile_cmd + ' -mabi=' + ('lp64 ' if 64 in ispec['supported_xlen'] else 'ilp32 ')
 
-        # Compile the RISCOF testbench
-        sim_dir = os.path.join(self.pluginpath, "..", "..", "sim")
-        os.makedirs(sim_dir, exist_ok=True)
+    def runTests(self, testList):
+        # Delete Makefile if it already exists
+        if os.path.exists(self.work_dir + "/Makefile." + self.name[:-1]):
+            os.remove(self.work_dir + "/Makefile." + self.name[:-1])
         
-        self.vvp_path = os.path.join(sim_dir, "z_core_riscof.vvp")
+        make = utils.makeUtil(makefilePath=os.path.join(self.work_dir, "Makefile." + self.name[:-1]))
+        make.makeCommand = 'make -k -j' + self.num_jobs
 
-        compile_cmd = [
-            "iverilog",
-            "-g2012",
-            "-o", self.vvp_path,
-            f"-I{self.rtl_path}",
-            self.riscof_tb
-        ]
+        for testname in testList:
+            testentry = testList[testname]
+            test = testentry['test_path']
+            test_dir = testentry['work_dir']
+            
+            # Output files
+            elf = 'my.elf'
+            hex_file = 'my.hex'
+            sig_file = os.path.join(test_dir, self.name[:-1] + ".signature")
+            
+            # Compile macros
+            compile_macros = ' -D' + " -D".join(testentry['macros'])
+            
+            # Compile command
+            cmd = self.compile_cmd.format(testentry['isa'].lower(), self.xlen, test, elf, compile_macros)
 
-        logger.info(f"Compiling Z-Core RISCOF testbench...")
-        try:
-            result = subprocess.run(compile_cmd, capture_output=True, text=True, check=True)
-            logger.info("Z-Core testbench compiled successfully")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to compile testbench: {e.stderr}")
-            raise
+            if self.target_run:
+                # Use the wrapper script that properly handles signature extraction
+                simcmd = "{0} {1} {2} {3} {4}".format(
+                    self.sim_script, elf, hex_file, sig_file, self.tb_exe)
+                
+                execute = '@cd {0}; {1}; {2};'.format(test_dir, cmd, simcmd)
+            else:
+                execute = '@cd {0}; {1}; echo "NO RUN";'.format(test_dir, cmd)
 
-    def runTests(self, testlist):
-        """
-        Run the architectural tests.
+            make.add_target(execute)
 
-        Args:
-            testlist: Dictionary of tests to run
-        """
-        for test_name, test_info in testlist.items():
-            test_entry = test_info["test_entry"]
-            work_dir = test_info["work_dir"]
-            isa = test_info["isa"]
+        make.execute_all(self.work_dir)
 
-            # Paths
-            elf_file = os.path.join(work_dir, f"{test_name}.elf")
-            hex_file = os.path.join(work_dir, f"{test_name}.hex")
-            sig_file = os.path.join(work_dir, f"{test_name}.signature")
-            log_file = os.path.join(work_dir, f"{test_name}.log")
-
-            logger.info(f"Running test: {test_name}")
-
-            # Step 1: Compile test to ELF
-            compile_cmd = [
-                self.compile_cmd,
-                "-march=rv32i",
-                "-mabi=ilp32",
-                "-static",
-                "-mcmodel=medany",
-                "-fvisibility=hidden",
-                "-nostdlib",
-                "-nostartfiles",
-                f"-I{self.env_dir}",
-                f"-T{os.path.join(self.env_dir, 'link.ld')}",
-                test_entry,
-                "-o", elf_file
-            ]
-
-            try:
-                subprocess.run(compile_cmd, capture_output=True, text=True, check=True)
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Compile failed for {test_name}: {e.stderr}")
-                continue
-
-            # Step 2: Convert ELF to hex for Verilog $readmemh
-            objcopy_cmd = [
-                "riscv32-unknown-elf-objcopy",
-                "-O", "verilog",
-                elf_file,
-                hex_file
-            ]
-
-            try:
-                subprocess.run(objcopy_cmd, capture_output=True, text=True, check=True)
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Objcopy failed for {test_name}: {e.stderr}")
-                continue
-
-            # Step 3: Extract signature bounds from ELF
-            sig_begin, sig_end = self._get_signature_bounds(elf_file)
-            if sig_begin is None:
-                logger.warning(f"Could not find signature bounds for {test_name}")
-                continue
-
-            # Step 4: Run simulation
-            sim_cmd = [
-                "vvp",
-                self.vvp_path,
-                f"+hex_file={hex_file}",
-                f"+sig_file={sig_file}",
-                f"+sig_begin={sig_begin}",
-                f"+sig_end={sig_end}"
-            ]
-
-            try:
-                with open(log_file, "w") as log:
-                    subprocess.run(sim_cmd, stdout=log, stderr=subprocess.STDOUT, timeout=60)
-            except subprocess.TimeoutExpired:
-                logger.error(f"Simulation timeout for {test_name}")
-                continue
-            except Exception as e:
-                logger.error(f"Simulation error for {test_name}: {e}")
-                continue
-
-            logger.info(f"Completed: {test_name}")
-
-    def _get_signature_bounds(self, elf_file):
-        """
-        Extract begin_signature and end_signature addresses from ELF.
-        """
-        try:
-            nm_cmd = ["riscv32-unknown-elf-nm", elf_file]
-            result = subprocess.run(nm_cmd, capture_output=True, text=True, check=True)
-
-            sig_begin = None
-            sig_end = None
-
-            for line in result.stdout.splitlines():
-                parts = line.split()
-                if len(parts) >= 3:
-                    addr = int(parts[0], 16)
-                    name = parts[2]
-                    if name == "begin_signature":
-                        sig_begin = addr
-                    elif name == "end_signature":
-                        sig_end = addr
-
-            return sig_begin, sig_end
-
-        except Exception as e:
-            logger.error(f"Failed to extract signature bounds: {e}")
-            return None, None
+        if not self.target_run:
+            raise SystemExit(0)

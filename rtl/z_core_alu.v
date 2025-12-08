@@ -34,8 +34,11 @@ localparam INST_BGE = 5'd13;
 localparam INST_BLTU = 5'd14;
 localparam INST_BGEU = 5'd15;
 
-
 always @(alu_inst_type or alu_in1 or alu_in2) begin
+    // Initialize outputs to prevent latches
+    alu_out = 32'd0;
+    alu_branch = 1'b0;
+    
     case (alu_inst_type) 
         INST_ADD: alu_out = alu_in1 + alu_in2;
         INST_SUB: alu_out = alu_in1 - alu_in2;

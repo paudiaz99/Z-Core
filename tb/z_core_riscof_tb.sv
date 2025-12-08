@@ -31,7 +31,7 @@ module z_core_riscof_tb;
     reg rstn;
 
     // Timeout counter
-    integer timeout_cycles = 1000000;  // 1M cycles max
+    integer timeout_cycles = 50000000;  // 50M cycles max for large tests
     integer cycle_count = 0;
 
     // Interconnect Parameters
@@ -105,7 +105,7 @@ module z_core_riscof_tb;
         .S_COUNT(S_COUNT),
         .M_COUNT(M_COUNT),
         .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH),
+        .ADDR_WIDTH(32),
         .STRB_WIDTH(STRB_WIDTH),
         .M_REGIONS(M_REGIONS),
         .M_BASE_ADDR(M_BASE_ADDR),
@@ -183,16 +183,16 @@ module z_core_riscof_tb;
         .halt(cpu_halt)
     );
 
-    // Instantiate AXI-Lite RAM
+    // Instantiate AXI-Lite RAM (2MB for large RISCOF tests)
     axil_ram #(
         .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(16),
+        .ADDR_WIDTH(21),  // 2^21 = 2MB
         .STRB_WIDTH(STRB_WIDTH),
         .PIPELINE_OUTPUT(0)
     ) u_axil_ram (
         .clk(clk),
         .rstn(rstn),
-        .s_axil_awaddr(m_axil_awaddr[0*ADDR_WIDTH +: 16]),
+        .s_axil_awaddr(m_axil_awaddr[0*ADDR_WIDTH +: ADDR_WIDTH]),
         .s_axil_awprot(m_axil_awprot[0*3 +: 3]),
         .s_axil_awvalid(m_axil_awvalid[0]),
         .s_axil_awready(m_axil_awready[0]),
@@ -203,7 +203,7 @@ module z_core_riscof_tb;
         .s_axil_bresp(m_axil_bresp[0*2 +: 2]),
         .s_axil_bvalid(m_axil_bvalid[0]),
         .s_axil_bready(m_axil_bready[0]),
-        .s_axil_araddr(m_axil_araddr[0*ADDR_WIDTH +: 16]),
+        .s_axil_araddr(m_axil_araddr[0*ADDR_WIDTH +: ADDR_WIDTH]),
         .s_axil_arprot(m_axil_arprot[0*3 +: 3]),
         .s_axil_arvalid(m_axil_arvalid[0]),
         .s_axil_arready(m_axil_arready[0]),
@@ -216,7 +216,7 @@ module z_core_riscof_tb;
     // Instantiate UART (minimal - just responds to prevent hangs)
     axil_uart #(
         .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(12),
+        .ADDR_WIDTH(12),  // 4KB
         .STRB_WIDTH(STRB_WIDTH),
         .DEFAULT_BAUD_DIV(16'd10)
     ) u_uart (
@@ -275,6 +275,13 @@ module z_core_riscof_tb;
         .s_axil_rready(m_axil_rready[2]),
         .gpio(gpio_wiring)
     );
+
+    initial begin
+        #1;
+        $display("DEBUG: ADDR_WIDTH=%d", ADDR_WIDTH);
+        $display("DEBUG: m_axil_awaddr width=%d", $bits(m_axil_awaddr));
+        $display("DEBUG: u_interconnect.m_axil_awaddr width=%d", $bits(u_interconnect.m_axil_awaddr));
+    end
 
     // Clock generation (100MHz)
     always #5 clk = ~clk;

@@ -1,44 +1,37 @@
-// Z-Core RISCOF Model Test Header
-// This file defines the macros required by RISCOF architectural tests
+#ifndef _COMPLIANCE_MODEL_H
+#define _COMPLIANCE_MODEL_H
 
-#ifndef _MODEL_TEST_H
-#define _MODEL_TEST_H
-
-//-----------------------------------------------------------------------
-// RV Software Compliance Test Macros
-//-----------------------------------------------------------------------
-
-// Signature region labels - used by RISCOF to extract test results
+// Data section with tohost/fromhost for signature tracking
 #define RVMODEL_DATA_SECTION \
-    .pushsection .tohost,"aw",@progbits; \
-    .align 8; .global tohost; tohost: .dword 0;  \
-    .align 8; .global fromhost; fromhost: .dword 0; \
-    .popsection; \
-    .section .data.signature,"aw",@progbits; \
-    .align 4; .global begin_signature; begin_signature:
+        .pushsection .tohost,"aw",@progbits;                            \
+        .align 8; .global tohost; tohost: .dword 0;                     \
+        .align 8; .global fromhost; fromhost: .dword 0;                 \
+        .popsection;                                                    \
+        .align 8; .global begin_regstate; begin_regstate:               \
+        .word 128;                                                      \
+        .align 8; .global end_regstate; end_regstate:                   \
+        .word 4;
 
-#define RVMODEL_DATA_BEGIN \
-    RVMODEL_DATA_SECTION
+// Halt using ECALL - Z-Core halts on ECALL/EBREAK
+#define RVMODEL_HALT                                                    \
+  ecall;                                                                \
+  halt_loop:                                                            \
+    j halt_loop;
 
-#define RVMODEL_DATA_END \
-    .align 4; .global end_signature; end_signature: \
-    .align 4; .global rvtest_sig_begin; rvtest_sig_begin: \
-    .fill 64, 4, 0xdeadbeef; \
-    .align 4; .global rvtest_sig_end; rvtest_sig_end:
+#define RVMODEL_BOOT
 
-// Halt macro - triggers ECALL to signal test completion
-// The testbench monitors the halt signal and extracts signature
-#define RVMODEL_HALT \
-    li gp, 1;  \
-    ecall;
+// Begin signature section
+#define RVMODEL_DATA_BEGIN                                              \
+  RVMODEL_DATA_SECTION                                                  \
+  .align 4;                                                             \
+  .global begin_signature; begin_signature:
 
-// Boot code section
-#define RVMODEL_BOOT \
-    .section .text.init; \
-    .globl _start; \
-    _start:
+// End signature section
+#define RVMODEL_DATA_END                                                \
+  .align 4;                                                             \
+  .global end_signature; end_signature:
 
-// IO macros - not used in Z-Core (no tohost/fromhost interface)
+// I/O stubs (not used by Z-Core)
 #define RVMODEL_IO_INIT
 #define RVMODEL_IO_WRITE_STR(_R, _STR)
 #define RVMODEL_IO_CHECK()
@@ -46,19 +39,10 @@
 #define RVMODEL_IO_ASSERT_SFPR_EQ(_F, _R, _I)
 #define RVMODEL_IO_ASSERT_DFPR_EQ(_D, _R, _I)
 
-// Set base address for signature updates
-#define RVTEST_SIGBASE(BaseReg, Val) \
-    la BaseReg, Val;
-
-// Update signature with register value
-#define RVTEST_SIGUPD(BaseReg, SigReg) \
-    sw SigReg, 0(BaseReg); \
-    addi BaseReg, BaseReg, 4;
-
-// Set exception handling to trap handler
+// Interrupt stubs (not implemented in Z-Core)
 #define RVMODEL_SET_MSW_INT
 #define RVMODEL_CLEAR_MSW_INT
 #define RVMODEL_CLEAR_MTIMER_INT
 #define RVMODEL_CLEAR_MEXT_INT
 
-#endif // _MODEL_TEST_H
+#endif // _COMPLIANCE_MODEL_H

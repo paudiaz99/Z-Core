@@ -1,8 +1,10 @@
 mtime:
-  implemented: false
+  implemented: true
+  address: 0xbff8
 mtimecmp:
-  implemented: false
+  implemented: true
+  address: 0x4000
 nmi:
-  label: nonmaskable_interrupt
+  label: nmi_vector
 reset:
-  address: 0x00000000
+  label: reset_vector
