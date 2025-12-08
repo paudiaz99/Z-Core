@@ -16,6 +16,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verilog](https://img.shields.io/badge/HDL-Verilog-blue.svg)](https://en.wikipedia.org/wiki/Verilog)
 [![RISC-V](https://img.shields.io/badge/ISA-RISC--V%20RV32I-green.svg)](https://riscv.org/)
+[![Compliance](https://img.shields.io/badge/Compliance-RISCOF%20Passed-brightgreen.svg)](doc/RISCOF_COMPLIANCE_REPORT.md)
 
 </div>
 
@@ -23,7 +24,7 @@
 
 ## Features
 
-- **Full RV32I Implementation** - Complete base integer instruction set
+- **Full RV32I Implementation** - Complete base integer instruction set (RISCOF Compliant)
 - **AXI4-Lite Interface** - Industry-standard memory bus protocol
 - **Modular Design** - Clean separation of concerns with individual modules
 - **Comprehensive Testbenches** - Automated testing for all components
@@ -188,6 +189,7 @@ The processor has been verified with **80 comprehensive tests** across 14 test s
 | GPIO | Bidirectional GPIO | 2 |
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
+| **RISCOF Compliance** | **Official RISC-V Architectural Tests** | **41** |
 
 ## Performance
 
@@ -224,6 +226,7 @@ Detailed documentation is available in the `doc/` directory:
 - **[GPIO](doc/GPIO.md)** - Bidirectional GPIO module
 - **[UART](doc/UART.md)** - Serial UART module
 - **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
+- **[RISCOF Compliance Report](doc/RISCOF_COMPLIANCE_REPORT.md)** - Detailed compliance verification results
 
 ## Roadmap
 
