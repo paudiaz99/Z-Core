@@ -186,13 +186,13 @@ module z_core_riscof_tb;
     // Instantiate AXI-Lite RAM (2MB for large RISCOF tests)
     axil_ram #(
         .DATA_WIDTH(DATA_WIDTH),
-        .ADDR_WIDTH(21),  // 2^21 = 2MB
+        .ADDR_WIDTH(26),  // 2^26 = 64MB
         .STRB_WIDTH(STRB_WIDTH),
         .PIPELINE_OUTPUT(0)
     ) u_axil_ram (
         .clk(clk),
         .rstn(rstn),
-        .s_axil_awaddr(m_axil_awaddr[0*ADDR_WIDTH +: ADDR_WIDTH]),
+        .s_axil_awaddr(m_axil_awaddr[0*ADDR_WIDTH +: 26]),
         .s_axil_awprot(m_axil_awprot[0*3 +: 3]),
         .s_axil_awvalid(m_axil_awvalid[0]),
         .s_axil_awready(m_axil_awready[0]),
@@ -203,7 +203,7 @@ module z_core_riscof_tb;
         .s_axil_bresp(m_axil_bresp[0*2 +: 2]),
         .s_axil_bvalid(m_axil_bvalid[0]),
         .s_axil_bready(m_axil_bready[0]),
-        .s_axil_araddr(m_axil_araddr[0*ADDR_WIDTH +: ADDR_WIDTH]),
+        .s_axil_araddr(m_axil_araddr[0*ADDR_WIDTH +: 26]),
         .s_axil_arprot(m_axil_arprot[0*3 +: 3]),
         .s_axil_arvalid(m_axil_arvalid[0]),
         .s_axil_arready(m_axil_arready[0]),

@@ -1,5 +1,7 @@
 # RISCOF testing infrastructure (keep local only)
 riscof/
+riscof_work/
+sim/
 
 # Simulation build artifacts
 *.vcd
