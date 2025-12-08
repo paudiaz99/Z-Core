@@ -211,6 +211,46 @@ This test verifies that the UART module can transmit a byte and receive it back 
 4. **Reception**: UART receives the byte and updates RX_DATA and STATUS registers.
 5. **Verification**: CPU checks STATUS (TX_EMPTY=1, RX_VALID=1) and RX_DATA (0x55).
 
+## Test 15: RAW Hazard Stress
+**Purpose:** Stress test the forwarding unit with long chains of dependencies
+
+```
+ADDI x1, x0, 1
+ADD x2, x1, x1  (Forward from WB or EX)
+ADD x3, x2, x2
+...
+SLT x15, x13, x12
+```
+
+## Test 16: Full ALU Coverage
+**Purpose:** Verify all ALU operations including corner cases
+- Verify SRAI, SLTI, SLTIU
+- Verify OR, XOR, SLL, SRL, SRA, SLT, SLTU
+- Verify store-load with ALU results
+
+## Test 17: Nested Loops
+**Purpose:** Verify complex control flow and register persistence
+
+```c
+for (i=0; i<3; i++) {
+    for (j=0; j<3; j++) {
+        sum += i + j;
+    }
+}
+```
+
+## Test 18: Memory Access Pattern Stress
+**Purpose:** extensive verification of byte/halfword loads and stores
+- Writes sequences of bytes/halfwords
+- Reads them back with mixed signed/unsigned instructions (LB, LBU, LH, LHU)
+- Specific test for Store-Load hazards (Store followed immediately by Load to same address)
+
+## Test 19: Mixed Instruction Stress
+**Purpose:** Randomized-style mix of all instruction types to catch interaction bugs
+- Interleaves ALU, Memory, Branch, and Jump instructions
+- Verifies `LUI` + `ADDI` large constant generation
+- Verifies `JAL` / `JALR` return address linking in complex flow
+
 ## Instruction Coverage
 
 ### RV32I Base Integer Instructions
@@ -300,8 +340,8 @@ gtkwave sim/z_core_control_u_tb.vcd
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  80                                          ║
-║  Passed:       80                                          ║
+║  Total Tests:  133                                         ║
+║  Passed:       133                                         ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║

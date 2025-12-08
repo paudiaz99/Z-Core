@@ -1,15 +1,13 @@
-# Z-Core
-
 <div align="center">
 
 ```
-███████╗       ██████╗ ██████╗ ██████╗ ███████╗
-╚══███╔╝      ██╔════╝██╔═══██╗██╔══██╗██╔════╝
-  ███╔╝ █████╗██║     ██║   ██║██████╔╝█████╗  
- ███╔╝  ╚════╝██║     ██║   ██║██╔══██╗██╔══╝  
-███████╗      ╚██████╗╚██████╔╝██║  ██║███████╗
-╚══════╝       ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
-```
+                        ███████╗       ██████╗ ██████╗ ██████╗ ███████╗
+                        ╚══███╔╝      ██╔════╝██╔═══██╗██╔══██╗██╔════╝
+                          ███╔╝ █████╗██║     ██║   ██║██████╔╝█████╗  
+                         ███╔╝  ╚════╝██║     ██║   ██║██╔══██╗██╔══╝  
+                        ███████╗      ╚██████╗╚██████╔╝██║  ██║███████╗
+                        ╚══════╝       ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
+```  
 
 **A lightweight, educational RISC-V RV32I processor core**
 
@@ -24,6 +22,7 @@
 
 ## Features
 
+- **5-Stage Pipeline** - Classic RISC-V 5-stage pipeline implementation
 - **Full RV32I Implementation** - Complete base integer instruction set (RISCOF Compliant)
 - **AXI4-Lite Interface** - Industry-standard memory bus protocol
 - **Modular Design** - Clean separation of concerns with individual modules
@@ -34,22 +33,24 @@
 ## Architecture
 
 ```
-                    ┌─────────────────────────────────────────────────────┐
-                    │                   Z-Core CPU                        │
-                    │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐ │
-                    │  │ Decoder │  │Reg File │  │ALU Ctrl │  │   ALU   │ │
-                    │  └────┬────┘  └────┬────┘  └───┬─────┘  └────┬────┘ │
-                    │       └────────────┼───────────┼─────────────┘      │
-                    │                    │           │                    │
-                    │            ┌───────┴───────────┴───────┐            │
-                    │            │    Control Unit (FSM)     │            │
-                    │            │  FETCH→DECODE→EXECUTE→WB  │            │
-                    │            └─────────────┬─────────────┘            │
-                    │                          │                          │
-                    │            ┌─────────────┴──────────────┐           │
-                    │            │      AXI-Lite Master       │           │
-                    │            └─────────────┬──────────────┘           │
-                    └──────────────────────────┼──────────────────────────┘
+                    ┌───────────────────────────────────────────────────────────────┐
+                    │                   Z-Core CPU                                  │
+                    │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │
+                    │  │ Decoder │  │Reg File │  │ALU Ctrl │  │   ALU   │           │
+                    │  └────┬────┘  └────┬────┘  └───┬─────┘  └────┬────┘           │
+                    │       └────────────┼───────────┼─────────────┘                │
+                    │                    │           │                              │
+                    │        ┌───►┌────────┐──►┌────────┐──►┌────────┐──►┌────────┐ │
+                    │        │    │ FETCH  │   │ DECODE │   │EXECUTE │   │WB/MEM  │ │
+                    │        │    └────────┘   └────────┘   └────────┘   └────────┘ │
+                    │        │         ▲            ▲            ▲            ▲     │
+                    │        └─────────┴────────────┴────────────┴────────────┘     │
+                    │                      Control Unit (Pipeline)                  │
+                    │                          │                                    │
+                    │            ┌─────────────┴──────────────┐                     │
+                    │            │      AXI-Lite Master       │                     │
+                    │            └─────────────┬──────────────┘                     │
+                    └──────────────────────────┼────────────────────────────────────┘
                                                │ AXI-Lite Bus
                                                ▼
                                   ┌─────────────────────────┐
@@ -155,8 +156,8 @@ vvp sim/z_core_control_u_tb.vvp
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  80                                          ║
-║  Passed:       80                                          ║
+║  Total Tests:  133                                         ║
+║  Passed:       133                                         ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
@@ -171,7 +172,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 
 ## Test Coverage
 
-The processor has been verified with **80 comprehensive tests** across 14 test suites:
+The processor has been verified with **133 comprehensive tests** across 15 test suites:
 
 | Test Suite | Description | Tests |
 |------------|-------------|-------|
@@ -190,13 +191,14 @@ The processor has been verified with **80 comprehensive tests** across 14 test s
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
 | **RISCOF Compliance** | **Official RISC-V Architectural Tests** | **41** |
+| Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 53 |
 
 ## Performance
 
 | Metric | Value |
 |--------|-------|
-| Pipeline Stages | Multi-cycle (5-6 stages) |
-| Clock Cycles per Instruction | 5-10 (varies by type) |
+| Pipeline Stages | 5-Stage (IF, ID, EX, MEM, WB) |
+| Throughput | ~1 cycle per instruction (ideal) |
 | Register File | 32 x 32-bit |
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
@@ -234,7 +236,7 @@ Detailed documentation is available in the `doc/` directory:
 - [x] AXI4-Lite memory interface
 - [x] Comprehensive testbench
 - [x] Modular IO (UART, GPIO)
-- [ ] Pipelining for improved throughput
+- [x] Pipelining for improved throughput
 - [ ] Branch prediction
 - [ ] M extension (multiply/divide)
 - [ ] C extension (compressed instructions)

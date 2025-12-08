@@ -55,6 +55,7 @@ assign m_axil_arprot = 3'b000;
 localparam STATE_IDLE       = 3'd0;
 localparam STATE_READ_ADDR  = 3'd1;
 localparam STATE_READ_DATA  = 3'd2;
+localparam STATE_READ_DONE  = 3'd5;  // NEW: Data captured, signal ready
 localparam STATE_WRITE_ADDR = 3'd3;
 localparam STATE_WRITE_RESP = 3'd4;
 
@@ -129,11 +130,18 @@ always @(posedge clk) begin
             STATE_READ_DATA: begin
                 // Wait for read data
                 if (m_axil_rvalid) begin
+                    // Capture data NOW - it will be stable next cycle
                     mem_rdata     <= m_axil_rdata;
-                    mem_ready     <= 1'b1;
                     m_axil_rready <= 1'b0;
-                    state <= STATE_IDLE;
+                    // Go to DONE state to assert mem_ready AFTER data is registered
+                    state <= STATE_READ_DONE;
                 end
+            end
+            
+            STATE_READ_DONE: begin
+                // Data is now stable in mem_rdata, signal completion
+                mem_ready <= 1'b1;
+                state <= STATE_IDLE;
             end
             
             STATE_WRITE_ADDR: begin

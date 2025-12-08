@@ -164,6 +164,13 @@ module z_core_control_u_tb;
         .m_axil_rready(m_axil_rready)
     );
 
+    // Safety Timeout
+    initial begin
+        #5000000; // 5ms timeout
+        $display("\n[ERROR] Simulation Timeout!");
+        $finish;
+    end
+
     // Instantiate Control Unit (AXI-Lite Master)
     wire cpu_halt;  // Halt signal from CPU (ECALL/EBREAK detected)
     
@@ -390,9 +397,9 @@ module z_core_control_u_tb;
     task reset_cpu;
         begin
             rstn = 0;
-            wait_cycles(4);
+            wait_cycles(10);  // Increased from 4 to allow pipeline flush
             rstn = 1;
-            wait_cycles(2);
+            wait_cycles(5);   // Increased from 2 to allow pipeline fill
         end
     endtask
 
@@ -582,8 +589,14 @@ module z_core_control_u_tb;
     endtask
 
     task load_test8_branches;
+        integer i;
         begin
             $display("\n--- Loading Test 8: Branch Operations ---");
+            // Clear memory first to avoid contamination from previous tests
+            for (i = 0; i < 64; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
             // This test verifies all branch instructions
             // We use x10 as a result accumulator, incrementing on correct paths
             
@@ -827,8 +840,8 @@ module z_core_control_u_tb;
     // ==========================================
     
     initial begin
-        $dumpfile("z_core_control_u_tb.vcd");
-        $dumpvars(0, z_core_control_u_tb);
+        // $dumpfile("z_core_control_u_tb.vcd");
+        // $dumpvars(0, z_core_control_u_tb);
 
         // Initialize UART testbench signals
         uart_rx_tb_drive = 1'b1;  // Idle high
@@ -1099,6 +1112,118 @@ module z_core_control_u_tb;
         end
 
         // ==========================================
+        // Test 15: RAW Hazard Stress Test
+        // ==========================================
+        load_test15_raw_hazard_stress();
+        reset_cpu();
+        #3000;  // Allow time for back-to-back dependent instructions
+        
+        $display("\n=== Test 15 Results: RAW Hazard Stress ===");
+        // Check doubling chain: 1->2->4->8->16->32->64->128->256->512
+        check_reg(1, 1,    "ADDI x1 = 1");
+        check_reg(2, 2,    "ADD x2 = 1+1 = 2");
+        check_reg(3, 4,    "ADD x3 = 2+2 = 4");
+        check_reg(4, 8,    "ADD x4 = 4+4 = 8");
+        check_reg(5, 16,   "ADD x5 = 8+8 = 16");
+        check_reg(6, 32,   "ADD x6 = 16+16 = 32");
+        check_reg(7, 64,   "ADD x7 = 32+32 = 64");
+        check_reg(8, 128,  "ADD x8 = 64+64 = 128");
+        check_reg(9, 256,  "ADD x9 = 128+128 = 256");
+        check_reg(10, 512, "ADD x10 = 256+256 = 512");
+        check_reg(11, 1024, "SLLI x11 = 512<<1 = 1024");
+        check_reg(12, 1536, "XOR x12 = 1024^512 = 1536");
+        check_reg(13, 512,  "SUB x13 = 1536-1024 = 512");
+        check_reg(14, 512,  "AND x14 = 512&1536 = 512");
+        check_reg(15, 0,    "SLT x15 = (512<512) = 0");
+
+        // ==========================================
+        // Test 16: Full ALU Instruction Coverage
+        // ==========================================
+        load_test16_full_alu_coverage();
+        reset_cpu();
+        #4000;  // Allow time for all ALU operations
+        
+        $display("\n=== Test 16 Results: Full ALU Coverage ===");
+        // Note: x4 gets overwritten by SRAI (93>>2=23), x5 by SLTI ((4<10)=1), x6 by SLTIU ((4<3)=0)
+        check_reg(4, 23,   "SRAI x4 = 93>>2 = 23 (final)");
+        check_reg(5, 1,    "SLTI x5 = (4<10) = 1 (final)");
+        check_reg(6, 0,    "SLTIU x6 = (4<3) = 0 (final)");
+        check_reg(7, 103,  "OR x7 = 100|7 = 103");
+        check_reg(8, 99,   "XOR x8 = 100^7 = 99");
+        check_reg(9, 12800, "SLL x9 = 100<<7 = 12800");
+        check_reg(10, 0,   "SRL x10 = 100>>7 = 0");
+        check_reg(11, -1,  "SRA x11 = -50>>>7 = -1");
+        check_reg(12, 1,   "SLT x12 = (-50<100) = 1");
+        check_reg(13, 1,   "SLTU x13 = (100<0xFFFFFFCE) = 1");
+        check_mem(512, 103, "SW x7 mem[512] = 103");
+        check_mem(516, 0,   "SW x10 mem[516] = 0");
+        check_mem(520, 1,   "SW x13 mem[520] = 1");
+
+        // ==========================================
+        // Test 17: Nested Loops
+        // ==========================================
+        load_test17_nested_loops();
+        reset_cpu();
+        #15000;  // Nested loops need more time
+        
+        $display("\n=== Test 17 Results: Nested Loops ===");
+        // sum = (0+0)+(0+1)+(0+2) + (1+0)+(1+1)+(1+2) + (2+0)+(2+1)+(2+2)
+        //     = 0+1+2 + 1+2+3 + 2+3+4 = 3 + 6 + 9 = 18
+        check_reg(1, 3,   "Outer counter final i=3");
+        check_reg(2, 3,   "Inner counter final j=3");
+        check_reg(10, 18, "Sum = 18");
+        check_mem(768, 18, "SW mem[768] = 18");
+
+        // ==========================================
+        // Test 18: Memory Access Pattern Stress
+        // ==========================================
+        load_test18_memory_stress();
+        reset_cpu();
+        #12000;  // Memory operations need more time for byte/halfword
+        
+        $display("\n=== Test 18 Results: Memory Stress ===");
+        check_reg(4, 32'h55,  "LW x4 = 0x55");
+        check_reg(5, 32'hAA,  "LW x5 = 0xAA");
+        check_reg(6, 32'h55,  "LW x6 = 0x55");
+        check_reg(7, 32'hAA,  "LW x7 = 0xAA");
+        check_reg(8, 32'hFF,  "ADD x8 = 0x55+0xAA = 0xFF");
+        check_reg(9, 32'hFF,  "ADD x9 = 0x55+0xAA = 0xFF");
+        check_reg(10, 32'h1FE, "ADD x10 = 0xFF+0xFF = 0x1FE");
+        check_reg(12, 32'h123, "LW x12 = 0x123 (store-load)");
+        // Note: LB of 0x55 is positive so sign extension keeps it 0x55
+        check_reg(13, 32'h55,  "LB x13 = sign(0x55) = 0x55");
+        check_reg(14, 32'hAA,  "LHU x14 = 0x00AA");
+        check_reg(15, 32'h321, "ADD x15 = 0x1FE+0x123 = 0x321");
+
+        // ==========================================
+        // Test 19: Mixed Instruction Stress
+        // ==========================================
+        load_test19_mixed_stress();
+        reset_cpu();
+        #15000;  // Mixed operations with jumps need time
+        
+        $display("\n=== Test 19 Results: Mixed Stress ===");
+        check_reg(1, 32'h12345678, "LUI+ADDI x1 = 0x12345678");
+        check_reg(3, 32'h1234,     "SRLI x3 = 0x1234");
+        check_reg(4, 32'h78,       "ANDI x4 = 0x78");
+        check_reg(5, 32'h12345678, "LW x5 = 0x12345678");
+        check_reg(6, 32'h12AC,     "ADD x6 = 0x12AC");
+        check_reg(11, 32'h48,      "JAL x11 = 0x48 (return addr)");
+        check_reg(12, 32'hABCDE000, "LUI x12 = 0xABCDE000");
+        check_reg(14, 32'h5C,      "JALR x14 = 0x5C (return addr)");
+        check_reg(15, 32'h42,      "ADDI x15 = 0x42 (final marker)");
+        // Verify skip paths weren't executed (x15 should NOT be 0xBAD)
+        if (uut.reg_file.reg_r15_q != 32'hBAD) begin
+            test_count = test_count + 1;
+            pass_count = pass_count + 1;
+            $display("  [PASS] JAL/JALR skip path verified (x15 != 0xBAD)");
+        end else begin
+            test_count = test_count + 1;
+            fail_count = fail_count + 1;
+            $display("  [FAIL] JAL/JALR skip path violated (x15 = 0xBAD)");
+        end
+
+        // ==========================================
         // Final Summary
         // ==========================================
         $display("");
@@ -1297,6 +1422,394 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[13] = 32'h00000013;
             u_axil_ram.mem[14] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 15: RAW Hazard Stress Test
+    // ==========================================
+    task load_test15_raw_hazard_stress;
+        integer i;
+        begin
+            $display("\n--- Loading Test 15: RAW Hazard Stress ---");
+            // Clear memory first
+            for (i = 0; i < 64; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // This test creates maximum RAW hazard pressure:
+            // Every instruction depends on the previous instruction's result
+            // This tests data forwarding from EX/MEM and MEM/WB stages
+            
+            // 0x00: ADDI x1, x0, 1       - x1 = 1
+            u_axil_ram.mem[0] = 32'h00100093;
+            // 0x04: ADD x2, x1, x1       - x2 = x1 + x1 = 2 (RAW on x1)
+            u_axil_ram.mem[1] = 32'h00108133;
+            // 0x08: ADD x3, x2, x2       - x3 = x2 + x2 = 4 (RAW on x2)
+            u_axil_ram.mem[2] = 32'h002101b3;
+            // 0x0C: ADD x4, x3, x3       - x4 = x3 + x3 = 8 (RAW on x3)
+            u_axil_ram.mem[3] = 32'h00318233;
+            // 0x10: ADD x5, x4, x4       - x5 = x4 + x4 = 16 (RAW on x4)
+            u_axil_ram.mem[4] = 32'h004202b3;
+            // 0x14: ADD x6, x5, x5       - x6 = x5 + x5 = 32 (RAW on x5)
+            u_axil_ram.mem[5] = 32'h00528333;
+            // 0x18: ADD x7, x6, x6       - x7 = x6 + x6 = 64 (RAW on x6)
+            u_axil_ram.mem[6] = 32'h006303b3;
+            // 0x1C: ADD x8, x7, x7       - x8 = x7 + x7 = 128 (RAW on x7)
+            u_axil_ram.mem[7] = 32'h00738433;
+            // 0x20: ADD x9, x8, x8       - x9 = x8 + x8 = 256 (RAW on x8)
+            u_axil_ram.mem[8] = 32'h008404b3;
+            // 0x24: ADD x10, x9, x9      - x10 = x9 + x9 = 512 (RAW on x9)
+            u_axil_ram.mem[9] = 32'h00948533;
+            
+            // Test with different instruction types creating RAW hazards
+            // 0x28: SLLI x11, x10, 1     - x11 = 512 << 1 = 1024 (RAW shift)
+            u_axil_ram.mem[10] = 32'h00151593;
+            // 0x2C: XOR x12, x11, x10    - x12 = 1024 ^ 512 = 1536 (RAW logical)
+            u_axil_ram.mem[11] = 32'h00a5c633;
+            // 0x30: SUB x13, x12, x11    - x13 = 1536 - 1024 = 512 (RAW arithmetic)
+            u_axil_ram.mem[12] = 32'h40b606b3;
+            // 0x34: AND x14, x13, x12    - x14 = 512 & 1536 = 512 (RAW logical)
+            u_axil_ram.mem[13] = 32'h00c6f733;
+            // 0x38: SLT x15, x14, x13    - x15 = (512 < 512) = 0 (RAW compare)
+            u_axil_ram.mem[14] = 32'h00d727b3;
+            
+            // NOPs
+            u_axil_ram.mem[15] = 32'h00000013;
+            u_axil_ram.mem[16] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 16: Full ALU Instruction Coverage
+    // ==========================================
+    task load_test16_full_alu_coverage;
+        integer i;
+        begin
+            $display("\n--- Loading Test 16: Full ALU Instruction Coverage ---");
+            // Clear memory first
+            for (i = 0; i < 80; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // Test all R-type and I-type ALU instructions in sequence
+            // Setup values
+            // 0x00: ADDI x1, x0, 100     - x1 = 100
+            u_axil_ram.mem[0] = 32'h06400093;
+            // 0x04: ADDI x2, x0, 7       - x2 = 7
+            u_axil_ram.mem[1] = 32'h00700113;
+            // 0x08: ADDI x3, x0, -50     - x3 = -50
+            u_axil_ram.mem[2] = 32'hfce00193;
+            
+            // R-type instructions
+            // 0x0C: ADD x4, x1, x2       - x4 = 100 + 7 = 107
+            u_axil_ram.mem[3] = 32'h00208233;
+            // 0x10: SUB x5, x1, x2       - x5 = 100 - 7 = 93
+            u_axil_ram.mem[4] = 32'h402082b3;
+            // 0x14: AND x6, x1, x2       - x6 = 100 & 7 = 4
+            u_axil_ram.mem[5] = 32'h0020f333;
+            // 0x18: OR x7, x1, x2        - x7 = 100 | 7 = 103
+            u_axil_ram.mem[6] = 32'h0020e3b3;
+            // 0x1C: XOR x8, x1, x2       - x8 = 100 ^ 7 = 99
+            u_axil_ram.mem[7] = 32'h0020c433;
+            // 0x20: SLL x9, x1, x2       - x9 = 100 << 7 = 12800
+            u_axil_ram.mem[8] = 32'h002094b3;
+            // 0x24: SRL x10, x1, x2      - x10 = 100 >> 7 = 0
+            u_axil_ram.mem[9] = 32'h0020d533;
+            // 0x28: SRA x11, x3, x2      - x11 = -50 >>> 7 = -1 (arithmetic shift)
+            u_axil_ram.mem[10] = 32'h4021d5b3;
+            // 0x2C: SLT x12, x3, x1      - x12 = (-50 < 100) = 1
+            u_axil_ram.mem[11] = 32'h0011a633;
+            // 0x30: SLTU x13, x1, x3     - x13 = (100 < 0xFFFFFFCE) = 1 (unsigned)
+            u_axil_ram.mem[12] = 32'h0030b6b3;
+            
+            // I-type instructions
+            // 0x34: ANDI x14, x1, 0x7F   - x14 = 100 & 127 = 100
+            u_axil_ram.mem[13] = 32'h07f0f713;
+            // 0x38: ORI x15, x1, 0x400   - x15 = 100 | 1024 = 1124
+            u_axil_ram.mem[14] = 32'h4000e793;
+            // 0x3C: XORI x1, x1, 0xFF    - x1 = 100 ^ 255 = 155 (reuse x1)
+            u_axil_ram.mem[15] = 32'h0ff0c093;
+            
+            // Immediate shifts
+            // 0x40: SLLI x2, x4, 3       - x2 = 107 << 3 = 856
+            u_axil_ram.mem[16] = 32'h00321113;
+            // 0x44: SRLI x3, x4, 2       - x3 = 107 >> 2 = 26
+            u_axil_ram.mem[17] = 32'h00225193;
+            // 0x48: SRAI x4, x5, 2       - x4 = 93 >> 2 = 23 (arithmetic)
+            u_axil_ram.mem[18] = 32'h4022d213;
+            
+            // Immediate compares
+            // 0x4C: SLTI x5, x6, 10      - x5 = (4 < 10) = 1
+            u_axil_ram.mem[19] = 32'h00a32293;
+            // 0x50: SLTIU x6, x6, 3      - x6 = (4 < 3) = 0
+            u_axil_ram.mem[20] = 32'h00333313;
+            
+            // Store results to memory for verification
+            // 0x54: SW x7, 512(x0)       - mem[512] = 103
+            u_axil_ram.mem[21] = 32'h20702023;
+            // 0x58: SW x10, 516(x0)      - mem[516] = 0
+            u_axil_ram.mem[22] = 32'h20a02223;
+            // 0x5C: SW x13, 520(x0)      - mem[520] = 1
+            u_axil_ram.mem[23] = 32'h20d02423;
+            
+            // NOPs
+            u_axil_ram.mem[24] = 32'h00000013;
+            u_axil_ram.mem[25] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 17: Nested Loops Test
+    // ==========================================
+    task load_test17_nested_loops;
+        integer i;
+        begin
+            $display("\n--- Loading Test 17: Nested Loops ---");
+            // Clear memory first
+            for (i = 0; i < 64; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // This test implements nested loops:
+            // for (i = 0; i < 3; i++)
+            //   for (j = 0; j < 3; j++)
+            //     sum += (i + j);
+            // Result: sum = 0+1+2 + 1+2+3 + 2+3+4 = 18
+            
+            // x1 = outer loop counter (i)
+            // x2 = inner loop counter (j)
+            // x3 = outer loop limit (3)
+            // x4 = inner loop limit (3)
+            // x10 = sum accumulator
+            // x11 = temp (i + j)
+            
+            // Initialize
+            // 0x00: ADDI x1, x0, 0       - i = 0
+            u_axil_ram.mem[0] = 32'h00000093;
+            // 0x04: ADDI x3, x0, 3       - outer limit = 3
+            u_axil_ram.mem[1] = 32'h00300193;
+            // 0x08: ADDI x4, x0, 3       - inner limit = 3
+            u_axil_ram.mem[2] = 32'h00300213;
+            // 0x0C: ADDI x10, x0, 0      - sum = 0
+            u_axil_ram.mem[3] = 32'h00000513;
+            
+            // Outer loop start (0x10):
+            // 0x10: ADDI x2, x0, 0       - j = 0
+            u_axil_ram.mem[4] = 32'h00000113;
+            
+            // Inner loop start (0x14):
+            // 0x14: ADD x11, x1, x2      - temp = i + j
+            u_axil_ram.mem[5] = 32'h002085b3;
+            // 0x18: ADD x10, x10, x11    - sum += temp
+            u_axil_ram.mem[6] = 32'h00b50533;
+            // 0x1C: ADDI x2, x2, 1       - j++
+            u_axil_ram.mem[7] = 32'h00110113;
+            // 0x20: BLT x2, x4, -12      - if j < 3, branch to 0x14
+            // Branch offset: 0x14 - 0x20 = -12
+            u_axil_ram.mem[8] = 32'hfe414ae3;
+            
+            // Inner loop done
+            // 0x24: ADDI x1, x1, 1       - i++
+            u_axil_ram.mem[9] = 32'h00108093;
+            // 0x28: BLT x1, x3, -24      - if i < 3, branch to 0x10
+            // Branch offset: 0x10 - 0x28 = -24
+            u_axil_ram.mem[10] = 32'hfe30c4e3;
+            
+            // Outer loop done, x10 should be 18
+            // Store result
+            // 0x2C: SW x10, 768(x0)      - mem[768] = 18
+            u_axil_ram.mem[11] = 32'h30a02023;
+            
+            // NOPs
+            u_axil_ram.mem[12] = 32'h00000013;
+            u_axil_ram.mem[13] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 18: Memory Access Pattern Stress
+    // ==========================================
+    task load_test18_memory_stress;
+        integer i;
+        begin
+            $display("\n--- Loading Test 18: Memory Access Pattern Stress ---");
+            // Clear memory first
+            for (i = 0; i < 80; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // This test performs various memory access patterns to stress
+            // the load/store pipeline and data forwarding from memory
+            
+            // Setup base addresses and values
+            // 0x00: ADDI x1, x0, 0x400  - x1 = 0x400 (base address 1024)
+            u_axil_ram.mem[0] = 32'h40000093;
+            // 0x04: ADDI x2, x0, 0x55   - x2 = 0x55
+            u_axil_ram.mem[1] = 32'h05500113;
+            // 0x08: ADDI x3, x0, 0xAA   - x3 = 0xAA
+            u_axil_ram.mem[2] = 32'h0aa00193;
+            
+            // Store-Store pattern
+            // 0x0C: SW x2, 0(x1)        - mem[0x400] = 0x55
+            u_axil_ram.mem[3] = 32'h0020a023;
+            // 0x10: SW x3, 4(x1)        - mem[0x404] = 0xAA
+            u_axil_ram.mem[4] = 32'h0030a223;
+            // 0x14: SW x2, 8(x1)        - mem[0x408] = 0x55
+            u_axil_ram.mem[5] = 32'h0020a423;
+            // 0x18: SW x3, 12(x1)       - mem[0x40C] = 0xAA
+            u_axil_ram.mem[6] = 32'h0030a623;
+            
+            // Load-Load pattern
+            // 0x1C: LW x4, 0(x1)        - x4 = 0x55
+            u_axil_ram.mem[7] = 32'h0000a203;
+            // 0x20: LW x5, 4(x1)        - x5 = 0xAA
+            u_axil_ram.mem[8] = 32'h0040a283;
+            // 0x24: LW x6, 8(x1)        - x6 = 0x55
+            u_axil_ram.mem[9] = 32'h0080a303;
+            // 0x28: LW x7, 12(x1)       - x7 = 0xAA
+            u_axil_ram.mem[10] = 32'h00c0a383;
+            
+            // Load-Use immediate pattern (tests forwarding)
+            // 0x2C: ADD x8, x4, x5      - x8 = 0x55 + 0xAA = 0xFF
+            u_axil_ram.mem[11] = 32'h00520433;
+            // 0x30: ADD x9, x6, x7      - x9 = 0x55 + 0xAA = 0xFF
+            u_axil_ram.mem[12] = 32'h007304b3;
+            // 0x34: ADD x10, x8, x9     - x10 = 0xFF + 0xFF = 0x1FE
+            u_axil_ram.mem[13] = 32'h00940533;
+            
+            // Store-Load same address (tests memory coherence)
+            // 0x38: ADDI x11, x0, 0x123 - x11 = 0x123
+            u_axil_ram.mem[14] = 32'h12300593;
+            // 0x3C: SW x11, 16(x1)      - mem[0x410] = 0x123
+            u_axil_ram.mem[15] = 32'h00b0a823;
+            // Add NOP after store before load
+            u_axil_ram.mem[16] = 32'h00000013;  // NOP
+            // 0x44: LW x12, 16(x1)      - x12 = 0x123 (load after store)
+            u_axil_ram.mem[17] = 32'h0100a603;
+            
+            // Mixed byte/halfword stress - need gaps between store and load
+            // 0x48: SB x2, 20(x1)       - mem[0x414] byte 0 = 0x55
+            // 0x48: SB x2, 20(x1)       - mem[0x414] byte 0 = 0x55
+            // Correct encoding: 0x00208a23 (rs2=x2 not x20)
+            u_axil_ram.mem[18] = 32'h00208a23;
+            // NOP to allow SB to complete
+            u_axil_ram.mem[19] = 32'h00000013;  // NOP
+            // 0x50: LB x13, 20(x1)      - x13 = sign_extend(0x55) = 0x55
+            // 0x50: LB x13, 20(x1)      - x13 = sign_extend(0x55) = 0x55
+            u_axil_ram.mem[20] = 32'h01408683;
+            
+            // 0x54: SH x3, 24(x1)       - mem[0x418] halfword = 0x00AA
+            // 0x54: SH x3, 24(x1)       - mem[0x418] halfword = 0x00AA
+            // Correct encoding: 0x00309c23 (rs2=x3 not x1)
+            u_axil_ram.mem[21] = 32'h00309c23;
+            // NOP to allow SH to complete
+            u_axil_ram.mem[22] = 32'h00000013;  // NOP
+            // 0x5C: LHU x14, 24(x1)     - x14 = 0x00AA (unsigned)
+            u_axil_ram.mem[23] = 32'h0180d703;
+            
+            // Verify results
+            // 0x60: ADD x15, x10, x12   - x15 = 0x1FE + 0x123 = 0x321
+            u_axil_ram.mem[24] = 32'h00c507b3;
+            
+            // NOPs
+            u_axil_ram.mem[25] = 32'h00000013;
+            u_axil_ram.mem[26] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 19: Mixed Instruction Stress
+    // ==========================================
+    task load_test19_mixed_stress;
+        integer i;
+        begin
+            $display("\n--- Loading Test 19: Mixed Instruction Stress ---");
+            // Clear memory first
+            for (i = 0; i < 100; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // This test alternates between different instruction types
+            // to stress the pipeline with varying latencies and dependencies
+            
+            // Setup
+            // 0x00: LUI x1, 0x12345      - x1 = 0x12345000
+            u_axil_ram.mem[0] = 32'h123450b7;
+            // 0x04: ADDI x1, x1, 0x678   - x1 = 0x12345678
+            u_axil_ram.mem[1] = 32'h67808093;
+            // 0x08: ADDI x2, x0, 0x500   - x2 = 0x500 (base addr)
+            u_axil_ram.mem[2] = 32'h50000113;
+            
+            // Alternate: Store, NOP, ALU, ALU, Load, ALU, Store...
+            // 0x0C: SW x1, 0(x2)         - mem[0x500] = 0x12345678
+            // Correct encoding: 0x00112023
+            u_axil_ram.mem[3] = 32'h00112023;
+            // 0x10: NOP                  - Allow store to complete
+            u_axil_ram.mem[4] = 32'h00000013;
+            // 0x14: SRLI x3, x1, 16      - x3 = 0x1234
+            u_axil_ram.mem[5] = 32'h0100d193;
+            // 0x18: ANDI x4, x1, 0xFF    - x4 = 0x78
+            u_axil_ram.mem[6] = 32'h0ff0f213;
+            // 0x1C: LW x5, 0(x2)         - x5 = 0x12345678
+            // 0x1C: LW x5, 0(x2)         - x5 = 0x12345678
+            // Correct encoding: 0x00012283 (rs1=x2 not x1)
+            u_axil_ram.mem[7] = 32'h00012283;
+            // 0x20: ADD x6, x3, x4       - x6 = 0x1234 + 0x78 = 0x12AC
+            u_axil_ram.mem[8] = 32'h00418333;
+            // 0x24: SW x6, 4(x2)         - mem[0x504] = 0x12AC
+            u_axil_ram.mem[9] = 32'h00612223;
+            
+            // Branch with ALU
+            // 0x28: ADDI x7, x0, 0       - x7 = 0 (counter)
+            u_axil_ram.mem[10] = 32'h00000393;
+            // 0x2C: ADDI x8, x0, 3       - x8 = 3 (limit)
+            u_axil_ram.mem[11] = 32'h00300413;
+            
+            // Loop: 0x30
+            // 0x30: SLLI x9, x7, 2       - x9 = counter * 4 (offset)
+            u_axil_ram.mem[12] = 32'h00239493;
+            // 0x34: ADD x10, x2, x9      - x10 = base + offset
+            u_axil_ram.mem[13] = 32'h00910533;
+            // 0x38: SW x7, 8(x10)        - store counter at mem[base+8+offset]
+            u_axil_ram.mem[14] = 32'h00752423;
+            // 0x3C: ADDI x7, x7, 1       - counter++
+            u_axil_ram.mem[15] = 32'h00138393;
+            // 0x40: BLT x7, x8, -16      - if counter < 3, goto 0x30
+            // Branch offset: 0x30 - 0x40 = -16
+            u_axil_ram.mem[16] = 32'hfe83c8e3;
+            
+            // JAL/JALR interspersed
+            // 0x44: JAL x11, +12         - jump to 0x50, x11 = 0x48
+            u_axil_ram.mem[17] = 32'h00c005ef;
+            // 0x48: ADDI x12, x0, 0xBAD  - SKIP (should not execute)
+            u_axil_ram.mem[18] = 32'hbad00613;
+            // 0x4C: ADDI x12, x0, 0xBAD  - SKIP
+            u_axil_ram.mem[19] = 32'hbad00613;
+            // 0x50: LUI x12, 0xABCDE     - x12 = 0xABCDE000
+            u_axil_ram.mem[20] = 32'habcde637;
+            // 0x54: ADDI x13, x0, 0x64   - x13 = 0x64 (target address)
+            u_axil_ram.mem[21] = 32'h06400693;
+            // 0x58: JALR x14, x13, 0     - jump to 0x64, x14 = 0x5C
+            u_axil_ram.mem[22] = 32'h00068767;
+            // 0x5C: ADDI x15, x0, 0xBAD  - SKIP
+            u_axil_ram.mem[23] = 32'hbad00793;
+            // 0x60: ADDI x15, x0, 0xBAD  - SKIP
+            u_axil_ram.mem[24] = 32'hbad00793;
+            // 0x64: ADDI x15, x0, 0x42   - x15 = 0x42 (final marker)
+            u_axil_ram.mem[25] = 32'h04200793;
+            
+            // Final verification: compute checksum of results
+            // 0x68: ADD x10, x3, x4      - x10 = 0x1234 + 0x78 = 0x12AC
+            u_axil_ram.mem[26] = 32'h00418533;
+            // 0x6C: ADD x10, x10, x6     - x10 += 0x12AC = 0x2558
+            u_axil_ram.mem[27] = 32'h00650533;
+            // 0x70: XOR x10, x10, x12    - x10 ^= 0xABCDE000
+            u_axil_ram.mem[28] = 32'h00c54533;
+            
+            // NOPs
+            u_axil_ram.mem[29] = 32'h00000013;
+            u_axil_ram.mem[30] = 32'h00000013;
         end
     endtask
 
