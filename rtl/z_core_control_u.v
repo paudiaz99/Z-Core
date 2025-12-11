@@ -78,16 +78,6 @@ reg                   mem_req_comb;
 assign mem_req = mem_req_comb;
 assign mem_wen = mem_wen_comb;
 
-// Previous always @* block for mem_addr removed (redundant)
-
-
-// We need to re-declare mem_addr as reg locally for invalidation?
-// The port is reg [ADDR_WIDTH-1:0] mem_addr; defined above.
-// Wait, port definition:
-// reg  [ADDR_WIDTH-1:0] mem_addr;
-// So I can't assign it in always @* AND have it be a reg?
-// Verilog allow reg to be driven by always @*.
-// But I need to remove "reg mem_req" etc from top.
 
 reg  [31:0]           mem_data_out_r;
 reg  [STRB_WIDTH-1:0] mem_wstrb_r;
@@ -143,13 +133,11 @@ reg [31:0] PC;
 reg [31:0] if_id_pc;
 reg [31:0] if_id_ir;
 reg        if_id_valid;
-reg        if_id_poisoned;  // Instruction should not write back
 
 // --- Skid Buffer for Fetch ---
 reg [31:0] fetch_buffer_ir;
 reg [31:0] fetch_buffer_pc;
 reg        fetch_buffer_valid;
-reg        fetch_buffer_poisoned;
 
 // --- ID/EX Pipeline Register ---
 reg [31:0] id_ex_pc;
@@ -166,7 +154,6 @@ reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc;
 reg        id_ex_is_r_type, id_ex_is_i_alu;
 reg        id_ex_reg_write;
 reg        id_ex_valid;
-reg        id_ex_poisoned;  // Instruction should not write back
 
 // --- EX/MEM Pipeline Register ---
 reg [31:0] ex_mem_pc;
@@ -177,7 +164,6 @@ reg [2:0]  ex_mem_funct3;
 reg        ex_mem_is_load, ex_mem_is_store;
 reg        ex_mem_reg_write;
 reg        ex_mem_valid;
-reg        ex_mem_poisoned;  // Instruction should not write back
 
 // --- MEM/WB Pipeline Register ---
 reg [31:0] mem_wb_result;
@@ -185,7 +171,6 @@ reg [31:0] mem_wb_pc;  // PC for debug tracing
 reg [4:0]  mem_wb_rd;
 reg        mem_wb_reg_write;
 reg        mem_wb_valid;
-reg        mem_wb_poisoned;  // Instruction should not write back
 
 // ##################################################
 //             INSTRUCTION DECODER (uses z_core_decoder)
@@ -320,14 +305,14 @@ wire dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id
 wire dec_is_ebreak = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
 
 // Halt signal for RISCOF compliance testing (ECALL/EBREAK detection in ID stage)
-assign halt = if_id_valid && !if_id_poisoned && (dec_is_ecall || dec_is_ebreak);
+assign halt = if_id_valid && (dec_is_ecall || dec_is_ebreak);
 
 
 // Need to stall EX stage if:
 // 1. MEM stage has pending operation waiting for completion (mem_stall)
 // 2. EX/MEM has load/store but can't start yet (waiting for AXI bus to be free)
 wire ex_stall = mem_stall || 
-                (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !ex_mem_poisoned && 
+                (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
                  (!mem_op_pending || mem_busy));
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
@@ -363,7 +348,6 @@ reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch complet
 reg mem_op_pending;
 reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
 reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
-reg poison_next_fetch;  // Set when flush happens, poison the NEXT instruction that completes fetch
 
 always @(posedge clk) begin
     if (~rstn) begin
@@ -375,23 +359,18 @@ always @(posedge clk) begin
         if_id_valid <= 1'b0;
         squash_now <= 1'b0;
         flush_r <= 1'b0;
-        if_id_poisoned <= 1'b0;
-        poison_next_fetch <= 1'b0;
         fetch_buffer_valid <= 1'b0;
         fetch_buffer_ir <= 32'b0;
         fetch_buffer_pc <= 32'b0;
-        fetch_buffer_poisoned <= 1'b0;
     end else begin
         if (flush) begin
             // Flush: invalidate IF/ID (delay slot) and redirect PC to target
             // The delay slot is invalidated by if_id_valid=0
-            // The TARGET should NOT be poisoned - it should execute normally
+            // Flush: invalidate IF/ID (delay slot) and redirect PC to target
             if_id_valid <= 1'b0;
             if_id_ir <= 32'h00000013;
-            if_id_poisoned <= 1'b0;  // Clear poisoned for any garbage instruction
             // Also invalidate the fetch buffer to prevent stale instructions from being loaded
             fetch_buffer_valid <= 1'b0;
-            // Do NOT set poison_next_fetch - TARGET should execute
             PC <= next_pc;
             fetch_wait <= 1'b0;
             // mem_req cleanup removed
@@ -413,7 +392,6 @@ always @(posedge clk) begin
                 if_id_ir <= fetch_buffer_ir;
                 if_id_pc <= fetch_buffer_pc;
                 if_id_valid <= 1'b1;
-                if_id_poisoned <= fetch_buffer_poisoned;
                 fetch_buffer_valid <= 1'b0;
             end
             
@@ -424,7 +402,7 @@ always @(posedge clk) begin
             // 4. Either buffer is empty OR (buffer will be emptied this cycle because !stall)
             // 5. EX stage does not need memory (prevent structural hazard)
             if (!fetch_wait && !mem_op_pending && !mem_busy &&
-                !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !ex_mem_poisoned) && 
+                !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
                 (!fetch_buffer_valid || !stall)) begin
                  // Start fetch - capture the PC we're fetching from
                  fetch_wait <= 1'b1;
@@ -436,17 +414,14 @@ always @(posedge clk) begin
                     if_id_ir <= mem_rdata;
                     if_id_pc <= fetch_pc;  // Use the PC that was captured when fetch started
                     if_id_valid <= 1'b1;
-                    if_id_poisoned <= poison_next_fetch;
                 end else begin
                     // Pipeline stalled or buffer full: load to buffer
                     fetch_buffer_ir <= mem_rdata;
                     fetch_buffer_pc <= fetch_pc;  // Use the PC that was captured when fetch started
                     fetch_buffer_valid <= 1'b1;
-                    fetch_buffer_poisoned <= poison_next_fetch;
                 end
                 
                 // Advance PC from the address we just fetched and clear flags
-                poison_next_fetch <= 1'b0;
                 PC <= fetch_pc + 4;
                 fetch_wait <= 1'b0;
                 // mem_req removal
@@ -497,7 +472,6 @@ always @(posedge clk) begin
         id_ex_is_r_type <= 1'b0;
         id_ex_is_i_alu <= 1'b0;
         id_ex_reg_write <= 1'b0;
-        id_ex_poisoned <= 1'b0;
     end else if (flush || load_use_hazard) begin
         // Insert bubble - flush handles current cycle squash
         id_ex_valid <= 1'b0;
@@ -509,14 +483,12 @@ always @(posedge clk) begin
         id_ex_is_jalr <= 1'b0;
         id_ex_is_lui <= 1'b0;
         id_ex_is_auipc <= 1'b0;
-        id_ex_poisoned <= 1'b0;  // Clear poisoned bit for bubble
         // Set squash_now for delayed squash on next cycle
         if (flush) squash_now <= 1'b1;
     end else if (squash_now) begin
         // Squash instruction that was in IF/ID when jump entered ID/EX
         // Don't load if_id into id_ex, just invalidate
         id_ex_valid <= 1'b0;
-        id_ex_poisoned <= 1'b0;
         squash_now <= 1'b0;  // Clear after single use
     end else if (!stall && if_id_valid) begin
         id_ex_pc <= if_id_pc;
@@ -539,9 +511,8 @@ always @(posedge clk) begin
         id_ex_is_i_alu <= dec_is_i_alu;
         id_ex_reg_write <= dec_reg_write;
         id_ex_valid <= 1'b1;
-        id_ex_poisoned <= if_id_poisoned;  // Propagate poisoned bit
         // Only set squash_now for JAL/JALR detected in if_id (unconditional jumps)
-        // Branch squash is handled by flush -> squash_now path (lines 415-420)
+        // Branch squash is handled by flush -> squash_now path
         squash_now <= if_id_is_jump;
     end else if (!stall) begin
         id_ex_valid <= 1'b0;
@@ -572,7 +543,6 @@ always @(posedge clk) begin
         ex_mem_is_load <= 1'b0;
         ex_mem_is_store <= 1'b0;
         ex_mem_reg_write <= 1'b0;
-        ex_mem_poisoned <= 1'b0;
     end else if (!mem_stall && !ex_stall) begin
         ex_mem_pc <= id_ex_pc;
         ex_mem_alu_result <= ex_result;
@@ -583,7 +553,6 @@ always @(posedge clk) begin
         ex_mem_is_store <= id_ex_is_store;
         ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store;
         ex_mem_valid <= id_ex_valid && !id_ex_is_branch;
-        ex_mem_poisoned <= id_ex_poisoned;  // Propagate poisoned bit
     end
 end
 
@@ -627,12 +596,11 @@ always @(posedge clk) begin
         mem_data_out_r <= 32'b0;
         mem_wstrb_r <= 4'b1111;
     end else begin
-        // Don't do memory operations for poisoned instructions
         // Start mem_op_pending when:
         // - Not currently pending
         // - mem_busy is false (AXI bus available - either idle or just completed)
         // This allows stores to be queued while waiting for fetch to complete
-        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !ex_mem_poisoned && !mem_busy) begin
+        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy) begin
             // mem_addr assignment removed
             // mem_wen assignment removed
             // mem_req assignment removed
@@ -674,14 +642,11 @@ always @(posedge clk) begin
         mem_wb_pc <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
-        mem_wb_poisoned <= 1'b0;
     end else if (!ex_stall || (mem_op_pending && mem_ready)) begin
         mem_wb_rd <= ex_mem_rd;
         mem_wb_pc <= ex_mem_pc;
-        // Don't write back for poisoned instructions
-        mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store && !ex_mem_poisoned;
+        mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
         mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
-        mem_wb_poisoned <= ex_mem_poisoned;  // Propagate for debugging
         
         if (ex_mem_is_load && mem_op_pending && mem_ready) begin
             mem_wb_result <= mem_load_data;
@@ -695,7 +660,6 @@ always @(posedge clk) begin
         mem_wb_valid <= 1'b0;
         mem_wb_reg_write <= 1'b0; // IMPORTANT: Must clear to prevent incorrect forwarding
         mem_wb_rd <= 5'b0;        // Safer to clear destination too
-        mem_wb_poisoned <= 1'b0;
     end
 end
 
@@ -707,32 +671,16 @@ end
 //           STATE FOR TESTBENCH COMPATIBILITY
 // ##################################################
 
-localparam N_STATES = 6;
+localparam N_STATES = 5;
 localparam STATE_FETCH_b = 0;
-localparam STATE_FETCH_WAIT_b = 1;
-localparam STATE_DECODE_b = 2;
-localparam STATE_EXECUTE_b = 3;
-localparam STATE_MEM_b = 4;
-localparam STATE_WRITE_b = 5;
+localparam STATE_DECODE_b = 1;
+localparam STATE_EXECUTE_b = 2;
+localparam STATE_MEM_b = 3;
+localparam STATE_WRITE_b = 4;
 
 reg [N_STATES-1:0] state;
 
-always @(posedge clk) begin
-    if (~rstn)
-        state <= 6'b000001;
-    else if (mem_wb_valid)
-        state <= 6'b100000;
-    else if (mem_op_pending)
-        state <= 6'b010000;
-    else if (ex_mem_valid)
-        state <= 6'b001000;
-    else if (id_ex_valid)
-        state <= 6'b000100;
-    else if (fetch_wait)
-        state <= 6'b000010;
-    else
-        state <= 6'b000001;
-end
+assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait};
 
 // Unified Memory Request Logic (Arbiter)
 // mem_addr is defined as reg above but driven combinationally here.

@@ -28,7 +28,7 @@ module z_core_control_u_tb;
     integer test_count = 0;
     integer pass_count = 0;
     integer fail_count = 0;
-    reg [5:0] current_state = 0;
+    reg [4:0] current_state = 0;
     real instruction_count = 0;
 
     // Interconnect Parameters
@@ -94,7 +94,7 @@ module z_core_control_u_tb;
     wire [M_COUNT-1:0]             m_axil_rvalid;
     wire [M_COUNT-1:0]             m_axil_rready;
 
-    // GPIO Signals for Bidirectional Testing
+    // GPIO Signals for Bidirectional 
     wire [N_GPIO-1:0] gpio_wiring;
     reg  [N_GPIO-1:0] gpio_test_drive;
     reg  [N_GPIO-1:0] gpio_test_en;
@@ -840,8 +840,8 @@ module z_core_control_u_tb;
     // ==========================================
     
     initial begin
-        // $dumpfile("z_core_control_u_tb.vcd");
-        // $dumpvars(0, z_core_control_u_tb);
+        $dumpfile("z_core_control_u_tb.vcd");
+        $dumpvars(0, z_core_control_u_tb);
 
         // Initialize UART testbench signals
         uart_rx_tb_drive = 1'b1;  // Idle high
@@ -1241,9 +1241,9 @@ module z_core_control_u_tb;
             $display("║              ✗ SOME TESTS FAILED ✗                        ║");
         end
 
-        $display("║  Test Duration: %0d ns                                    ║", $time);
-        $display("║  Clock Cycles:  %0d                                       ║", $time / 10);
-        $display("║  Instructions:  %0d                                       ║", instruction_count);
+        $display("║  Test Duration: %0d ns                                 ║", $time);
+        $display("║  Clock Cycles:  %0d                                     ║", $time / 10);
+        $display("║  Instructions:  %0d                                      ║", instruction_count);
         $display("╚═══════════════════════════════════════════════════════════╝");
         $display("");
         

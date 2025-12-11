@@ -177,7 +177,7 @@ The WB stage writes results back to the register file:
 ```verilog
 // Register file write condition
 assign write_enable = mem_wb_valid && mem_wb_reg_write && 
-                      mem_wb_rd != 5'b0 && !mem_wb_poisoned;
+                      mem_wb_rd != 5'b0;
 assign write_data = mem_wb_result;
 assign write_addr = mem_wb_rd;
 ```
@@ -193,7 +193,7 @@ graph TD
         D2["pc: 32-bit (for debug)"]
         D3["rd: 5-bit"]
         D4["reg_write: 1-bit"]
-        D5["valid, poisoned: 1-bit"]
+        D5["valid: 1-bit"]
     end
 
     subgraph EX_MEM["EX/MEM Register"]
@@ -203,7 +203,7 @@ graph TD
         C4["rd: 5-bit"]
         C5["funct3: 3-bit"]
         C6["is_load, is_store, reg_write"]
-        C7["valid, poisoned: 1-bit"]
+        C7["valid: 1-bit"]
     end
 
     subgraph ID_EX["ID/EX Register"]
@@ -213,14 +213,13 @@ graph TD
         B4["rd, rs1_addr, rs2_addr: 5-bit"]
         B5["alu_op: 4-bit"]
         B6["is_load, is_store, is_branch, is_jal, is_jalr, ..."]
-        B7["valid, poisoned: 1-bit"]
+        B7["valid: 1-bit"]
     end
 
     subgraph IF_ID["IF/ID Register"]
         A1["pc: 32-bit"]
         A2["ir: 32-bit instruction"]
         A3["valid: 1-bit"]
-        A4["poisoned: 1-bit"]
     end
 ```
 
@@ -438,12 +437,11 @@ Target:                  IF             ID   EX   MEM  WB
 | `mem_busy` | AXI master not in IDLE state |
 | `mem_ready` | Memory operation complete, data valid |
 
-### Valid/Poisoned Bits
+### Valid Bits
 
 | Signal | Description |
 |--------|-------------|
 | `*_valid` | Stage contains valid instruction to process |
-| `*_poisoned` | Instruction should not write to register file |
 
 ---
 
