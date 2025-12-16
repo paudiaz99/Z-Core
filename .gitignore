@@ -11,3 +11,5 @@ sim/*.vvp
 # Python cache
 __pycache__/
 *.pyc
+
+.DS_Store

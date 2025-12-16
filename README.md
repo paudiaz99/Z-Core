@@ -34,32 +34,32 @@
 
 ```
                     ┌───────────────────────────────────────────────────────────────┐
-                    │                   Z-Core CPU                                  │
-                    │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐           │
-                    │  │ Decoder │  │Reg File │  │ALU Ctrl │  │   ALU   │           │
-                    │  └────┬────┘  └────┬────┘  └───┬─────┘  └────┬────┘           │
-                    │       └────────────┼───────────┼─────────────┘                │
-                    │                    │           │                              │
-                    │        ┌───►┌────────┐──►┌────────┐──►┌────────┐──►┌────────┐ │
-                    │        │    │ FETCH  │   │ DECODE │   │EXECUTE │   │WB/MEM  │ │
-                    │        │    └────────┘   └────────┘   └────────┘   └────────┘ │
-                    │        │         ▲            ▲            ▲            ▲     │
-                    │        └─────────┴────────────┴────────────┴────────────┘     │
+                    │                          Z-Core CPU                           │
+                    │     ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
+                    │     │ Decoder │  │Reg File │  │ALU Ctrl │  │   ALU   │        │
+                    │     └────┬────┘  └────┬────┘  └───┬─────┘  └────┬────┘        │
+                    │          └────────────┴───────────┴─────────────┘             │
+                    │                                                               │
+                    │          ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐    │
+                    │     ┌───►│ FETCH  │──►│ DECODE │──►│EXECUTE │──►│WB/MEM  │    │
+                    │     │    └────▲───┘   └────▲───┘   └────▲───┘   └────▲───┘    │
+                    │     │         │            │            │            │        │
+                    │     └─────────┴────────────┴────────────┴────────────┘        │
                     │                      Control Unit (Pipeline)                  │
-                    │                          │                                    │
-                    │            ┌─────────────┴──────────────┐                     │
-                    │            │      AXI-Lite Master       │                     │
-                    │            └─────────────┬──────────────┘                     │
-                    └──────────────────────────┼────────────────────────────────────┘
-                                               │ AXI-Lite Bus
-                                               ▼
-                                  ┌─────────────────────────┐
-                                  │  AXI-Lite Interconnect  │
-                                  └─┬──────────┬──────────┬─┘
-                                    │          │          │
-                ┌───────────────────▼─┐  ┌─────▼────┐  ┌──▼───────┐
-                │    Memory (RAM)     │  │   UART   │  │   GPIO   │
-                └─────────────────────┘  └──────────┘  └──────────┘
+                    │                             │                                 │
+                    │               ┌─────────────┴──────────────┐                  │
+                    │               │      AXI-Lite Master       │                  │
+                    │               └─────────────┬──────────────┘                  │
+                    └─────────────────────────────┼─────────────────────────────────┘
+                                                  │ AXI-Lite Bus
+                                                  ▼
+                                    ┌─────────────────────────┐
+                                    │  AXI-Lite Interconnect  │
+                                    └─┬──────────┬──────────┬─┘
+                                      │          │          │
+                  ┌───────────────────▼─┐  ┌─────▼────┐  ┌──▼───────┐
+                  │    Memory (RAM)     │  │   UART   │  │   GPIO   │
+                  └─────────────────────┘  └──────────┘  └──────────┘
 ```
 
 ## Supported Instructions
@@ -142,7 +142,7 @@ vvp sim/z_core_control_u_tb.vvp
 ```
 ╔═══════════════════════════════════════════════════════════╗
 ║           Z-Core RISC-V Processor Test Suite              ║
-║                   RV32I Instruction Set                    ║
+║                   RV32I Instruction Set                   ║
 ╚═══════════════════════════════════════════════════════════╝
 
 --- Loading Test 1: Arithmetic Operations ---
@@ -152,13 +152,13 @@ vvp sim/z_core_control_u_tb.vvp
   ...
 
 ╔═══════════════════════════════════════════════════════════╗
-║                    TEST SUMMARY                            ║
+║                    TEST SUMMARY                           ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  133                                         ║
-║  Passed:       133                                         ║
-║  Failed:        0                                          ║
+║  Total Tests:  133                                        ║
+║  Passed:       133                                        ║
+║  Failed:        0                                         ║
 ╠═══════════════════════════════════════════════════════════╣
-║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
+║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║
 ╚═══════════════════════════════════════════════════════════╝
 ```
 
@@ -223,6 +223,7 @@ Detailed documentation is available in the `doc/` directory:
 
 - **[Architecture](doc/Z_CORE_ARCHITECTURE.md)** - Detailed architecture overview
 - **[AXI Interface](doc/AXI_INTERFACE.md)** - Complete AXI-Lite protocol documentation
+- **[Pipeline](doc/PIPELINE.md)** - Pipeline implementation details
 - **[GPIO](doc/GPIO.md)** - Bidirectional GPIO module
 - **[UART](doc/UART.md)** - Serial UART module
 - **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
@@ -235,13 +236,13 @@ Detailed documentation is available in the `doc/` directory:
 - [x] Comprehensive testbench
 - [x] Modular IO (UART, GPIO)
 - [x] Pipelining for improved throughput
+- [ ] **FPGA synthesis and validation**
 - [ ] Branch prediction
 - [ ] M extension (multiply/divide)
 - [ ] C extension (compressed instructions)
 - [ ] Interrupt support
-- [ ] FPGA synthesis and validation
 - [ ] Cache subsystem
-- [ ] **Exception / Trap Handling** (e.g., Address Misalignment, mtvec)
+- [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
 
 ## Contributing
 
@@ -263,10 +264,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Alex Forencich](https://github.com/alexforencich) for the AXI-Lite RAM module
 - The open-source hardware community
 
+## About the Project
+
+The aim of this project is to gain a practical understanding of Computer Architecture and SoC design by building a system-on-chip. The implementation blends custom RTL, written from scratch, with established open-source modules (such as the AXI-Lite infrastructure) and utilizes AI tools to assist in development and verification. This project demonstrates the ability to architect a system, integrate third-party IP, and adopt modern engineering workflows.
+
 ---
 
 <div align="center">
 
-**Built for learning computer architecture**
+**Built for learning computer architecture and SoC design :D**
 
 </div>

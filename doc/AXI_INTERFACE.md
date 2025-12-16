@@ -7,35 +7,35 @@ The Z-Core processor communicates with external memory through an AXI4-Lite inte
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        z_core_control_u                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
-│  │   Decoder   │  │  Reg File   │  │  ALU Ctrl   │  │     ALU     │ │
-│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘ │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────┐│
-│  │                    FSM Controller                                ││
-│  │  FETCH → FETCH_WAIT → DECODE → EXECUTE → [MEM] → [WRITE]        ││
-│  └─────────────────────────────────────────────────────────────────┘│
-│                              │                                       │
-│                   ┌──────────┴──────────┐                           │
-│                   │  Simple Memory I/F  │                           │
-│                   │  mem_req, mem_wen   │                           │
-│                   │  mem_addr, mem_rdata│                           │
-│                   └──────────┬──────────┘                           │
-│                              │                                       │
-│                   ┌──────────┴──────────┐                           │
-│                   │    axil_master      │                           │
-│                   │  (Protocol Handler) │                           │
-│                   └──────────┬──────────┘                           │
-│                              │                                       │
-└──────────────────────────────┼───────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                          z_core_control_u                         │
+│┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+││   Decoder   │  │  Reg File   │  │  ALU Ctrl   │  │     ALU     │ │
+│└─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘ │
+│                                                                   │
+│┌─────────────────────────────────────────────────────────────────┐│
+││                    FSM Controller                               ││
+││  FETCH → FETCH_WAIT → DECODE → EXECUTE → [MEM] → [WRITE]        ││
+│└─────────────────────────────────────────────────────────────────┘│
+│                              │                                    │
+│                   ┌──────────┴──────────┐                         │
+│                   │  Simple Memory I/F  │                         │
+│                   │  mem_req, mem_wen   │                         │
+│                   │  mem_addr, mem_rdata│                         │
+│                   └──────────┬──────────┘                         │
+│                              │                                    │
+│                   ┌──────────┴──────────┐                         │
+│                   │    axil_master      │                         │
+│                   │  (Protocol Handler) │                         │
+│                   └──────────┬──────────┘                         │
+│                              │                                    │
+└──────────────────────────────┼────────────────────────────────────┘
                                │ AXI-Lite Interface
                                ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                          axil_ram                                     │
-│                     (Memory Subsystem)                                │
-└──────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                          axil_ram                                 │
+│                     (Memory Subsystem)                            │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
 ## AXI-Lite Signal Description
@@ -104,21 +104,21 @@ The `axil_master` module implements the AXI-Lite protocol with the following sta
             ┌────────────┴────────────┐               │
             │                         │               │
             ▼                         ▼               │
-     ┌─────────────┐          ┌─────────────┐        │
-     │ READ_ADDR   │          │ WRITE_ADDR  │        │
-     │(arvalid=1)  │          │(awvalid=1)  │        │
-     └──────┬──────┘          │(wvalid=1)   │        │
-            │ arready         └──────┬──────┘        │
-            ▼                        │ awready &     │
-     ┌─────────────┐                 │ wready        │
-     │ READ_DATA   │                 ▼               │
-     │(rready=1)   │          ┌─────────────┐        │
-     └──────┬──────┘          │ WRITE_RESP  │        │
-            │ rvalid          │(bready=1)   │        │
-            │                 └──────┬──────┘        │
-            │                        │ bvalid        │
-            │                        │               │
-            └────────────────────────┴───────────────┘
+     ┌─────────────┐          ┌─────────────┐         │
+     │ READ_ADDR   │          │ WRITE_ADDR  │         │
+     │(arvalid=1)  │          │(awvalid=1)  │         │
+     └──────┬──────┘          │(wvalid=1)   │         │
+            │ arready         └──────┬──────┘         │
+            ▼                        │ awready &      │
+     ┌─────────────┐                 │ wready         │
+     │ READ_DATA   │                 ▼                │
+     │(rready=1)   │          ┌─────────────┐         │
+     └──────┬──────┘          │ WRITE_RESP  │         │
+            │ rvalid          │(bready=1)   │         │
+            │                 └──────┬──────┘         │
+            │                        │ bvalid         │
+            │                        │                │
+            └────────────────────────┴────────────────┘
                          mem_ready pulse
 ```
 
@@ -290,6 +290,18 @@ gtkwave sim/z_core_control_u_tb.vcd
 | rtl/axi_mem.v             | AXI-Lite RAM slave                       |
 | rtl/z_core_control_u.v    | Control unit with AXI master integration |
 | tb/z_core_control_u_tb.v  | Testbench for AXI interface verification |
+
+## Acknowledgements
+
+The AXI-Lite infrastructure used in this project is based on the open-source [Verilog AXI Components](https://github.com/alexforencich/verilog-axi) by [Alex Forencich](https://github.com/alexforencich). Specifically, the following modules are utilized:
+
+- `axil_interconnect`: AXI-Lite Interconnect
+- `axil_ram`: AXI-Lite RAM (modified as `axi_mem`)
+- `arbiter`: Generic round-robin arbiter
+- `priority_encoder`: Priority encoder logic
+
+> [!NOTE]
+> Future plans include replacing these modules with custom implementations to support full AXI4 burst operations.
 
 ## References
 

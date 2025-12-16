@@ -66,8 +66,4 @@ The verification suite was expanded using `riscv_ctg` to include comprehensive c
 **Conclusion**: Z-Core is fully compliant with the RV32I base user-level ISA.
 
 ## 6. Next Steps
-1.  **Regression Testing**: Add RISCOF run to CI/CD pipeline.
-2.  **Extensions**:
-    *   Verify **M-Extension** (Multiplication/Division) if implemented.
-    *   Verify **CSRs** (Zicsr) and Exception handling compliance.
-3.  **Performance**: Analyze CPI (Cycles Per Instruction) using the compliance tests as micro-benchmarks.
+1.  [] **Performance**: Analyze CPI (Cycles Per Instruction) using the compliance tests as micro-benchmarks.

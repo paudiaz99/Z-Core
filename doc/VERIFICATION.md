@@ -409,9 +409,7 @@ riscof run --config=config.ini \
 ## Future Verification Plans
 
 1. [x] RISC-V official compliance tests (RISCOF infrastructure)
-2. [ ] Run full RISCOF test suite
-3. [ ] Random instruction testing
-4. [ ] Stress testing with longer programs
+2. [x] Run full RISCOF test suite
 5. [ ] Formal verification of critical paths
 6. [ ] Coverage-driven verification
 
