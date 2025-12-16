@@ -125,6 +125,45 @@ axil_master #(
 localparam PC_INIT = 32'd0;
 reg [31:0] PC;
 
+// **************************************************
+//                Instruction FIFO
+// **************************************************
+
+localparam FIFO_DEPTH = 16;
+localparam FIFO_DEPTH_WIDTH = $clog2(FIFO_DEPTH);
+
+// FIFO Data Signals
+reg [31:0] instr_fifo_data [FIFO_DEPTH-1:0];
+reg [31:0] instr_fifo_pc [FIFO_DEPTH-1:0];
+reg        instr_fifo_valid [FIFO_DEPTH-1:0];
+
+// FIFO Control Signals
+
+wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_rd_ptr;
+wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_wr_ptr;
+wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_count;
+wire                        fifo_ctrl_full;
+wire                        fifo_ctrl_empty;
+
+assign fifo_ctrl_full = (fifo_ctrl_count == FIFO_DEPTH);
+assign fifo_ctrl_empty = (fifo_ctrl_count == 0);
+
+
+// TODO...
+
+// 1. Instruction prefetcher Reads Burst from AXI-Lite 
+//    and stores it in the Instruction FIFO 
+//    TODO: When does it read?
+//      a. It reads separately from the fetch unit (Prefecther unit), which 
+//         is the main unit responsible for fetching instructions from the
+//         memory. And is a separate master of the AXI-Lite bus.
+// 2. Fetch unit reads from the Instruction FIFO each cycle if:
+//    a. FIFO is not empty
+//    b. FIFO instructions are valid (TODO: All or any?)
+//    c. IF/ID pipeline stage is not occupied
+//    
+
+
 // ##################################################
 //              PIPELINE REGISTERS
 // ##################################################
