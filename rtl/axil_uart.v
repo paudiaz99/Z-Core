@@ -33,7 +33,7 @@ module axil_uart #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 12,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
-    parameter DEFAULT_BAUD_DIV = 16'd868  // 100MHz / (16 * 115200) ≈ 54, but use 868 for 9600
+    parameter DEFAULT_BAUD_DIV = 16'd326  // 50MHz / (16 * 9600) = 326
 )(
     input  wire                   clk,
     input  wire                   rst,
