@@ -238,12 +238,12 @@ Detailed documentation is available in the `doc/` directory:
 - [x] Comprehensive testbench
 - [x] Modular IO (UART, GPIO)
 - [x] Pipelining for improved throughput
-- [ ] **FPGA synthesis and validation**
-- [ ] Branch prediction
+- [x] FPGA synthesis and validation **[Z-Core-FPGA repository](https://github.com/paudiaz99/Z-Core-FPGA)** 
+- [ ] **Branch prediction & Instruction Cache**
 - [ ] M extension (multiply/divide)
 - [ ] C extension (compressed instructions)
 - [ ] Interrupt support
-- [ ] Cache subsystem
+- [ ] Extra Peripherals (VGA Controller, Timer, etc.)
 - [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
 
 ## Contributing
