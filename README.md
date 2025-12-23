@@ -1,15 +1,17 @@
 <div align="center">
+<pre>
+███████╗       ██████╗ ██████╗ ██████╗ ███████╗
+╚══███╔╝      ██╔════╝██╔═══██╗██╔══██╗██╔════╝
+  ███╔╝ █████╗██║     ██║   ██║██████╔╝█████╗  
+ ███╔╝  ╚════╝██║     ██║   ██║██╔══██╗██╔══╝  
+███████╗      ╚██████╗╚██████╔╝██║  ██║███████╗
+╚══════╝       ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
+</pre>
+</div>
 
-```
-                          ███████╗       ██████╗ ██████╗ ██████╗ ███████╗
-                          ╚══███╔╝      ██╔════╝██╔═══██╗██╔══██╗██╔════╝
-                            ███╔╝ █████╗██║     ██║   ██║██████╔╝█████╗  
-                           ███╔╝  ╚════╝██║     ██║   ██║██╔══██╗██╔══╝  
-                          ███████╗      ╚██████╗╚██████╔╝██║  ██║███████╗
-                          ╚══════╝       ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝
-```  
+<div align="center">
 
-**A lightweight, educational RISC-V RV32I processor core**
+**A lightweight, educational RISC-V RV32I processor**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verilog](https://img.shields.io/badge/HDL-Verilog-blue.svg)](https://en.wikipedia.org/wiki/Verilog)
