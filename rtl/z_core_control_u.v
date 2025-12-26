@@ -9,6 +9,7 @@
 `include "rtl/z_core_reg_file.v"
 `include "rtl/z_core_alu_ctrl.v"
 `include "rtl/z_core_alu.v"
+`include "rtl/z_core_div_unit.v"
 `include "rtl/axil_master.v"
 
 module z_core_control_u #(
@@ -186,10 +187,10 @@ reg [31:0] id_ex_imm;
 reg [4:0]  id_ex_rd;
 reg [4:0]  id_ex_rs1_addr;
 reg [4:0]  id_ex_rs2_addr;
-reg [3:0]  id_ex_alu_op;
+reg [4:0]  id_ex_alu_op;
 reg [2:0]  id_ex_funct3;
 reg        id_ex_is_load, id_ex_is_store, id_ex_is_branch;
-reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc;
+reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc, id_ex_is_div;
 reg        id_ex_is_r_type, id_ex_is_i_alu;
 reg        id_ex_reg_write;
 reg        id_ex_valid;
@@ -200,7 +201,7 @@ reg [31:0] ex_mem_alu_result;
 reg [31:0] ex_mem_rs2_data;
 reg [4:0]  ex_mem_rd;
 reg [2:0]  ex_mem_funct3;
-reg        ex_mem_is_load, ex_mem_is_store;
+reg        ex_mem_is_load, ex_mem_is_store, ex_mem_is_div;
 reg        ex_mem_reg_write;
 reg        ex_mem_valid;
 
@@ -236,6 +237,20 @@ z_core_decoder decoder (
     .funct7(dec_funct7)
 );
 
+// ##################################################
+//              ALU CONTROL (uses z_core_alu_ctrl)
+// ##################################################
+
+wire [4:0] dec_alu_op;
+
+z_core_alu_ctrl alu_ctrl (
+    .alu_op(dec_op),
+    .alu_funct3(dec_funct3),
+    .alu_funct7(dec_funct7),
+    .alu_inst_type(dec_alu_op)
+);
+
+
 // Control signal decode (from current IF/ID instruction)
 wire dec_is_load   = (dec_op == I_LOAD_INST);
 wire dec_is_store  = (dec_op == S_INST);
@@ -246,6 +261,7 @@ wire dec_is_lui    = (dec_op == LUI_INST);
 wire dec_is_auipc  = (dec_op == AUIPC_INST);
 wire dec_is_r_type = (dec_op == R_INST);
 wire dec_is_i_alu  = (dec_op == I_INST);
+wire dec_is_div    = (dec_op == R_INST) & (dec_alu_op >= 5'd20) & (dec_alu_op <= 5'd23);
 wire dec_reg_write = dec_is_r_type | dec_is_i_alu | dec_is_load | 
                      dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc;
 
@@ -274,18 +290,6 @@ z_core_reg_file reg_file (
     .rs2_out(rf_rs2_data)
 );
 
-// ##################################################
-//              ALU CONTROL (uses z_core_alu_ctrl)
-// ##################################################
-
-wire [3:0] dec_alu_op;
-
-z_core_alu_ctrl alu_ctrl (
-    .alu_op(dec_op),
-    .alu_funct3(dec_funct3),
-    .alu_funct7(dec_funct7),
-    .alu_inst_type(dec_alu_op)
-);
 
 // ##################################################
 //                   ALU (uses z_core_alu)
@@ -310,6 +314,31 @@ z_core_alu alu (
     .alu_inst_type(id_ex_alu_op),
     .alu_out(alu_out),
     .alu_branch(alu_branch)
+);
+
+// ##################################################
+//          DIV Unit (uses z_core_div_unit)
+// ##################################################
+
+wire div_running; // When division is running, we have to stall the pipeline
+wire div_done;
+wire [31:0] div_result;
+
+// Simple div_start: start immediately when div instruction enters EX
+// Forwarding from ex_mem should work since values update before being sampled
+wire div_start = !div_running && !div_done && id_ex_is_div && id_ex_valid;
+
+z_core_div_unit div_unit (
+    .clk(clk),
+    .rstn(rstn),
+    .dividend(alu_in1),
+    .divisor(alu_in2),
+    .is_signed(~id_ex_funct3[0]),
+    .quotient_or_rem(~id_ex_funct3[1]),
+    .div_start(div_start),
+    .div_running(div_running),
+    .div_done(div_done),
+    .div_result(div_result)
 );
 
 // ##################################################
@@ -350,9 +379,13 @@ assign halt = if_id_valid && (dec_is_ecall || dec_is_ebreak);
 // Need to stall EX stage if:
 // 1. MEM stage has pending operation waiting for completion (mem_stall)
 // 2. EX/MEM has load/store but can't start yet (waiting for AXI bus to be free)
+// 3. Division instruction in EX stage and division not complete yet
+wire div_stall = id_ex_valid && id_ex_is_div && !div_done;
+
 wire ex_stall = mem_stall || 
                 (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
-                 (!mem_op_pending || mem_busy));
+                 (!mem_op_pending || mem_busy)) ||
+                div_stall;
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
 wire stall = load_use_hazard || ex_stall;
@@ -375,8 +408,6 @@ wire if_id_is_branch = if_id_valid && dec_is_branch;
 
 wire [31:0] branch_target = id_ex_pc + id_ex_imm;
 wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
-wire [31:0] next_pc       = flush ? (id_ex_is_jalr ? jalr_target : branch_target) :
-                            stall ? PC : PC + 4;
 
 // ##################################################
 //              PIPELINE STAGE: FETCH
@@ -410,9 +441,8 @@ always @(posedge clk) begin
             if_id_ir <= 32'h00000013;
             // Also invalidate the fetch buffer to prevent stale instructions from being loaded
             fetch_buffer_valid <= 1'b0;
-            PC <= next_pc;
+            PC <= id_ex_is_jalr ? jalr_target : branch_target;
             fetch_wait <= 1'b0;
-            // mem_req cleanup removed
             flush_r <= 1'b1;  // Register that flush happened
         end else begin
             // Clear if_id_valid when instruction is consumed by decode stage
@@ -463,11 +493,7 @@ always @(posedge clk) begin
                 // Advance PC from the address we just fetched and clear flags
                 PC <= fetch_pc + 4;
                 fetch_wait <= 1'b0;
-                // mem_req removal
-            end else if (!fetch_wait) begin
-                // mem_req removal
             end
-            
             // Handle flush_r clearing (legacy from original code logic)
             flush_r <= 1'b0;
         end
@@ -499,7 +525,7 @@ always @(posedge clk) begin
         id_ex_rd <= 5'b0;
         id_ex_rs1_addr <= 5'b0;
         id_ex_rs2_addr <= 5'b0;
-        id_ex_alu_op <= 4'b0;
+        id_ex_alu_op <= 5'b0;
         id_ex_funct3 <= 3'b0;
         id_ex_is_load <= 1'b0;
         id_ex_is_store <= 1'b0;
@@ -510,6 +536,7 @@ always @(posedge clk) begin
         id_ex_is_auipc <= 1'b0;
         id_ex_is_r_type <= 1'b0;
         id_ex_is_i_alu <= 1'b0;
+        id_ex_is_div <= 1'b0;
         id_ex_reg_write <= 1'b0;
     end else if (flush || load_use_hazard) begin
         // Insert bubble - flush handles current cycle squash
@@ -522,6 +549,7 @@ always @(posedge clk) begin
         id_ex_is_jalr <= 1'b0;
         id_ex_is_lui <= 1'b0;
         id_ex_is_auipc <= 1'b0;
+        id_ex_is_div <= 1'b0;
         // Set squash_now for delayed squash on next cycle
         if (flush) squash_now <= 1'b1;
     end else if (squash_now) begin
@@ -548,6 +576,7 @@ always @(posedge clk) begin
         id_ex_is_auipc <= dec_is_auipc;
         id_ex_is_r_type <= dec_is_r_type;
         id_ex_is_i_alu <= dec_is_i_alu;
+        id_ex_is_div <= dec_is_div;
         id_ex_reg_write <= dec_reg_write;
         id_ex_valid <= 1'b1;
         // Only set squash_now for JAL/JALR detected in if_id (unconditional jumps)
@@ -569,6 +598,7 @@ end
 wire [31:0] ex_result = id_ex_is_lui   ? id_ex_imm :
                         id_ex_is_auipc ? (id_ex_pc + id_ex_imm) :
                         (id_ex_is_jal || id_ex_is_jalr) ? (id_ex_pc + 4) :
+                        id_ex_is_div ? div_result :
                         alu_out;
 
 always @(posedge clk) begin
@@ -581,6 +611,7 @@ always @(posedge clk) begin
         ex_mem_funct3 <= 3'b0;
         ex_mem_is_load <= 1'b0;
         ex_mem_is_store <= 1'b0;
+        ex_mem_is_div <= 1'b0;
         ex_mem_reg_write <= 1'b0;
     end else if (!mem_stall && !ex_stall) begin
         ex_mem_pc <= id_ex_pc;
@@ -590,6 +621,7 @@ always @(posedge clk) begin
         ex_mem_funct3 <= id_ex_funct3;
         ex_mem_is_load <= id_ex_is_load;
         ex_mem_is_store <= id_ex_is_store;
+        ex_mem_is_div <= id_ex_is_div;
         ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store;
         ex_mem_valid <= id_ex_valid && !id_ex_is_branch;
     end
@@ -663,9 +695,6 @@ always @(posedge clk) begin
             end
         end else if (mem_op_pending && mem_ready) begin
             mem_op_pending <= 1'b0;
-            // mem_req removal
-        end else if (!mem_op_pending) begin
-            // mem_req removal
         end
     end
 end
@@ -681,7 +710,9 @@ always @(posedge clk) begin
         mem_wb_pc <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
-    end else if (!ex_stall || (mem_op_pending && mem_ready)) begin
+    end else if (!mem_stall || (mem_op_pending && mem_ready)) begin
+        // NOTE: Use mem_stall not ex_stall here - div_stall should NOT block WB
+        // This allows instructions ahead of division to complete their writeback
         mem_wb_rd <= ex_mem_rd;
         mem_wb_pc <= ex_mem_pc;
         mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
@@ -689,9 +720,6 @@ always @(posedge clk) begin
         
         if (ex_mem_is_load && mem_op_pending && mem_ready) begin
             mem_wb_result <= mem_load_data;
-            // synthesis translate_off
-            // Debug print block removed
-            // synthesis translate_on
         end else begin
             mem_wb_result <= ex_mem_alu_result;
         end
@@ -701,10 +729,6 @@ always @(posedge clk) begin
         mem_wb_rd <= 5'b0;        // Safer to clear destination too
     end
 end
-
-// synthesis translate_off
-// Debug blocks removed
-// synthesis translate_on
 
 // ##################################################
 //           STATE FOR TESTBENCH COMPATIBILITY

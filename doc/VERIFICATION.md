@@ -251,6 +251,51 @@ for (i=0; i<3; i++) {
 - Verifies `LUI` + `ADDI` large constant generation
 - Verifies `JAL` / `JALR` return address linking in complex flow
 
+## Test 20: Multiplication (M Extension)
+**Purpose:** Verify MUL, MULH, MULHSU, MULHU instructions
+
+| Instruction | Test Case | Expected |
+|-------------|-----------|----------|
+| MUL | 6 × 7 | 42 |
+| MUL | 100 × 200 | 20000 |
+| MULH | 0x7FFFFFFF × 2 | 0 (upper 32 of signed) |
+| MULHU | 0x80000000 × 2 | 1 (upper 32 of unsigned) |
+| MULHSU | -1 × 0x80000000 | 0x7FFFFFFF |
+
+## Test 21: Division (M Extension)
+**Purpose:** Verify DIV, DIVU, REM, REMU instructions
+
+| Instruction | Test Case | Expected |
+|-------------|-----------|----------|
+| DIVU | 100 / 7 | 14 |
+| REMU | 100 % 7 | 2 |
+| DIV | -100 / 7 | -14 |
+| REM | -100 % 7 | -2 |
+| DIVU | 1000000 / 1000 | 1000 |
+| DIVU | 5 / 10 | 0 |
+
+## Test 22: Division Forwarding
+**Purpose:** Verify data forwarding works with division inputs
+
+Tests three forwarding scenarios:
+1. **ADD → DIVU**: Division immediately after ALU operation
+2. **MUL → DIVU**: Division immediately after multiplication
+3. **DIVU → DIVU**: Back-to-back divisions using previous result
+
+## Test 23: M Extension + Control Flow
+**Purpose:** Comprehensive stress test combining MUL, DIV, branches, and jumps
+
+| Step | Operations | Verification |
+|------|------------|-------------|
+| 1 | MUL x4 = 6×7 | x4 = 42 |
+| 2 | BLT (40 < 42?) | Branch taken |
+| 3 | DIVU x6 = 42/3 | x6 = 14 (forwarding) |
+| 4 | BEQ (x6 == 14?) | Branch taken |
+| 5 | JAL to subroutine | x21 = return addr |
+| 6 | MUL x8 = 14×7 (in sub) | x8 = 98 |
+| 7 | JALR return | Jump back |
+| 8 | DIVU x9 = 98/7 | x9 = 14 |
+
 ## Instruction Coverage
 
 ### RV32I Base Integer Instructions
@@ -266,6 +311,8 @@ for (i=0; i<3; i++) {
 | Upper Imm | LUI, AUIPC | Yes | 100% |
 | Load | LW, LB, LH, LBU, LHU | Yes | 100% |
 | Store | SW, SB, SH | Yes | 100% |
+| M Extension | MUL, MULH, MULHSU, MULHU | Yes | 100% |
+| M Extension | DIV, DIVU, REM, REMU | Yes | 100% |
 | **NOT IMPLEMENTED** | FENCE, ECALL, EBREAK | N/A | 0% |
 
 ## Test Flow Diagram
@@ -340,8 +387,8 @@ gtkwave sim/z_core_control_u_tb.vcd
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                            ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  133                                         ║
-║  Passed:       133                                         ║
+║  Total Tests:  183                                         ║
+║  Passed:       183                                         ║
 ║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
@@ -364,7 +411,7 @@ Key signals to observe in GTKWave:
 ## Known Limitations
 
 1. **No interrupts**: Interrupt handling not implemented
-2. **No pipeline**: Multi-cycle execution only
+2. ~~**No pipeline**: Multi-cycle execution only~~ Converted to 5-stage pipeline
 
 ## RISCOF Compliance Testing
 
