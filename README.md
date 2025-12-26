@@ -71,7 +71,7 @@
 
 | Type | Instructions | Description |
 |------|-------------|-------------|
-| **R-Type** | `ADD`, `SUB`, `SLL`, `SLT`, `SLTU`, `XOR`, `SRL`, `SRA`, `OR`, `AND` | Register-register operations |
+| **R-Type** | `ADD`, `SUB`, `SLL`, `SLT`, `SLTU`, `XOR`, `SRL`, `SRA`, `OR`, `AND`, `MUL`, `MULH`, `MULHSU`, `MULHU`, `DIV`, `DIVU`, `REM`, `REMU` | Register-register operations |
 | **I-Type** | `ADDI`, `SLTI`, `SLTIU`, `XORI`, `ORI`, `ANDI`, `SLLI`, `SRLI`, `SRAI` | Immediate operations |
 | **Load** | `LB`, `LH`, `LW`, `LBU`, `LHU` | Memory load |
 | **Store** | `SB`, `SH`, `SW` | Memory store |
@@ -90,6 +90,8 @@ Z-Core/
 │   ├── z_core_reg_file.v      # 32x32-bit register file
 │   ├── z_core_alu.v           # Arithmetic logic unit
 │   ├── z_core_alu_ctrl.v      # ALU control
+│   ├── z_core_mult_unit.v     # Multiplier unit
+│   ├── z_core_div_unit.v      # Divider unit
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
 │   ├── axil_slave.v           # Generic AXI-Lite Slave
 │   ├── axil_uart.v            # UART Module
@@ -101,7 +103,9 @@ Z-Core/
 │   ├── z_core_alu_tb.v        # ALU unit test
 │   ├── z_core_alu_ctrl_tb.v   # ALU control test
 │   ├── z_core_decoder_tb.v    # Decoder test
-│   └── z_core_reg_file_tb.v   # Register file test
+│   ├── z_core_reg_file_tb.v   # Register file test
+│   ├── z_core_mult_unit_tb.v  # Multiplier unit test
+│   └── z_core_div_unit_tb.v   # Divider unit test
 │
 └── doc/                       # Documentation
     ├── AXI_INTERFACE.md       # AXI protocol details
@@ -193,7 +197,7 @@ The processor has been verified with **183 comprehensive tests** across 17 test 
 | GPIO | Bidirectional GPIO | 2 |
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
-| **M Extension** | MUL, DIV, Forwarding, Stress | 10 |
+| **M Extension** | MUL, DIV, REM, Forwarding Stress | 10 |
 | **RISCOF Compliance** | **Official RISC-V RV32I Architectural Tests** | **41** |
 | Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 53 |
 
@@ -206,6 +210,8 @@ The processor has been verified with **183 comprehensive tests** across 17 test 
 | Register File | 32 x 32-bit |
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
+
+> Note: The processor thtoughput is now limited by the memory latency (Around 10 cycles per memory access). Therefore, the current processor implementation cannot reach the ideal throughput of 1 cycle per instruction.
 
 ## Configuration
 
