@@ -11,16 +11,12 @@
 
 <div align="center">
 
-**A lightweight, educational RISC-V RV32IM processor core (Alpha Version)**
-
-> [!IMPORTANT]
-> **Status:** All local tests are passing (183 tests), but official RISCOF verification for the M-extension/pipeline is currently **pending**.
-
+**A lightweight RISC-V RV32IM processor**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verilog](https://img.shields.io/badge/HDL-Verilog-blue.svg)](https://en.wikipedia.org/wiki/Verilog)
 [![RISC-V](https://img.shields.io/badge/ISA-RISC--V%20RV32IM-green.svg)](https://riscv.org/)
-[![Compliance](https://img.shields.io/badge/Compliance-RISCOF%20Pending-orange.svg)](doc/RISCOF_COMPLIANCE_REPORT.md)
+[![Compliance](https://img.shields.io/badge/RISCOF-RV32IM%20Passed-brightgreen.svg)](https://github.com/riscv-software-src/riscof)
 
 </div>
 
@@ -200,7 +196,7 @@ The processor has been verified with **183 comprehensive tests** across 17 test 
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
 | **M Extension** | MUL, DIV, REM, Forwarding Stress | 10 |
-| **RISCOF Compliance** | **Official RISC-V RV32I Architectural Tests** | **41** |
+| **RISCOF Compliance** | **Official RISC-V RV32IM Architectural Tests** | **49** |
 | Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 53 |
 
 ## Performance
