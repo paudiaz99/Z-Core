@@ -377,16 +377,32 @@ module z_core_control_u_tb;
                 5'd13: actual = uut.reg_file.reg_r13_q;
                 5'd14: actual = uut.reg_file.reg_r14_q;
                 5'd15: actual = uut.reg_file.reg_r15_q;
+                5'd16: actual = uut.reg_file.reg_r16_q;
+                5'd17: actual = uut.reg_file.reg_r17_q;
+                5'd18: actual = uut.reg_file.reg_r18_q;
+                5'd19: actual = uut.reg_file.reg_r19_q;
+                5'd20: actual = uut.reg_file.reg_r20_q;
+                5'd21: actual = uut.reg_file.reg_r21_q;
+                5'd22: actual = uut.reg_file.reg_r22_q;
+                5'd23: actual = uut.reg_file.reg_r23_q;
+                5'd24: actual = uut.reg_file.reg_r24_q;
+                5'd25: actual = uut.reg_file.reg_r25_q;
+                5'd26: actual = uut.reg_file.reg_r26_q;
+                5'd27: actual = uut.reg_file.reg_r27_q;
+                5'd28: actual = uut.reg_file.reg_r28_q;
+                5'd29: actual = uut.reg_file.reg_r29_q;
+                5'd30: actual = uut.reg_file.reg_r30_q;
+                5'd31: actual = uut.reg_file.reg_r31_q;
                 default: actual = 32'hDEADBEEF;
             endcase
             
             if (actual == expected) begin
                 pass_count = pass_count + 1;
-                $display("  [PASS] %0s: x%0d = %0d", test_name, reg_num, actual);
+                $display("  [PASS] %0s: x%0d = %0d (%0d signed)", test_name, reg_num, actual, $signed(actual));
             end else begin
                 fail_count = fail_count + 1;
-                $display("  [FAIL] %0s: x%0d = %0d (expected %0d)", 
-                         test_name, reg_num, actual, expected);
+                $display("  [FAIL] %0s: x%0d = %0d (%0d signed), expected %0d (%0d signed)", 
+                         test_name, reg_num, actual, $signed(actual), expected, $signed(expected));
             end
         end
     endtask
@@ -1248,6 +1264,109 @@ module z_core_control_u_tb;
         end
 
         // ==========================================
+        // Test 20: Multiplication Operations (M Extension)
+        // ==========================================
+        load_test20_multiplication();
+        reset_cpu();
+        #24000;  // Multiplication test has many instructions - needs more time
+        
+        $display("\n=== Test 20 Results: Multiplication (M Extension) ===");
+        // Basic tests
+        check_reg(3, 42,         "MUL x3 = 7 * 6 = 42");
+        check_reg(6, 32'h0,      "MUL x6 = 0x10000000 * 16 (lower 32 = 0)");
+        check_reg(7, 32'h1,      "MULH x7 = upper(0x10000000 * 16) = 1");
+        check_reg(10, -50,       "MUL x10 = (-10) * 5 = -50");
+        check_reg(13, 32'h1,     "MULHU x13 = upper(0xFFFFFFFF * 2) = 1");
+        check_reg(14, 32'hFFFFFFFF, "MULHSU x14 = upper(-10 * 2 signed*unsigned) = -1");
+        // Corner cases
+        check_reg(15, 0,         "MUL x15 = 7 * 0 = 0 (multiply by zero)");
+        check_reg(17, 7,         "MUL x17 = 7 * 1 = 7 (multiply by one)");
+        check_reg(19, -7,        "MUL x19 = 7 * (-1) = -7 (multiply by -1)");
+        check_reg(24, 32'h80000000, "MUL x24 = 0x80000000 * (-1) = 0x80000000");
+        check_reg(25, 32'hFFFFFFFE, "MULHU x25 = upper(0xFFFFFFFF^2) = 0xFFFFFFFE");
+        check_reg(26, 1,         "MUL x26 = lower(0xFFFFFFFF^2) = 1");
+        // Memory verification
+        check_mem(256, 42,       "SW mem[256] = 42 (MUL result)");
+        check_mem(260, 32'h0,    "SW mem[260] = 0 (MUL overflow lower)");
+        check_mem(264, 32'h1,    "SW mem[264] = 1 (MULH upper)");
+
+        // ==========================================
+        // Test 21: Division Operations (M Extension)
+        // ==========================================
+        load_test21_division();
+        reset_cpu();
+        #80000;  // Division takes ~67 cycles each, need more time for multiple divs
+        
+        $display("\n=== Test 21 Results: Division (M Extension) ===");
+        // DIVU/REMU tests (unsigned)
+        check_reg(3, 14,         "DIVU x3 = 100 / 7 = 14");
+        check_reg(4, 2,          "REMU x4 = 100 % 7 = 2");
+        // DIV/REM tests (signed)
+        check_reg(5, -100,       "ADDI x5 = -100");
+        check_reg(6, -14,        "DIV x6 = -100 / 7 = -14");
+        check_reg(7, -2,         "REM x7 = -100 % 7 = -2");
+        // Large number test
+        check_reg(10, 1000,      "DIVU x10 = 1000000 / 1000 = 1000");
+        // Division by 1
+        check_reg(12, 100,       "DIVU x12 = 100 / 1 = 100");
+        // Smaller / larger
+        check_reg(15, 0,         "DIVU x15 = 5 / 10 = 0");
+        check_reg(16, 5,         "REMU x16 = 5 % 10 = 5");
+        // Memory verification
+        check_mem(256, 14,       "SW mem[256] = 14 (100/7)");
+        check_mem(260, 2,        "SW mem[260] = 2 (100%7)");
+        check_mem(264, 1000,     "SW mem[264] = 1000 (1M/1K)");
+
+        // ==========================================
+        // Test 22: Division Forwarding Tests (ADD->DIV, MUL->DIV, DIV->DIV)
+        // ==========================================
+        load_test22_m_extension_stress();
+        reset_cpu();
+        #200000;  // Multiple divisions need time
+        
+        $display("\n=== Test 22 Results: Division Forwarding ===");
+        // Test Case 1: ADD -> DIV
+        check_reg(5, 42,         "ADD x5 = 42 (copy from x1)");
+        check_reg(10, 14,        "DIVU x10 = 42/3 = 14 (ADD->DIV forward)");
+        check_mem(512, 14,       "SW mem[512] = 14 (ADD->DIV result)");
+        // Test Case 2: MUL -> DIV
+        check_reg(6, 42,         "MUL x6 = 6*7 = 42");
+        check_reg(11, 14,        "DIVU x11 = 42/3 = 14 (MUL->DIV forward)");
+        check_mem(516, 14,       "SW mem[516] = 14 (MUL->DIV result)");
+        check_mem(524, 42,       "SW mem[524] = 42 (verify MUL)");
+        // Test Case 3: DIV -> DIV
+        check_reg(7, 14,         "DIVU x7 = 42/3 = 14 (first div)");
+        check_reg(8, 14,         "ADDI x8 = x7 = 14 (verify first div)");
+        check_reg(12, 2,         "DIVU x12 = 14/6 = 2 (DIV->DIV)");
+        check_mem(520, 2,        "SW mem[520] = 2 (DIV->DIV result)");
+
+        // ==========================================
+        // Test 23: M Extension + Control Flow (MUL+DIV+Branches+Jumps)
+        // ==========================================
+        load_test23_m_extension_control_flow();
+        reset_cpu();
+        #200000;  // Multiple divisions + control flow need time
+        
+        $display("\n=== Test 23 Results: M Extension + Control Flow ===");
+        // Step 1: MUL then branch
+        check_reg(4, 42,         "MUL x4 = 6*7 = 42");
+        check_mem(512, 42,       "SW mem[512] = 42 (MUL result)");
+        // Step 2: DIV with forwarding
+        check_reg(6, 14,         "DIVU x6 = 42/3 = 14");
+        check_mem(516, 14,       "SW mem[516] = 14 (first DIV)");
+        // Step 4: Subroutine MUL
+        check_reg(8, 98,         "MUL x8 = 14*7 = 98 (subroutine)");
+        check_mem(520, 98,       "SW mem[520] = 98 (subroutine MUL)");
+        // Step 5: Final DIV
+        check_reg(9, 14,         "DIVU x9 = 98/7 = 14 (final)");
+        check_mem(524, 14,       "SW mem[524] = 14 (final DIV)");
+        // Control flow verification
+        check_reg(20, 3,         "Branch counter x20 = 3 (2 branches + 1 return)");
+        check_mem(528, 3,        "SW mem[528] = 3 (branch counter)");
+        check_reg(21, 32'h44,    "JAL return addr x21 = 0x44");
+        check_mem(532, 32'h44,   "SW mem[532] = 0x44 (JAL return addr)");
+
+        // ==========================================
         // Final Summary
         // ==========================================
         $display("");
@@ -1834,6 +1953,423 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[29] = 32'h00000013;
             u_axil_ram.mem[30] = 32'h00000013;
+        end
+    endtask
+
+    task load_test20_multiplication;
+        integer i;
+        begin
+            $display("\n--- Loading Test 20: Multiplication Operations (M Extension) ---");
+            // Clear memory first
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // This test verifies MUL, MULH, MULHSU, MULHU instructions
+            // M-extension uses funct7 = 0000001 to distinguish from standard R-type
+            
+            // ============================================
+            // Setup test values
+            // ============================================
+            // 0x00: ADDI x1, x0, 7        - x1 = 7
+            u_axil_ram.mem[0] = 32'h00700093;
+            // 0x04: ADDI x2, x0, 6        - x2 = 6
+            u_axil_ram.mem[1] = 32'h00600113;
+            
+            // ============================================
+            // Test 1: Basic MUL (lower 32 bits)
+            // ============================================
+            // 0x08: MUL x3, x1, x2         - x3 = 7 * 6 = 42
+            // Encoding: funct7=0000001, rs2=2, rs1=1, funct3=000, rd=3, opcode=0110011
+            u_axil_ram.mem[2] = 32'h022081b3;
+            
+            // ============================================
+            // Test 2: MUL with overflow (result needs 64 bits)
+            // ============================================
+            // 0x0C: LUI x4, 0x10000        - x4 = 0x10000000 (268435456)
+            u_axil_ram.mem[3] = 32'h10000237;
+            // 0x10: ADDI x5, x0, 16       - x5 = 16
+            u_axil_ram.mem[4] = 32'h01000293;
+            // 0x14: MUL x6, x4, x5         - x6 = 0x10000000 * 16 = 0 (lower 32 bits)
+            u_axil_ram.mem[5] = 32'h02520333;
+            
+            // ============================================
+            // Test 3: MULH (upper 32 bits, signed*signed)
+            // ============================================
+            // 0x18: MULH x7, x4, x5        - x7 = upper(0x10000000 * 16) = 1
+            u_axil_ram.mem[6] = 32'h025213b3;
+            
+            // ============================================
+            // Test 4: MUL with negative numbers
+            // ============================================
+            // 0x1C: ADDI x8, x0, -10       - x8 = -10 (0xFFFFFFF6)
+            u_axil_ram.mem[7] = 32'hff600413;
+            // 0x20: ADDI x9, x0, 5         - x9 = 5
+            u_axil_ram.mem[8] = 32'h00500493;
+            // 0x24: MUL x10, x8, x9        - x10 = (-10) * 5 = -50
+            u_axil_ram.mem[9] = 32'h02940533;
+            
+            // ============================================
+            // Test 5: MULHU (unsigned * unsigned upper)
+            // ============================================
+            // 0x28: ADDI x11, x0, -1        - x11 = 0xFFFFFFFF (use signed immediate)
+            u_axil_ram.mem[10] = 32'hfff00593;
+            // 0x2C: ADDI x12, x0, 2        - x12 = 2
+            u_axil_ram.mem[11] = 32'h00200613;
+            // 0x30: MULHU x13, x11, x12    - x13 = upper(0xFFFFFFFF * 2 unsigned) = 1
+            u_axil_ram.mem[12] = 32'h02c5b6b3;
+            
+            // ============================================
+            // Test 6: MULHSU (signed * unsigned upper)
+            // NOTE: Our multiplier is unsigned-only, MULHSU will not give correct signed result
+            // ============================================
+            // 0x34: MULHSU x14, x8, x12    - x14 = upper((-10) * 2 signed*unsigned)
+            // With unsigned multiplier: treats -10 as 0xFFFFFFF6, so (0xFFFFFFF6 * 2) >> 32 = 1
+            u_axil_ram.mem[13] = 32'h02c42733;
+            
+            // ============================================
+            // CORNER CASES
+            // ============================================
+            
+            // Test 7: Multiply by zero
+            // 0x38: MUL x15, x1, x0        - x15 = 7 * 0 = 0
+            u_axil_ram.mem[14] = 32'h020087b3;
+            
+            // Test 8: Multiply by one
+            // 0x3C: ADDI x16, x0, 1        - x16 = 1
+            u_axil_ram.mem[15] = 32'h00100813;
+            // 0x40: MUL x17, x1, x16       - x17 = 7 * 1 = 7
+            u_axil_ram.mem[16] = 32'h030088b3;
+            
+            // Test 9: Multiply by -1
+            // 0x44: ADDI x18, x0, -1       - x18 = -1
+            u_axil_ram.mem[17] = 32'hfff00913;
+            // 0x48: MUL x19, x1, x18       - x19 = 7 * (-1) = -7
+            u_axil_ram.mem[18] = 32'h032089b3;
+            
+            // Test 10: Max positive * max positive (0x7FFFFFFF * 0x7FFFFFFF)
+            // Upper = 0x3FFFFFFF, Lower = 0x00000001
+            // 0x4C: LUI x20, 0x7FFFF       - x20 = 0x7FFFF000
+            u_axil_ram.mem[19] = 32'h7ffffa37;
+            // 0x50: ADDI x20, x20, 0x7FF   - x20 = 0x7FFFF7FF (not quite 0x7FFFFFFF)
+            u_axil_ram.mem[20] = 32'h7ffa0a13;
+            // 0x54: MUL x21, x20, x20      - x21 = lower(0x7FFFF7FF^2)
+            u_axil_ram.mem[21] = 32'h034a0ab3;
+            // 0x58: MULH x22, x20, x20     - x22 = upper(0x7FFFF7FF^2)
+            u_axil_ram.mem[22] = 32'h034a1b33;
+            
+            // Test 11: 0x80000000 * -1 edge case (most negative * -1)
+            // Result should be 0x80000000 (overflow, stays same)
+            // 0x5C: LUI x23, 0x80000       - x23 = 0x80000000
+            u_axil_ram.mem[23] = 32'h80000bb7;
+            // 0x60: MUL x24, x23, x18      - x24 = 0x80000000 * (-1) = 0x80000000
+            u_axil_ram.mem[24] = 32'h032b8c33;
+            
+            // Test 12: 0xFFFFFFFF * 0xFFFFFFFF (unsigned max * max)
+            // MULHU upper = 0xFFFFFFFE, MUL lower = 0x00000001
+            // 0x64: MULHU x25, x11, x11    - x25 = upper(0xFFFFFFFF^2 unsigned) = 0xFFFFFFFE
+            u_axil_ram.mem[25] = 32'h02b5bcb3;
+            // 0x68: MUL x26, x11, x11      - x26 = lower(0xFFFFFFFF^2) = 1
+            u_axil_ram.mem[26] = 32'h02b58d33;
+            
+            // ============================================
+            // Store results for verification
+            // ============================================
+            // 0x6C: SW x3, 256(x0)         - mem[256] = 42
+            u_axil_ram.mem[27] = 32'h10302023;
+            // 0x70: SW x6, 260(x0)         - mem[260] = 0 (overflow lower)
+            u_axil_ram.mem[28] = 32'h10602223;
+            // 0x74: SW x7, 264(x0)         - mem[264] = 1 (MULH upper)
+            u_axil_ram.mem[29] = 32'h10702423;
+            
+            // NOPs
+            u_axil_ram.mem[30] = 32'h00000013;
+            u_axil_ram.mem[31] = 32'h00000013;
+            u_axil_ram.mem[32] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 21: Division Operations (M Extension)
+    // ==========================================
+    task load_test21_division;
+        integer i;
+        begin
+            $display("\n--- Loading Test 21: Division (M Extension) ---");
+            // Clear memory first
+            for (i = 0; i < 64; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // ============================================
+            // Division Instructions Encoding (R-type):
+            // funct7[6:0] = 0000001 (M extension)
+            // funct3[2:0] for division:
+            //   100 = DIV   (signed quotient)
+            //   101 = DIVU  (unsigned quotient)
+            //   110 = REM   (signed remainder)
+            //   111 = REMU  (unsigned remainder)
+            // ============================================
+            
+            // Setup test values
+            // 0x00: ADDI x1, x0, 100      - x1 = 100 (dividend)
+            u_axil_ram.mem[0] = 32'h06400093;
+            // 0x04: ADDI x2, x0, 7        - x2 = 7 (divisor)
+            u_axil_ram.mem[1] = 32'h00700113;
+            
+            // ============================================
+            // Test 1: DIVU (unsigned quotient) 100 / 7 = 14
+            // ============================================
+            // 0x08: DIVU x3, x1, x2       - x3 = 100 / 7 = 14
+            // Encoding: 0000001 | rs2=2 | rs1=1 | funct3=101 | rd=3 | 0110011
+            u_axil_ram.mem[2] = 32'h0220d1b3;
+            
+            // ============================================
+            // Test 2: REMU (unsigned remainder) 100 % 7 = 2
+            // ============================================
+            // 0x0C: REMU x4, x1, x2       - x4 = 100 % 7 = 2
+            // Encoding: 0000001 | rs2=2 | rs1=1 | funct3=111 | rd=4 | 0110011
+            u_axil_ram.mem[3] = 32'h0220f233;
+            
+            // ============================================
+            // Test 3: DIV (signed quotient) -100 / 7 = -14
+            // ============================================
+            // 0x10: ADDI x5, x0, -100     - x5 = -100
+            u_axil_ram.mem[4] = 32'hf9c00293;
+            // 0x14: DIV x6, x5, x2        - x6 = -100 / 7 = -14
+            // Encoding: 0000001 | rs2=2 | rs1=5 | funct3=100 | rd=6 | 0110011
+            u_axil_ram.mem[5] = 32'h0222c333;
+            
+            // ============================================  
+            // Test 4: REM (signed remainder) -100 % 7 = -2
+            // ============================================
+            // 0x18: REM x7, x5, x2        - x7 = -100 % 7 = -2
+            // Encoding: 0000001 | rs2=2 | rs1=5 | funct3=110 | rd=7 | 0110011
+            u_axil_ram.mem[6] = 32'h0222e3b3;
+            
+            // ============================================
+            // Test 5: Large numbers - 1000000 / 1000 = 1000
+            // ============================================
+            // Build 1000000 = 0x000F4240
+            // 0x1C: LUI x8, 0x000F4      - x8 = 0x000F4000
+            u_axil_ram.mem[7] = 32'h000f4437;
+            // 0x20: ADDI x8, x8, 0x240   - x8 = 0x000F4240 = 1000000
+            u_axil_ram.mem[8] = 32'h24040413;
+            // 0x24: ADDI x9, x0, 1000    - x9 = 1000 (0x3E8)
+            u_axil_ram.mem[9] = 32'h3e800493;
+            // 0x28: DIVU x10, x8, x9     - x10 = 1000000 / 1000 = 1000
+            u_axil_ram.mem[10] = 32'h02945533;
+            
+            // ============================================
+            // Test 6: Division by 1 (identity)
+            // ============================================
+            // 0x2C: ADDI x11, x0, 1      - x11 = 1
+            u_axil_ram.mem[11] = 32'h00100593;
+            // 0x30: DIVU x12, x1, x11    - x12 = 100 / 1 = 100
+            u_axil_ram.mem[12] = 32'h02b0d633;
+            
+            // ============================================
+            // Test 7: Division of smaller by larger = 0
+            // ============================================
+            // 0x34: ADDI x13, x0, 5      - x13 = 5
+            u_axil_ram.mem[13] = 32'h00500693;
+            // 0x38: ADDI x14, x0, 10     - x14 = 10
+            u_axil_ram.mem[14] = 32'h00a00713;
+            // 0x3C: DIVU x15, x13, x14   - x15 = 5 / 10 = 0
+            u_axil_ram.mem[15] = 32'h02e6d7b3;
+            // 0x40: REMU x16, x13, x14   - x16 = 5 % 10 = 5
+            u_axil_ram.mem[16] = 32'h02e6f833;
+            
+            // ============================================
+            // Store results for verification
+            // ============================================
+            // 0x44: SW x3, 256(x0)       - mem[256] = 14 (100/7)
+            u_axil_ram.mem[17] = 32'h10302023;
+            // 0x48: SW x4, 260(x0)       - mem[260] = 2 (100%7)
+            u_axil_ram.mem[18] = 32'h10402223;
+            // 0x4C: SW x10, 264(x0)      - mem[264] = 1000 (1M/1K)
+            u_axil_ram.mem[19] = 32'h10a02423;
+            
+            // NOPs  
+            u_axil_ram.mem[20] = 32'h00000013;
+            u_axil_ram.mem[21] = 32'h00000013;
+            u_axil_ram.mem[22] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 22: Division Forwarding Test
+    //   Tests: ADD->DIV, MUL->DIV, DIV->DIV
+    // ==========================================
+    task load_test22_m_extension_stress;
+        integer i;
+        begin
+            $display("\n--- Loading Test 22: Division Forwarding Tests ---");
+            // Clear memory first
+            for (i = 0; i < 32; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // Setup values
+            // 0x00: ADDI x1, x0, 42         - x1 = 42
+            u_axil_ram.mem[0] = 32'h02a00093;
+            // 0x04: ADDI x2, x0, 6          - x2 = 6
+            u_axil_ram.mem[1] = 32'h00600113;
+            // 0x08: ADDI x3, x0, 3          - x3 = 3 (divisor)
+            u_axil_ram.mem[2] = 32'h00300193;
+            // 0x0C: ADDI x4, x0, 7          - x4 = 7
+            u_axil_ram.mem[3] = 32'h00700213;
+            
+            // ========== Test Case 1: ADD -> DIVU ==========
+            // 0x10: ADD x5, x1, x0          - x5 = 42 + 0 = 42 (copy)
+            u_axil_ram.mem[4] = 32'h000082b3;
+            // 0x14: DIVU x10, x5, x3        - x10 = 42 / 3 = 14 (forward from ADD)
+            u_axil_ram.mem[5] = 32'h0232d533;
+            // 0x18-0x1C: NOPs for division completion
+            u_axil_ram.mem[6] = 32'h00000013;
+            u_axil_ram.mem[7] = 32'h00000013;
+            
+            // ========== Test Case 2: MUL -> DIVU ==========
+            // 0x20: MUL x6, x2, x4          - x6 = 6 * 7 = 42
+            u_axil_ram.mem[8] = 32'h02410333;
+            // 0x24: DIVU x11, x6, x3        - x11 = 42 / 3 = 14 (forward from MUL)
+            u_axil_ram.mem[9] = 32'h023355b3;
+            // 0x28-0x2C: NOPs for division completion
+            u_axil_ram.mem[10] = 32'h00000013;
+            u_axil_ram.mem[11] = 32'h00000013;
+            
+            // ========== Test Case 3: DIVU -> DIVU ==========
+            // 0x30: DIVU x7, x1, x3         - x7 = 42 / 3 = 14
+            u_axil_ram.mem[12] = 32'h0230d3b3;
+            // 0x34-0x38: NOPs for first division completion
+            u_axil_ram.mem[13] = 32'h00000013;
+            u_axil_ram.mem[14] = 32'h00000013;
+            // 0x3C: ADDI x8, x7, 0          - x8 = x7 = 14 (verify first div result)
+            u_axil_ram.mem[15] = 32'h00038413;
+            // 0x40: DIVU x12, x7, x2        - x12 = 14 / 6 = 2 (use result of first div)
+            // funct7=0000001, rs2=00010(x2), rs1=00111(x7), funct3=101, rd=01100(x12), opcode=0110011
+            u_axil_ram.mem[16] = 32'h0223d633;
+            // 0x44-0x48: NOPs for second division completion
+            u_axil_ram.mem[17] = 32'h00000013;
+            u_axil_ram.mem[18] = 32'h00000013;
+            
+            // ========== Store results ==========
+            // 0x4C: SW x10, 512(x0)         - mem[512] = 14 (ADD->DIV result)
+            u_axil_ram.mem[19] = 32'h20a02023;
+            // 0x50: SW x11, 516(x0)         - mem[516] = 14 (MUL->DIV result)
+            u_axil_ram.mem[20] = 32'h20b02223;
+            // 0x54: SW x12, 520(x0)         - mem[520] = 2 (DIV->DIV result)
+            u_axil_ram.mem[21] = 32'h20c02423;
+            // 0x58: SW x6, 524(x0)          - mem[524] = 42 (verify MUL worked)
+            u_axil_ram.mem[22] = 32'h20602623;
+            
+            // NOPs
+            u_axil_ram.mem[23] = 32'h00000013;
+            u_axil_ram.mem[24] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 23: M Extension + Control Flow
+    //   Combines MUL, DIV, Branches, Jumps
+    // ==========================================
+    task load_test23_m_extension_control_flow;
+        integer i;
+        begin
+            $display("\n--- Loading Test 23: M Extension + Control Flow ---");
+            // Clear memory first
+            for (i = 0; i < 48; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // ========== Setup values ==========
+            // 0x00: ADDI x1, x0, 6           - x1 = 6
+            u_axil_ram.mem[0] = 32'h00600093;
+            // 0x04: ADDI x2, x0, 7           - x2 = 7
+            u_axil_ram.mem[1] = 32'h00700113;
+            // 0x08: ADDI x3, x0, 3           - x3 = 3 (divisor)
+            u_axil_ram.mem[2] = 32'h00300193;
+            // 0x0C: ADDI x20, x0, 0          - x20 = 0 (branch counter)
+            u_axil_ram.mem[3] = 32'h00000a13;
+            
+            // ========== Step 1: MUL then conditional branch ==========
+            // 0x10: MUL x4, x1, x2           - x4 = 6 * 7 = 42
+            u_axil_ram.mem[4] = 32'h02208233;
+            // 0x14: ADDI x5, x0, 40          - x5 = 40 (comparison value)
+            u_axil_ram.mem[5] = 32'h02800293;
+            // 0x18: BLT x5, x4, +8           - if 40 < 42, branch to 0x20 (skip next)
+            // B-type: imm[12|10:5]=0_000000, rs2=x4, rs1=x5, funct3=100, imm[4:1|11]=0100_0
+            u_axil_ram.mem[6] = 32'h0042c463;
+            // 0x1C: ADDI x20, x20, 100       - SKIPPED if branch taken
+            u_axil_ram.mem[7] = 32'h064a0a13;
+            // 0x20: ADDI x20, x20, 1         - x20++ (branch was taken)
+            u_axil_ram.mem[8] = 32'h001a0a13;
+            
+            // ========== Step 2: DIV with forwarding from MUL ==========
+            // 0x24: DIVU x6, x4, x3          - x6 = 42 / 3 = 14
+            u_axil_ram.mem[9] = 32'h02325333;
+            // 0x28-0x2C: NOPs for division
+            u_axil_ram.mem[10] = 32'h00000013;
+            u_axil_ram.mem[11] = 32'h00000013;
+            
+            // ========== Step 3: Branch based on DIV result ==========
+            // 0x30: ADDI x7, x0, 14          - x7 = 14 (expected result)
+            u_axil_ram.mem[12] = 32'h00e00393;
+            // 0x34: BEQ x6, x7, +8           - if x6 == 14, branch to 0x3C
+            // B-type: imm[12|10:5]=0_000000, rs2=x7, rs1=x6, funct3=000, imm[4:1|11]=0100_0
+            u_axil_ram.mem[13] = 32'h00730463;
+            // 0x38: ADDI x20, x20, 100       - SKIPPED if branch taken
+            u_axil_ram.mem[14] = 32'h064a0a13;
+            // 0x3C: ADDI x20, x20, 1         - x20++ (branch was taken)
+            u_axil_ram.mem[15] = 32'h001a0a13;
+            
+            // ========== Step 4: JAL to subroutine ==========
+            // 0x40: JAL x21, +24             - Jump to 0x58, x21 = 0x44
+            // J-type: +24: imm[20|10:1|11|19:12]=0_0000001100_0_00000000, rd=10101(x21), op=1101111
+            // 0_0000001100_0_00000000_10101_1101111 = 0x01800AEF
+            u_axil_ram.mem[16] = 32'h01800aef;
+            // 0x44: ADDI x20, x20, 1         - x20++ (returned from JAL)
+            u_axil_ram.mem[17] = 32'h001a0a13;
+            // 0x48: JAL x0, +24              - Skip subroutine, jump to 0x60
+            // J-type: +24: imm[20|10:1|11|19:12]=0_0000001100_0_00000000, rd=0, op=1101111
+            // 0_0000001100_0_00000000_00000_1101111 = 0x0180006F
+            u_axil_ram.mem[18] = 32'h0180006f;
+            // 0x4C-0x54: Padding (skipped)
+            u_axil_ram.mem[19] = 32'h00000013;
+            u_axil_ram.mem[20] = 32'h00000013;
+            u_axil_ram.mem[21] = 32'h00000013;
+            
+            // ========== Subroutine at 0x58 ==========
+            // 0x58: MUL x8, x6, x2           - x8 = 14 * 7 = 98
+            u_axil_ram.mem[22] = 32'h02238433;
+            // 0x5C: JALR x0, x21, 0          - Return to x21 (0x44)
+            u_axil_ram.mem[23] = 32'h000a8067;
+            
+            // ========== Step 5: Final DIV after control flow ==========
+            // 0x60: DIVU x9, x8, x2          - x9 = 98 / 7 = 14
+            // funct7=0000001, rs2=00010(x2), rs1=01000(x8), funct3=101, rd=01001(x9), op=0110011
+            u_axil_ram.mem[24] = 32'h022454b3;
+            // 0x64-0x68: NOPs for division
+            u_axil_ram.mem[25] = 32'h00000013;
+            u_axil_ram.mem[26] = 32'h00000013;
+            
+            // ========== Store results ==========
+            // 0x6C: SW x4, 512(x0)           - mem[512] = 42 (MUL result)
+            u_axil_ram.mem[27] = 32'h20402023;
+            // 0x70: SW x6, 516(x0)           - mem[516] = 14 (first DIV)
+            u_axil_ram.mem[28] = 32'h20602223;
+            // 0x74: SW x8, 520(x0)           - mem[520] = 98 (subroutine MUL)
+            u_axil_ram.mem[29] = 32'h20802423;
+            // 0x78: SW x9, 524(x0)           - mem[524] = 14 (final DIV)
+            u_axil_ram.mem[30] = 32'h20902623;
+            // 0x7C: SW x20, 528(x0)          - mem[528] = 3 (branch counter)
+            u_axil_ram.mem[31] = 32'h21402823;
+            // 0x80: SW x21, 532(x0)          - mem[532] = 0x44 (JAL return addr)
+            u_axil_ram.mem[32] = 32'h21502a23;
+            
+            // NOPs
+            u_axil_ram.mem[33] = 32'h00000013;
+            u_axil_ram.mem[34] = 32'h00000013;
         end
     endtask
 

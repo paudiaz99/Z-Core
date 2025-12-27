@@ -11,12 +11,16 @@
 
 <div align="center">
 
-**A lightweight, educational RISC-V RV32I processor**
+**A lightweight, educational RISC-V RV32IM processor core (Alpha Version)**
+
+> [!IMPORTANT]
+> **Status:** All local tests are passing (183 tests), but official RISCOF verification for the M-extension/pipeline is currently **pending**.
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verilog](https://img.shields.io/badge/HDL-Verilog-blue.svg)](https://en.wikipedia.org/wiki/Verilog)
-[![RISC-V](https://img.shields.io/badge/ISA-RISC--V%20RV32I-green.svg)](https://riscv.org/)
-[![Compliance](https://img.shields.io/badge/Compliance-RISCOF%20Passed-brightgreen.svg)](doc/RISCOF_COMPLIANCE_REPORT.md)
+[![RISC-V](https://img.shields.io/badge/ISA-RISC--V%20RV32IM-green.svg)](https://riscv.org/)
+[![Compliance](https://img.shields.io/badge/Compliance-RISCOF%20Pending-orange.svg)](doc/RISCOF_COMPLIANCE_REPORT.md)
 
 </div>
 
@@ -25,7 +29,8 @@
 ## Features
 
 - **5-Stage Pipeline** - Classic RISC-V 5-stage pipeline implementation
-- **Full RV32I Implementation** - Complete base integer instruction set (RISCOF Compliant)
+- **RV32IM Implementation** - Base integer ISA + Multiplication/Division
+
 - **AXI4-Lite Interface** - Industry-standard memory bus protocol
 - **Modular Design** - Clean separation of concerns with individual modules
 - **Comprehensive Testbenches** - Automated testing for all components
@@ -68,7 +73,7 @@
 
 | Type | Instructions | Description |
 |------|-------------|-------------|
-| **R-Type** | `ADD`, `SUB`, `SLL`, `SLT`, `SLTU`, `XOR`, `SRL`, `SRA`, `OR`, `AND` | Register-register operations |
+| **R-Type** | `ADD`, `SUB`, `SLL`, `SLT`, `SLTU`, `XOR`, `SRL`, `SRA`, `OR`, `AND`, `MUL`, `MULH`, `MULHSU`, `MULHU`, `DIV`, `DIVU`, `REM`, `REMU` | Register-register operations |
 | **I-Type** | `ADDI`, `SLTI`, `SLTIU`, `XORI`, `ORI`, `ANDI`, `SLLI`, `SRLI`, `SRAI` | Immediate operations |
 | **Load** | `LB`, `LH`, `LW`, `LBU`, `LHU` | Memory load |
 | **Store** | `SB`, `SH`, `SW` | Memory store |
@@ -87,6 +92,8 @@ Z-Core/
 │   ├── z_core_reg_file.v      # 32x32-bit register file
 │   ├── z_core_alu.v           # Arithmetic logic unit
 │   ├── z_core_alu_ctrl.v      # ALU control
+│   ├── z_core_mult_unit.v     # Multiplier unit
+│   ├── z_core_div_unit.v      # Divider unit
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
 │   ├── axil_slave.v           # Generic AXI-Lite Slave
 │   ├── axil_uart.v            # UART Module
@@ -98,7 +105,9 @@ Z-Core/
 │   ├── z_core_alu_tb.v        # ALU unit test
 │   ├── z_core_alu_ctrl_tb.v   # ALU control test
 │   ├── z_core_decoder_tb.v    # Decoder test
-│   └── z_core_reg_file_tb.v   # Register file test
+│   ├── z_core_reg_file_tb.v   # Register file test
+│   ├── z_core_mult_unit_tb.v  # Multiplier unit test
+│   └── z_core_div_unit_tb.v   # Divider unit test
 │
 └── doc/                       # Documentation
     ├── AXI_INTERFACE.md       # AXI protocol details
@@ -156,9 +165,9 @@ vvp sim/z_core_control_u_tb.vvp
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                           ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  133                                        ║
-║  Passed:       133                                        ║
-║  Failed:        0                                         ║
+║  Total Tests:  183                                         ║
+║  Passed:       183                                         ║
+║  Failed:        0                                          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║
 ╚═══════════════════════════════════════════════════════════╝
@@ -172,7 +181,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 
 ## Test Coverage
 
-The processor has been verified with **133 comprehensive tests** across 15 test suites:
+The processor has been verified with **183 comprehensive tests** across 17 test suites:
 
 | Test Suite | Description | Tests |
 |------------|-------------|-------|
@@ -190,7 +199,8 @@ The processor has been verified with **133 comprehensive tests** across 15 test 
 | GPIO | Bidirectional GPIO | 2 |
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
-| **RISCOF Compliance** | **Official RISC-V Architectural Tests** | **41** |
+| **M Extension** | MUL, DIV, REM, Forwarding Stress | 10 |
+| **RISCOF Compliance** | **Official RISC-V RV32I Architectural Tests** | **41** |
 | Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 53 |
 
 ## Performance
@@ -202,6 +212,8 @@ The processor has been verified with **133 comprehensive tests** across 15 test 
 | Register File | 32 x 32-bit |
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
+
+> Note: The processor thtoughput is now limited by the memory latency (Around 10 cycles per memory access). Therefore, the current processor implementation cannot reach the ideal throughput of 1 cycle per instruction.
 
 ## Configuration
 
@@ -239,8 +251,8 @@ Detailed documentation is available in the `doc/` directory:
 - [x] Modular IO (UART, GPIO)
 - [x] Pipelining for improved throughput
 - [x] FPGA synthesis and validation **[Z-Core-FPGA repository](https://github.com/paudiaz99/Z-Core-FPGA)** 
+- [x] M extension (multiply/divide)
 - [ ] **Branch prediction & Instruction Cache**
-- [ ] M extension (multiply/divide)
 - [ ] C extension (compressed instructions)
 - [ ] Interrupt support
 - [ ] Extra Peripherals (VGA Controller, Timer, etc.)
