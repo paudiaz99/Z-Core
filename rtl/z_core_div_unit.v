@@ -44,9 +44,9 @@ localparam DONE   = 3'd4;
 
 reg [2:0] state;
 reg [31:0] quotient;
-reg [63:0] remainder;
-reg [63:0] temp_remainder;
-reg [63:0] divisor_reg;
+reg [64:0] remainder;      // 65 bits: extra bit for borrow detection
+reg [64:0] temp_remainder; // 65 bits
+reg [64:0] divisor_reg;    // 65 bits
 reg [5:0] iteration_count;
 
 // Sign tracking for signed division
@@ -72,9 +72,9 @@ always @(posedge clk) begin
         div_running <= 1'b0;
         div_result <= 32'b0;
         quotient <= 32'b0;
-        remainder <= 64'b0;
-        temp_remainder <= 64'b0;
-        divisor_reg <= 64'b0;
+        remainder <= 65'b0;
+        temp_remainder <= 65'b0;
+        divisor_reg <= 65'b0;
         iteration_count <= 6'b0;
         dividend_neg <= 1'b0;
         divisor_neg <= 1'b0;
@@ -94,10 +94,10 @@ always @(posedge clk) begin
                     divisor_neg  <= is_signed & divisor[31];
                     
                     // Initialize for new division using absolute values
-                    // Remainder: absolute dividend in lower 32 bits
-                    remainder <= {32'b0, abs_dividend};
-                    // Divisor: absolute divisor in upper 32 bits
-                    divisor_reg <= {abs_divisor, 32'b0};
+                    // Remainder: absolute dividend in lower 32 bits (65-bit with leading 0)
+                    remainder <= {33'b0, abs_dividend};
+                    // Divisor: absolute divisor in upper 32 bits (65-bit with leading 0)
+                    divisor_reg <= {1'b0, abs_divisor, 32'b0};
                     quotient <= 32'b0;
                     iteration_count <= 6'b0;
                     div_running <= 1'b1;
@@ -113,18 +113,18 @@ always @(posedge clk) begin
             end
 
             SHIFT: begin
-                // Step 2: Check sign of result (bit 63)
-                if (remainder[63]) begin
-                    // Result < 0: Restore remainder, shift quotient left with 0
+                // Step 2: Check borrow bit (bit 64) for unsigned subtraction
+                if (remainder[64]) begin
+                    // Borrow occurred: Restore remainder, shift quotient left with 0
                     remainder <= temp_remainder;
                     quotient <= {quotient[30:0], 1'b0};
                 end else begin
-                    // Result >= 0: Keep remainder, shift quotient left with 1
+                    // No borrow: Keep remainder, shift quotient left with 1
                     quotient <= {quotient[30:0], 1'b1};
                 end
 
                 // Step 3: Shift divisor right by 1
-                divisor_reg <= {1'b0, divisor_reg[63:1]};
+                divisor_reg <= {1'b0, divisor_reg[64:1]};
 
                 // Increment iteration counter
                 iteration_count <= iteration_count + 1;

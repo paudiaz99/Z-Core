@@ -348,9 +348,21 @@ wire div_running; // When division is running, we have to stall the pipeline
 wire div_done;
 wire [31:0] div_result;
 
-// Simple div_start: start immediately when div instruction enters EX
+// Division by zero detection (RISC-V spec):
+// - DIV/DIVU by 0:  result = -1 (0xFFFFFFFF)
+// - REM/REMU by 0:  result = dividend
+wire div_by_zero = (alu_in2 == 32'b0);
+wire [31:0] div_by_zero_result = id_ex_funct3[1] ? alu_in1 : 32'hFFFFFFFF;
+
+// Only start division unit if divisor is non-zero
 // Forwarding from ex_mem should work since values update before being sampled
-wire div_start = !div_running && !div_done && id_ex_is_div && id_ex_valid;
+wire div_start = !div_running && !div_done && id_ex_is_div && id_ex_valid && !div_by_zero;
+
+// Division complete: either div_done from unit OR div_by_zero (instant)
+wire div_complete = div_done || (id_ex_is_div && div_by_zero);
+
+// Final division result: use bypass result for div-by-zero, otherwise unit result
+wire [31:0] div_final_result = div_by_zero ? div_by_zero_result : div_result;
 
 z_core_div_unit div_unit (
     .clk(clk),
@@ -404,7 +416,7 @@ assign halt = if_id_valid && (dec_is_ecall || dec_is_ebreak);
 // 1. MEM stage has pending operation waiting for completion (mem_stall)
 // 2. EX/MEM has load/store but can't start yet (waiting for AXI bus to be free)
 // 3. Division instruction in EX stage and division not complete yet
-wire div_stall = id_ex_valid && id_ex_is_div && !div_done;
+wire div_stall = id_ex_valid && id_ex_is_div && !div_complete;
 
 wire ex_stall = mem_stall || 
                 (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
@@ -622,7 +634,7 @@ end
 wire [31:0] ex_result = id_ex_is_lui   ? id_ex_imm :
                         id_ex_is_auipc ? (id_ex_pc + id_ex_imm) :
                         (id_ex_is_jal || id_ex_is_jalr) ? (id_ex_pc + 4) :
-                        id_ex_is_div ? div_result :
+                        id_ex_is_div ? div_final_result :
                         alu_out;
 
 always @(posedge clk) begin

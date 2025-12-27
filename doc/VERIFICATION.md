@@ -8,26 +8,26 @@ This document describes the verification strategy, test coverage, and results fo
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                         Z-Core Test Environment                             │
-│                                                                              │
+│                         Z-Core Test Environment                            │
+│                                                                            │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    z_core_control_u_tb.sv                             │  │
+│  │                    z_core_control_u_tb.sv                            │  │
 │  │  ┌────────────────────────────────────────────────────────────────┐  │  │
-│  │  │                    Test Orchestration                           │  │  │
+│  │  │                    Test Orchestration                          │  │  │
 │  │  │  - Program Loading (load_testN tasks)                          │  │  │
-│  │  │  - CPU Reset Management                                         │  │  │
+│  │  │  - CPU Reset Management                                        │  │  │
 │  │  │  - Result Verification (check_reg, check_mem tasks)            │  │  │
-│  │  │  - Pass/Fail Reporting                                          │  │  │
+│  │  │  - Pass/Fail Reporting                                         │  │  │
 │  │  └────────────────────────────────────────────────────────────────┘  │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                        │
-│                                    ▼                                        │
+│                                    │                                       │
+│                                    ▼                                       │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    Device Under Test (DUT)                            │  │
-│  │  ┌────────────────────┐      AXI-Lite      ┌────────────────────┐   │  │
-│  │  │  z_core_control_u  │◄──────────────────►│ axil_interconnect  │   │  │
-│  │  │    (CPU Core)      │                    │                    │   │  │
-│  │  └────────────────────┘                    └─────────┬──────────┘   │  │
+│  │                    Device Under Test (DUT)                           │  │
+│  │  ┌────────────────────┐      AXI-Lite      ┌────────────────────┐    │  │
+│  │  │  z_core_control_u  │◄──────────────────►│ axil_interconnect  │    │  │
+│  │  │    (CPU Core)      │                    │                    │    │  │
+│  │  └────────────────────┘                    └─────────┬──────────┘    │  │
 │  │                                                      │               │  │
 │  │                                          ┌───────────▼───────────┐   │  │
 │  │                                          │   AXI-Lite Slaves     │   │  │
@@ -36,9 +36,9 @@ This document describes the verification strategy, test coverage, and results fo
 │  │                                          │ - GPIO (Wrapper)      │   │  │
 │  │                                          └───────────────────────┘   │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│  Output: VCD Waveforms, Test Results, Coverage Report                       │
-34: └────────────────────────────────────────────────────────────────────────────┘
+│                                                                            │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Test Suites
@@ -375,7 +375,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 ```
 ╔═══════════════════════════════════════════════════════════╗
 ║           Z-Core RISC-V Processor Test Suite              ║
-║                   RV32I Instruction Set                    ║
+║                   RV32I Instruction Set                   ║
 ╚═══════════════════════════════════════════════════════════╝
 
 --- Loading Test 1: Arithmetic Operations ---
@@ -385,13 +385,13 @@ gtkwave sim/z_core_control_u_tb.vcd
   ...
 
 ╔═══════════════════════════════════════════════════════════╗
-║                    TEST SUMMARY                            ║
+║                    TEST SUMMARY                           ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  183                                         ║
-║  Passed:       183                                         ║
-║  Failed:        0                                          ║
+║  Total Tests:  183                                        ║
+║  Passed:       183                                        ║
+║  Failed:        0                                         ║
 ╠═══════════════════════════════════════════════════════════╣
-║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                ║
+║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║
 ╚═══════════════════════════════════════════════════════════╝
 ```
 
@@ -408,55 +408,30 @@ Key signals to observe in GTKWave:
 | `axil_awvalid/awready` | AXI Write handshake |
 | `uut.reg_file.reg_r*_q` | Register values |
 
-## Known Limitations
 
-1. **No interrupts**: Interrupt handling not implemented
-2. ~~**No pipeline**: Multi-cycle execution only~~ Converted to 5-stage pipeline
+## RISCOF Compliance
 
-## RISCOF Compliance Testing
+Z-Core has passed all **49 official RISCOF architectural tests** for the **RV32IM** ISA.
 
-Z-Core includes infrastructure for RISC-V architectural compliance testing:
+| Test Suite | Tests | Status |
+|------------|-------|--------|
+| **RV32I Base Integer** | 41 | <font color="green">All Passed</font> |
+| **RV32M Multiply/Divide** | 8 | <font color="green">All Passed</font> |
+| **Total** | **49** | <font color="green">All Passed</font> |
 
-### Setup Requirements
+### Extended Coverage Tests
 
-1. **RISC-V GNU Toolchain** (`riscv32-unknown-elf-gcc`)
-2. **Spike** reference model (`riscv-isa-sim`)
-3. **RISCOF** Python package (`pip install riscof`)
-4. **riscv-arch-test** repository
+In addition to the official RISCOF tests, Z-Core has been validated with **45 extended coverage tests** generated by `riscv_ctg` (RISC-V Compliance Test Generator). These tests provide additional coverage for corner cases.
 
-### Running RISCOF Tests
+| Test Suite | Tests | Status |
+|------------|-------|--------|
+| **Generated RV32IM Tests** | 45 | <font color="green">All Passed</font> |
 
-```bash
-# Navigate to RISCOF directory
-cd riscof
-
-# Update config.ini with your Spike installation path
-
-# Validate configuration
-riscof validateyaml --config=config.ini
-
-# Run compliance tests
-riscof run --config=config.ini \
-  --suite=/path/to/riscv-arch-test/riscv-test-suite \
-  --env=/path/to/riscv-arch-test/riscv-test-suite/env
-```
-
-### RISCOF Files
-
-| File | Description |
-|------|-------------|
-| `riscof/config.ini` | RISCOF configuration |
-| `riscof/z_core/z_core_isa.yaml` | ISA specification |
-| `riscof/z_core/z_core_platform.yaml` | Platform specification |
-| `riscof/z_core/riscof_z_core.py` | DUT plugin |
-| `riscof/z_core/env/model_test.h` | Test macros |
-| `riscof/z_core/env/link.ld` | Linker script |
-| `tb/z_core_riscof_tb.sv` | RISCOF testbench |
+> **Note**: The RISCOF verification infrastructure is maintained in a separate `riscof/` directory (not included in the main repository). See the RISCOF directory's README for setup and usage instructions.
 
 ## Future Verification Plans
 
-1. [x] RISC-V official compliance tests (RISCOF infrastructure)
-2. [x] Run full RISCOF test suite
-5. [ ] Formal verification of critical paths
-6. [ ] Coverage-driven verification
-
+1. [x] RISC-V official compliance tests (RISCOF)
+2. [x] Run full RISCOF test suite for RV32IM
+3. [x] Extended coverage tests (riscv_ctg)
+4. [ ] Formal verification of critical paths
