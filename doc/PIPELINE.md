@@ -451,13 +451,13 @@ All RV32I instructions are fully supported:
 
 | Category | Instructions | Status |
 |----------|--------------|--------|
-| **R-type** | ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU | ✅ Working |
-| **I-type (ALU)** | ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI, SLTI, SLTIU | ✅ Working |
-| **I-type (Load)** | LW, LH, LB, LHU, LBU | ✅ Working |
-| **S-type (Store)** | SW, SH, SB | ✅ Working |
-| **U-type** | LUI, AUIPC | ✅ Working |
-| **J-type** | JAL, JALR | ✅ Working |
-| **B-type** | BEQ, BNE, BLT, BGE, BLTU, BGEU | ✅ Working |
+| **R-type** | ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU | [x] Working |
+| **I-type (ALU)** | ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI, SLTI, SLTIU | [x] Working |
+| **I-type (Load)** | LW, LH, LB, LHU, LBU | [x] Working |
+| **S-type (Store)** | SW, SH, SB | [x] Working |
+| **U-type** | LUI, AUIPC | [x] Working |
+| **J-type** | JAL, JALR | [x] Working |
+| **B-type** | BEQ, BNE, BLT, BGE, BLTU, BGEU | [x] Working |
 
 ---
 
@@ -467,25 +467,25 @@ All 19 tests pass:
 
 | Test | Description | Status |
 |------|-------------|--------|
-| 1 | Arithmetic (ADD, SUB, ADDI) | ✅ PASS |
-| 2 | Logical (AND, OR, XOR) | ✅ PASS |
-| 3 | Shifts (SLL, SRL, SRA) | ✅ PASS |
-| 4 | Memory (LW, SW) | ✅ PASS |
-| 5 | Compare (SLT, SLTU) | ✅ PASS |
-| 6 | LUI/AUIPC | ✅ PASS |
-| 7 | Fibonacci Integration | ✅ PASS |
-| 8 | Branches (BEQ, BNE, BLT, BGE, BLTU, BGEU) | ✅ PASS |
-| 9 | Jumps (JAL, JALR) | ✅ PASS |
-| 10 | Backward Branch Loop | ✅ PASS |
-| 11 | IO Access (UART/GPIO) | ✅ PASS |
-| 12 | GPIO Bidirectional | ✅ PASS |
-| 13 | Byte/Halfword Load/Store | ✅ PASS |
-| 14 | UART Loopback | ✅ PASS |
-| 15 | RAW Hazard Stress | ✅ PASS |
-| 16 | Full ALU Coverage | ✅ PASS |
-| 17 | Nested Loops | ✅ PASS |
-| 18 | Memory Access Pattern Stress | ✅ PASS |
-| 19 | Mixed Instruction Stress | ✅ PASS |
+| 1 | Arithmetic (ADD, SUB, ADDI) | [x] PASS |
+| 2 | Logical (AND, OR, XOR) | [x] PASS |
+| 3 | Shifts (SLL, SRL, SRA) | [x] PASS |
+| 4 | Memory (LW, SW) | [x] PASS |
+| 5 | Compare (SLT, SLTU) | [x] PASS |
+| 6 | LUI/AUIPC | [x] PASS |
+| 7 | Fibonacci Integration | [x] PASS |
+| 8 | Branches (BEQ, BNE, BLT, BGE, BLTU, BGEU) | [x] PASS |
+| 9 | Jumps (JAL, JALR) | [x] PASS |
+| 10 | Backward Branch Loop | [x] PASS |
+| 11 | IO Access (UART/GPIO) | [x] PASS |
+| 12 | GPIO Bidirectional | [x] PASS |
+| 13 | Byte/Halfword Load/Store | [x] PASS |
+| 14 | UART Loopback | [x] PASS |
+| 15 | RAW Hazard Stress | [x] PASS |
+| 16 | Full ALU Coverage | [x] PASS |
+| 17 | Nested Loops | [x] PASS |
+| 18 | Memory Access Pattern Stress | [x] PASS |
+| 19 | Mixed Instruction Stress | [x] PASS |
 
 ---
 
