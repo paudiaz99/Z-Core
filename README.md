@@ -35,36 +35,13 @@
 
 ## Architecture
 
-```
-                    ┌───────────────────────────────────────────────────────────────┐
-                    │                          Z-Core CPU                           │
-                    │     ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
-                    │     │ Decoder │  │Reg File │  │ALU Ctrl │  │   ALU   │        │
-                    │     └────┬────┘  └────┬────┘  └───┬─────┘  └────┬────┘        │
-                    │          └────────────┴───────────┴─────────────┘             │
-                    │                                                               │
-                    │          ┌────────┐   ┌────────┐   ┌────────┐   ┌────────┐    │
-                    │     ┌───►│ FETCH  │──►│ DECODE │──►│EXECUTE │──►│WB/MEM  │    │
-                    │     │    └────▲───┘   └────▲───┘   └────▲───┘   └────▲───┘    │
-                    │     │         │            │            │            │        │
-                    │     └─────────┴────────────┴────────────┴────────────┘        │
-                    │                      Control Unit (Pipeline)                  │
-                    │                             │                                 │
-                    │               ┌─────────────┴──────────────┐                  │
-                    │               │      AXI-Lite Master       │                  │
-                    │               └─────────────┬──────────────┘                  │
-                    └─────────────────────────────┼─────────────────────────────────┘
-                                                  │ AXI-Lite Bus
-                                                  ▼
-                                    ┌─────────────────────────┐
-                                    │  AXI-Lite Interconnect  │
-                                    └─┬──────────┬──────────┬─┘
-                                      │          │          │
-                  ┌───────────────────▼─┐  ┌─────▼────┐  ┌──▼───────┐
-                  │    Memory (RAM)     │  │   UART   │  │   GPIO   │
-                  └─────────────────────┘  └──────────┘  └──────────┘
-```
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/50bac403-7920-4caf-81a2-609e63d777d9" alt="centered image">
+  <br>
+  <sup>Z-Core SoC Architecture.</sup>
+</div>
 
+> **Note**: For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
 ## Supported Instructions
 
 | Type | Instructions | Description |
