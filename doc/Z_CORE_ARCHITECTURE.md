@@ -4,34 +4,13 @@
 
 Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruction set. It uses a **5-stage pipelined architecture** (IF, ID, EX, MEM, WB) with an AXI4-Lite memory interface.
 
-## Block Diagram
+## Z-Core Architecture Diagram
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                            Z-Core Top Module                                 │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                     Control Unit (Pipeline)                             │ │
-│  │  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌───────────┐  ┌──────────┐ │ │
-│  │  │ IF Stage │─►│ ID Stage  │─►│ EX Stage │─►│ MEM Stage │─►│ WB Stage │ │ │
-│  │  └──────────┘  └───────────┘  └──────────┘  └───────────┘  └──────────┘ │ │
-│  │                                                   │                     │ │
-│  │                                              ┌────┴────┐                │ │
-│  │                                              │ AXI Mst │                │ │
-│  │                                              └────┬────┘                │ │
-│  └───────────────────────────────────────────────────│─────────────────────┘ │
-│                                                      │ AXI-Lite              │
-│                                                      ▼                       │
-│                                      ┌─────────────────────────┐             │
-│                                      │  AXI-Lite Interconnect  │             │
-│                                      └─┬──────────┬──────────┬─┘             │
-│                                        │          │          │               │
-│                    ┌───────────────────▼─┐  ┌─────▼────┐  ┌──▼───────┐       │
-│                    │    Memory (RAM)     │  │   UART   │  │   GPIO   │       │
-│                    └─────────────────────┘  └──────────┘  └──────────┘       │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/7b391614-59e9-4d7f-9c6c-08ad8f6601e3" alt="centered image">
+  <br>
+  <sup>Z-Core RV32IM Architecture Diagram.</sup>
+</div>
 
 ## Module Descriptions
 
@@ -229,12 +208,6 @@ Based on **Patterson & Hennessy "Computer Organization and Design" RISC-V Editio
 Pipelined control unit with Hazard Detection and Forwarding Unit.
 
 **Pipeline Stages:**
-```
-   ┌──────┐      ┌──────┐      ┌──────┐       ┌───────┐      ┌──────┐
-──►│  IF  │─────►│  ID  │─────►│  EX  │──────►│  MEM  │─────►│  WB  │──►
-   └──────┘      └──────┘      └──────┘       └───────┘      └──────┘
-   Fetch         Decode        Execute        Memory         Writeback
-```
 
 | Stage | Description                                      |
 |-------|--------------------------------------------------|
