@@ -272,7 +272,7 @@ Run the testbench to verify AXI interface operation:
 
 ```bash
 cd /path/to/Z-Core
-iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.v
+iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv
 vvp sim/z_core_control_u_tb.vvp
 ```
 
@@ -289,7 +289,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 | rtl/axil_master.v         | AXI-Lite master protocol handler         |
 | rtl/axi_mem.v             | AXI-Lite RAM slave                       |
 | rtl/z_core_control_u.v    | Control unit with AXI master integration |
-| tb/z_core_control_u_tb.v  | Testbench for AXI interface verification |
+| tb/z_core_control_u_tb.sv | Testbench for AXI interface verification |
 
 ## Acknowledgements
 

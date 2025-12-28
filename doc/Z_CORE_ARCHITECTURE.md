@@ -2,19 +2,31 @@
 
 ## Overview
 
-Z-Core is a 32-bit RISC-V processor implementing the RV32I base integer instruction set. It uses a **5-stage pipelined architecture** (IF, ID, EX, MEM, WB) with an AXI4-Lite memory interface.
+Z-Core is a 32-bit RISC-V processor implementing the RV32IM base integer instruction set. It uses a **5-stage pipelined architecture** (IF, ID, EX, MEM, WB) with an AXI4-Lite memory interface.
 
 ## Z-Core Architecture Diagram
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/7b391614-59e9-4d7f-9c6c-08ad8f6601e3" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/c02b2a54-ae7c-4070-adcd-875faa8720d2" alt="centered image">
   <br>
   <sup>Z-Core RV32IM Architecture Diagram.</sup>
 </div>
 
-## Module Descriptions
+## 1. Z-Core Processor (Control Unit) (`z_core_control_u`)
 
-### 1. Instruction Decoder (`z_core_decoder`)
+The **Control Unit** is the top-level module of the processor core. It orchestrates the operation of all internal components and manages the execution pipeline. It is responsible for:
+
+- **Pipeline Staging**: Manages the flow of instructions through IF, ID, EX, MEM, and WB stages.
+- **Control Signals**: Generates signals for register writes, memory access, and ALU operations.
+- **Hazard Detection**: 
+  - Detects Load-Use hazards and inserts stalls.
+  - Detects Control Hazards (Branch/Jump) and flushes the pipeline.
+- **Forwarding Unit**: Solves Data Hazards by forwarding results from EX/MEM and MEM/WB stages to the ID/EX stage.
+- **System Signals**: Handles reset logic and halt signals (for simulation/verification).
+
+The following components are **instantiated internally** within the Control Unit structure:
+
+### 1.1 Instruction Decoder (`z_core_decoder`)
 
 Decodes 32-bit RISC-V instructions into control signals and immediate values.
 
@@ -27,7 +39,7 @@ Decodes 32-bit RISC-V instructions into control signals and immediate values.
 - `funct3[2:0]`, `funct7[6:0]` - Function fields
 - `Iimm`, `Simm`, `Uimm`, `Bimm`, `Jimm` - Immediate values (sign-extended)
 
-### 2. Register File (`z_core_reg_file`)
+### 1.2 Register File (`z_core_reg_file`)
 
 32 x 32-bit general-purpose registers with asynchronous read and synchronous write.
 
@@ -50,7 +62,7 @@ Decodes 32-bit RISC-V instructions into control signals and immediate values.
 | rs1_out      | Output    | 32    | Data from rs1        |
 | rs2_out      | Output    | 32    | Data from rs2        |
 
-### 3. ALU Control (`z_core_alu_ctrl`)
+### 1.3 ALU Control (`z_core_alu_ctrl`)
 
 Generates ALU operation codes based on instruction opcode and function fields.
 
@@ -74,9 +86,9 @@ Generates ALU operation codes based on instruction opcode and function fields.
 | 14   | BLTU      | Branch if < (u)     |
 | 15   | BGEU      | Branch if >= (u)    |
 
-### 4. ALU (`z_core_alu`)
+### 1.4 ALU (`z_core_alu`)
 
-Performs arithmetic, logical, and comparison operations.
+Performs arithmetic, logical, and comparison operations. It instantiates the **Multiplication Unit** (`z_core_mult_unit`) internally.
 
 **Ports:**
 | Port          | Direction | Width | Description      |
@@ -87,9 +99,9 @@ Performs arithmetic, logical, and comparison operations.
 | alu_out       | Output    | 32    | Result           |
 | alu_branch    | Output    | 1     | Branch condition |
 
-### 5. Multiplication Unit (`z_core_mult_unit`)
+#### 1.4.1 Multiplication Unit (`z_core_mult_unit`)
 
-A 32×32→64 bit multiplier supporting the full **RISC-V M Extension**:
+Instantiated within the ALU (`z_core_alu`), this unit performs 32×32→64 bit multiplication supporting the full **RISC-V M Extension**:
 
 | Instruction | Operands | Description |
 |-------------|----------|-------------|
@@ -98,7 +110,7 @@ A 32×32→64 bit multiplier supporting the full **RISC-V M Extension**:
 | MULHSU | signed × unsigned | Upper 32 bits of signed × unsigned |
 | MULHU | unsigned × unsigned | Upper 32 bits of unsigned multiplication |
 
-#### Implementation Options
+#### 1.4.1.1 Implementation Options
 
 Two implementations are available, selectable via `define` in `z_core_mult_unit.v`:
 
@@ -115,7 +127,7 @@ Two implementations are available, selectable via `define` in `z_core_mult_unit.
 > [!TIP]
 > The **synthesis-optimized version** is the default. It allows the synthesis tool to use DSP blocks on FPGAs or optimized multiplier cells on ASICs. The tree version is provided for educational purposes to understand the Patterson & Hennessy Figure 3.7 architecture.
 
-#### Signed Multiplication Approach
+#### 1.4.1.2 Signed Multiplication Approach
 
 Both implementations use the same area-efficient signed multiplication approach:
 
@@ -123,7 +135,7 @@ Both implementations use the same area-efficient signed multiplication approach:
 2. **Unsigned Multiplication**: Perform unsigned multiply
 3. **Sign Correction**: Negate result if exactly one operand was negative
 
-#### Tree Implementation Details (Educational)
+#### 1.4.1.3 Tree Implementation Details (Educational)
 
 The tree version follows Patterson & Hennessy Figure 3.7:
 - 32 partial products summed in a binary tree
@@ -139,19 +151,11 @@ The tree version follows Patterson & Hennessy Figure 3.7:
 | op2_signed | Input     | 1     | Treat op2 as signed       |
 | result     | Output    | 64    | Product                   |
 
-### 6. Division Unit (`z_core_div_unit`)
+### 1.5 Division Unit (`z_core_div_unit`)
 
-A 32÷32→32 bit divider supporting the **RISC-V M Extension** division instructions:
+A 32÷32→32 bit divider supporting the **RISC-V M Extension** division instructions (DIV, DIVU, REM, REMU).
 
-| Instruction | Operands | Description |
-|-------------|----------|-------------|
-| DIV | signed ÷ signed | Signed division quotient |
-| DIVU | unsigned ÷ unsigned | Unsigned division quotient |
-| REM | signed % signed | Signed division remainder |
-| REMU | unsigned % unsigned | Unsigned division remainder |
-
-#### Algorithm
-
+**Algorithm:**
 Based on **Patterson & Hennessy "Computer Organization and Design" RISC-V Edition, Figure 3.8**:
 
 ```
@@ -164,7 +168,7 @@ Based on **Patterson & Hennessy "Computer Organization and Design" RISC-V Editio
 3. Apply sign correction for signed operations
 ```
 
-#### Signed Division Handling
+#### 1.5.1 Signed Division Handling
 
 1. **Convert** operands to absolute values
 2. **Divide** using unsigned algorithm
@@ -172,7 +176,7 @@ Based on **Patterson & Hennessy "Computer Organization and Design" RISC-V Editio
    - Quotient: negative if operand signs differ
    - Remainder: same sign as dividend (per RISC-V spec)
 
-#### Performance & Pipeline Integration
+#### 1.5.2 Performance & Pipeline Integration
 
 | Metric | Value |
 |--------|-------|
@@ -203,26 +207,36 @@ Based on **Patterson & Hennessy "Computer Organization and Design" RISC-V Editio
 | div_done       | Output    | 1     | Division complete         |
 | div_result     | Output    | 32    | Quotient or remainder     |
 
-### 7. Control Unit (`z_core_control_u`)
+### 1.6 Load/Store Unit Logic (LSU)
 
-Pipelined control unit with Hazard Detection and Forwarding Unit.
+Although not a standalone module, the Control Unit contains dedicated logic acting as an LSU:
+- **Function**: Handles data alignment for byte/halfword/word accesses (LB, LH, LW, SB, SH, SW).
+- **Alignment**:
+  - Shifts write data to correct byte lanes based on address LSBs.
+  - Generates appropriate Write Strobes (`wstrb`) for the AXI-Lite interface.
+  - Sign-extends or zero-extends read data based on instruction type (signed vs unsigned loads).
+- **Arbiter**: Manages access to the AXI-Lite Master, prioritizing data access (Load/Store) over instruction fetch if a conflict occurs.
 
-**Pipeline Stages:**
+### 1.7 AXI-Lite Master (`axil_master`)
 
-| Stage | Description                                      |
-|-------|--------------------------------------------------|
-| IF    | Instruction Fetch from memory                    |
-| ID    | Instruction Decode & Register Read               |
-| EX    | ALU Operation / Address Calculation              |
-| MEM   | Data Memory Access (Load/Store)                  |
-| WB    | Write Back result to Register File               |
+A separate module instantiated within the Control Unit (`u_axil_master`) to handle AXI4-Lite bus protocol communication.
 
-**Hazard Handling:**
-- **Data Hazards**: Forwarding (EX->EX, MEM->EX) and Stalling (Load-Use)
-- **Control Hazards**: Branch prediction (not implemented) / Flush on taken branch
-- **Structural Hazards**: Memory arbiter for IF/MEM conflict
+- **Role**: Bridges the internal simple memory interface (Request/Grant) to the AXI4-Lite protocol.
+- **Channels**: Manages all 5 AXI4-Lite channels (AW, W, B, AR, R).
+- **Features**:
+  - Handles handshake signals (`VALID`/`READY`).
+  - Serializes requests if necessary (though current CPU is single-issue blocking).
+  - Converts internal read/write signals into AXI address and data phases.
 
-### 8. AXI-Lite Interconnect (`axil_interconnect`)
+## 2. Peripherals & Interconnect
+
+These components reside **outside** the Z-Core Control Unit and are connected via the AXI-Lite bus.
+
+### 2.1 AXI-Lite RAM (`axil_ram`)
+
+The **AXI-Lite RAM** serves as the main memory for the SoC, storing both program instructions and data. It is an AXI4-Lite slave module designed for high compatibility and simple integration.
+
+### 2.2 AXI-Lite Interconnect (`axil_interconnect`)
 
 Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
@@ -230,21 +244,16 @@ Connects the Control Unit (Master) to multiple Slaves based on the address map.
 - 1 Slave Interface (from Control Unit)
 - 3 Master Interfaces (to Memory, UART, GPIO)
 
-### 9. Peripherals
-
-#### UART (`axil_uart`)
+### 2.3 UART (`axil_uart`)
 - Base Address: `0x0400_0000`
 - Size: 4KB
-- Uses `axil_slave` wrapper to expose User Interface.
+- Uses direct AXI-Lite Slave interface logic.
 
-#### GPIO (`axil_gpio`)
+### 2.4 GPIO (`axil_gpio`)
 - Base Address: `0x0400_1000`
 - Size: 4KB
-- Uses `axil_slave` wrapper to expose User Interface.
+- Uses direct AXI-Lite Slave interface logic.
 
-#### Generic Slave (`axil_slave`)
-- Reusable AXI-Lite slave interface.
-- Handles handshake and exposes simple Read/Write interface (`usr_addr`, `usr_wdata`, `usr_wen`, `usr_ren`, `usr_rdata`).
 
 ## Supported Instructions
 
@@ -292,39 +301,6 @@ The processor uses a unified address space for instructions and data:
 
 **Note:** The current implementation uses word-aligned (4-byte) accesses only.
 
-## Timing
-
-Each instruction takes multiple clock cycles:
-
-| Instruction Type | Throughput | Latency |
-|------------------|------------|---------|
-| R-Type           | 1 cycle    | 5 cycles|
-| I-Type (ALU)     | 1 cycle    | 5 cycles|
-| Load             | 1 cycle    | 5 cycles|
-| Store            | 1 cycle    | 5 cycles|
-| Branch           | 1-3 cycles | 3 cycles|
-| JAL/JALR         | 2 cycles   | 3 cycles|
-
-## Files
-
-| File                     | Description                    |
-|--------------------------|--------------------------------|
-| rtl/z_core_top_model.v   | Top-level wrapper              |
-| rtl/z_core_control_u.v   | Control unit / CPU Core        |
-| rtl/z_core_decoder.v     | Instruction decoder            |
-| rtl/z_core_reg_file.v    | Register file                  |
-| rtl/z_core_alu_ctrl.v    | ALU control                    |
-| rtl/z_core_alu.v         | Arithmetic logic unit          |
-| rtl/z_core_mult_unit.v   | Tree multiplier (32×32→64)     |
-| rtl/z_core_div_unit.v    | Division unit (32÷32→32)       |
-| rtl/adder_32b.v          | 32-bit ripple carry adder      |
-| rtl/full_adder.v         | 1-bit full adder               |
-| rtl/axil_interconnect.v  | AXI-Lite Interconnect          |
-| rtl/axi_mem.v            | AXI-Lite RAM                   |
-| rtl/axil_slave.v         | Generic AXI-Lite Slave         |
-| rtl/axil_uart.v          | UART Module                    |
-| rtl/axil_gpio.v          | GPIO Module                    |
-
 ## Simulation
 
 ### Running Tests
@@ -335,7 +311,7 @@ iverilog -o sim/z_core_alu_tb.vvp tb/z_core_alu_tb.v
 vvp sim/z_core_alu_tb.vvp
 
 # Compile and run full system test
-iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.v
+iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv
 vvp sim/z_core_control_u_tb.vvp
 ```
 
@@ -344,15 +320,3 @@ vvp sim/z_core_control_u_tb.vvp
 ```bash
 gtkwave sim/z_core_control_u_tb.vcd
 ```
-
-## Future Enhancements
-
-1. ~~**Multiple Data Sizes**: Support for byte/halfword load/store~~ ✓ Implemented
-2. ~~**Pipeline**: Convert to pipelined architecture for higher throughput~~ ✓ Implemented
-3. **Caching**: Add instruction and data caches
-4. **Interrupts**: Exception and interrupt handling
-5. **M Extension (Multiply/Divide)**: ✅ Implemented
-   - MUL, MULH, MULHSU, MULHU: Functional multiplication implemented with 31-adder tree architecture.
-   - DIV, DIVU, REM, REMU: Division unit implemented using Patterson & Hennessy algorithm (~68 cycles per division).
-6. **C Extension**: Compressed instructions
-7. ~~**Peripherals**: Capability to talk to the outter world~~ ✓ Implemented (UART, GPIO)

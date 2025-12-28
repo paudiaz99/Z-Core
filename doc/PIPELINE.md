@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Z-Core implements a **5-stage in-order stalling pipeline** for the RV32I instruction set. This document describes the complete pipeline architecture, data flow, hazard handling, memory interface, and implementation details.
+The Z-Core implements a **5-stage in-order stalling pipeline** for the RV32IM instruction set. This document describes the complete pipeline architecture, data flow, hazard handling, memory interface, and implementation details.
 
 ---
 
@@ -447,7 +447,7 @@ Target:                  IF             ID   EX   MEM  WB
 
 ## Supported Instructions
 
-All RV32I instructions are fully supported:
+All RV32IM instructions are fully supported:
 
 | Category | Instructions | Status |
 |----------|--------------|--------|
@@ -506,7 +506,6 @@ rtl/
 
 doc/
 ├── PIPELINE.md           # This file
-├── PIPELINE_BUGS.md      # Educational guide to timing bugs found
 └── Z_CORE_ARCHITECTURE.md # High-level architecture overview
 
 tb/
@@ -528,7 +527,7 @@ The pipeline required several non-obvious timing fixes:
 5. **STATE_READ_DONE**: AXI master ensures data stable before ready assertion
 6. **Bubble Signal Clearing**: `reg_write` signals must be cleared when stalling to prevent incorrect forwarding.
 
-For detailed explanations, see [PIPELINE_BUGS.md](PIPELINE_BUGS.md).
+
 
 ### Performance Characteristics
 
@@ -543,4 +542,3 @@ For detailed explanations, see [PIPELINE_BUGS.md](PIPELINE_BUGS.md).
 
 - [RISC-V Specification](https://riscv.org/specifications/)
 - Patterson & Hennessy, "Computer Organization and Design: RISC-V Edition"
-- [PIPELINE_BUGS.md](PIPELINE_BUGS.md) - Educational guide to timing issues found
