@@ -33,12 +33,19 @@
 - **Well Documented** - Extensive documentation and code comments
 - **Educational Focus** - Perfect for learning computer architecture
 
-## Architecture
+## Block Diagram
 
 <div align="center">
   <img src="https://github.com/user-attachments/assets/50bac403-7920-4caf-81a2-609e63d777d9" alt="centered image">
   <br>
   <sup>Z-Core SoC Architecture.</sup>
+</div>
+
+## Z-Core RV32IM Architecture
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/7b391614-59e9-4d7f-9c6c-08ad8f6601e3" alt="centered image">
+  <br>
+  <sup>Z-Core RV32IM Architecture Diagram.</sup>
 </div>
 
 > **Note**: For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
