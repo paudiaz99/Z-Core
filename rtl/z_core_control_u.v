@@ -463,7 +463,6 @@ always @(posedge clk) begin
         if_id_ir <= 32'h00000013;  // NOP
         if_id_pc <= 32'b0;
         if_id_valid <= 1'b0;
-        squash_now <= 1'b0;
         flush_r <= 1'b0;
         fetch_buffer_valid <= 1'b0;
         fetch_buffer_ir <= 32'b0;
@@ -553,6 +552,7 @@ wire [31:0] dec_fwd_rs2 =
 
 always @(posedge clk) begin
     if (~rstn) begin
+        squash_now <= 1'b0;
         id_ex_valid <= 1'b0;
         id_ex_pc <= 32'b0;
         id_ex_rs1_data <= 32'b0;
