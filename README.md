@@ -36,14 +36,14 @@
 ## Block Diagram
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/50bac403-7920-4caf-81a2-609e63d777d9" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/fec3a0e0-5cef-46e4-a3fd-7f07b1387a11" alt="centered image">
   <br>
   <sup>Z-Core SoC Architecture.</sup>
 </div>
 
 ## Z-Core RV32IM Architecture
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/7b391614-59e9-4d7f-9c6c-08ad8f6601e3" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/c02b2a54-ae7c-4070-adcd-875faa8720d2" alt="centered image">
   <br>
   <sup>Z-Core RV32IM Architecture Diagram.</sup>
 </div>
@@ -76,19 +76,21 @@ Z-Core/
 │   ├── z_core_mult_unit.v     # Multiplier unit
 │   ├── z_core_div_unit.v      # Divider unit
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
-│   ├── axil_slave.v           # Generic AXI-Lite Slave
+│   ├── axil_master.v          # AXI-Lite Master
 │   ├── axil_uart.v            # UART Module
 │   ├── axil_gpio.v            # GPIO Module
 │   └── axi_mem.v              # AXI-Lite RAM
 │
 ├── tb/                        # Testbenches
-│   ├── z_core_control_u_tb.v  # Full system test
+│   ├── z_core_control_u_tb.sv # Full system test
 │   ├── z_core_alu_tb.v        # ALU unit test
 │   ├── z_core_alu_ctrl_tb.v   # ALU control test
 │   ├── z_core_decoder_tb.v    # Decoder test
 │   ├── z_core_reg_file_tb.v   # Register file test
 │   ├── z_core_mult_unit_tb.v  # Multiplier unit test
-│   └── z_core_div_unit_tb.v   # Divider unit test
+│   ├── z_core_div_unit_tb.v   # Divider unit test
+│   ├── axil_gpio_tb.v         # GPIO testbench
+│   └── z_core_riscof_tb.sv    # RISCOF compliance testbench
 │
 └── doc/                       # Documentation
     ├── AXI_INTERFACE.md       # AXI protocol details
@@ -96,7 +98,6 @@ Z-Core/
     ├── UART.md                # UART module documentation
     ├── Z_CORE_ARCHITECTURE.md # Architecture overview
     ├── PIPELINE.md            # Pipeline implementation details
-    ├── RISCOF_COMPLIANCE_REPORT.md # Compliance verification
     └── VERIFICATION.md        # Verification details
 ```
 
@@ -125,7 +126,7 @@ mkdir -p sim
 iverilog -o sim/z_core_alu_tb.vvp tb/z_core_alu_tb.v && vvp sim/z_core_alu_tb.vvp
 
 # Run full system test (comprehensive)
-iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.v
+iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv
 vvp sim/z_core_control_u_tb.vvp
 ```
 
@@ -194,7 +195,7 @@ The processor has been verified with **183 comprehensive tests** across 17 test 
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
 
-> Note: The processor thtoughput is now limited by the memory latency (Around 10 cycles per memory access). Therefore, the current processor implementation cannot reach the ideal throughput of 1 cycle per instruction.
+> Note: The processor throughput is now limited by the memory latency (Around 10 cycles per memory access). Therefore, the current processor implementation cannot reach the ideal throughput of 1 cycle per instruction.
 
 ## Configuration
 
@@ -222,7 +223,6 @@ Detailed documentation is available in the `doc/` directory:
 - **[GPIO](doc/GPIO.md)** - Bidirectional GPIO module
 - **[UART](doc/UART.md)** - Serial UART module
 - **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
-- **[RISCOF Compliance Report](doc/RISCOF_COMPLIANCE_REPORT.md)** - Detailed compliance verification results
 
 ## Roadmap
 

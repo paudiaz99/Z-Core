@@ -298,7 +298,7 @@ Tests three forwarding scenarios:
 
 ## Instruction Coverage
 
-### RV32I Base Integer Instructions
+### RV32IM Base Integer Instructions
 
 | Category | Instructions | Tested | Coverage |
 |----------|-------------|--------|----------|
@@ -375,7 +375,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 ```
 ╔═══════════════════════════════════════════════════════════╗
 ║           Z-Core RISC-V Processor Test Suite              ║
-║                   RV32I Instruction Set                   ║
+║                  RV32IM Instruction Set                   ║
 ╚═══════════════════════════════════════════════════════════╝
 
 --- Loading Test 1: Arithmetic Operations ---
@@ -415,7 +415,7 @@ Z-Core has passed all **49 official RISCOF architectural tests** for the **RV32I
 
 | Test Suite | Tests | Status |
 |------------|-------|--------|
-| **RV32I Base Integer** | 41 | <font color="green">All Passed</font> |
+| **RV32IM Base Integer** | 41 | <font color="green">All Passed</font> |
 | **RV32M Multiply/Divide** | 8 | <font color="green">All Passed</font> |
 | **Total** | **49** | <font color="green">All Passed</font> |
 
