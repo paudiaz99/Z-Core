@@ -15,7 +15,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verilog](https://img.shields.io/badge/HDL-Verilog-blue.svg)](https://en.wikipedia.org/wiki/Verilog)
-[![RISC-V](https://img.shields.io/badge/ISA-RISC--V%20RV32IM-green.svg)](https://riscv.org/)
+![RISC-V](https://img.shields.io/badge/RISC--V-RV32IM-green?logo=riscv)
 [![Compliance](https://img.shields.io/badge/RISCOF-RV32IM%20Passed-brightgreen.svg)](https://github.com/riscv-software-src/riscof)
 
 </div>
