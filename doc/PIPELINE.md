@@ -91,14 +91,16 @@ graph LR
 The decode stage can receive forwarded data for immediate use in ID/EX:
 
 ```verilog
-dec_fwd_rs1 = (ex_mem_valid && ex_mem_rd == dec_rs1) ? ex_mem_alu_result :
-              (mem_wb_valid && mem_wb_rd == dec_rs1) ? mem_wb_result :
+dec_fwd_rs1 = (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == dec_rs1 && dec_rs1 != 0) 
+                ? ex_mem_alu_result :
+              (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs1 && mem_wb_rd != 0) 
+                ? mem_wb_result :
               rf_rs1_data;
 ```
 
 ### EX Stage (Execute)
 
-The EX stage performs ALU operations and evaluates branches:
+The EX stage performs ALU operations, evaluates branches, and handles division:
 
 ```mermaid
 graph TD
@@ -106,8 +108,11 @@ graph TD
     ID_EX --> ALU_MUX2[ALU Input 2 Mux]
     ALU_MUX1 --> ALU[ALU]
     ALU_MUX2 --> ALU
+    ALU_MUX1 --> DIV[Division Unit]
+    ALU_MUX2 --> DIV
     
     ALU --> RESULT_MUX[Result Mux]
+    DIV --> |div_result| RESULT_MUX
     ID_EX --> |PC+4| RESULT_MUX
     ID_EX --> |Immediate| RESULT_MUX
     
@@ -133,6 +138,7 @@ alu_in2 = (I-type|Load|Store|LUI|AUIPC|Jump) ? immediate
 ex_result = (LUI)        ? immediate
           : (AUIPC)      ? pc + immediate  
           : (JAL|JALR)   ? pc + 4          (return address)
+          : (DIV/REM)    ? div_result      (division/remainder)
           :                alu_out
 ```
 
@@ -202,7 +208,7 @@ graph TD
         C3["rs2_data: 32-bit (for stores)"]
         C4["rd: 5-bit"]
         C5["funct3: 3-bit"]
-        C6["is_load, is_store, reg_write"]
+        C6["is_load, is_store, is_div, reg_write"]
         C7["valid: 1-bit"]
     end
 
@@ -211,9 +217,12 @@ graph TD
         B2["rs1_data, rs2_data: 32-bit"]
         B3["imm: 32-bit"]
         B4["rd, rs1_addr, rs2_addr: 5-bit"]
-        B5["alu_op: 4-bit"]
-        B6["is_load, is_store, is_branch, is_jal, is_jalr, ..."]
-        B7["valid: 1-bit"]
+        B5["alu_op: 5-bit"]
+        B6["funct3: 3-bit"]
+        B7["is_load, is_store, is_branch, is_jal, is_jalr"]
+        B8["is_lui, is_auipc, is_r_type, is_i_alu, is_div"]
+        B9["reg_write: 1-bit"]
+        B10["valid: 1-bit"]
     end
 
     subgraph IF_ID["IF/ID Register"]
@@ -255,9 +264,7 @@ fwd_rs1_data = (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1_addr 
                  ? ex_mem_alu_result :
                (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 0) 
                  ? mem_wb_result :
-                (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 0) 
-                  ? mem_wb_result :
-                id_ex_rs1_data;
+               id_ex_rs1_data;
 ```
 
 > **Critical Fix**: `mem_wb_reg_write` must be explicitly cleared when the pipeline stalls (inserting a bubble). Otherwise, stalled, invalid instructions in the pipeline could be interpreted as valid writes, causing incorrect forwarding of "ghost" data.
@@ -274,9 +281,9 @@ ADD x3, x2, x4    ; Uses x2 - STALL required!
 
 **Detection:**
 ```verilog
-load_use_hazard = id_ex_valid && id_ex_is_load &&
+load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
     ((id_ex_rd == dec_rs1 && dec_rs1 != 0) ||
-     (id_ex_rd == dec_rs2 && dec_rs2 != 0 && uses_rs2));
+     (id_ex_rd == dec_rs2 && dec_rs2 != 0 && (dec_is_r_type || dec_is_store || dec_is_branch)));
 ```
 
 **Action:** Stall IF, ID for 1 cycle; insert bubble in ID/EX.
@@ -391,26 +398,9 @@ I3:                 IF   ID   EX   MEM  WB
 ### With Multi-Cycle Fetch (11-cycle AXI latency)
 
 ```
-Cycle:    1----11  12   13   14   15   16----26  27   28   29   30
-I1:       IF        ID   EX   MEM  WB
-I2:                 IF             ID   EX        MEM  WB
-```
-
-### Load-Use Stall
-
-```
-Cycle:    1----11  12   13   14----24  25   26
-LW x2:    IF        ID   EX   MEM       WB
-ADD x3,x2:          IF   [stall]  ID    EX   MEM  WB
-```
-
-### Branch Taken (Flush)
-
-```
-Cycle:    1----11  12   13   14   15----25  26   27   28   29
-BEQ:      IF        ID   EX   MEM  WB
-I+1:                IF   ××       (flushed)
-Target:                  IF             ID   EX   MEM  WB
+Cycle:    1----11  12   13   14   15   16----23  24   25   26   27
+I1:       IF       ID   EX   MEM  WB
+I2:                IF                        ID  EX        MEM  WB
 ```
 
 ---
@@ -425,7 +415,8 @@ Target:                  IF             ID   EX   MEM  WB
 | `flush` | Invalidates IF/ID, redirects PC (branch taken / jump) |
 | `squash_now` | Set for one cycle after JAL/JALR enters ID/EX |
 | `mem_stall` | Stalls when load/store in progress |
-| `ex_stall` | Stalls EX when MEM is busy or waiting for AXI (`mem_stall` OR `mem_busy`) |
+| `div_stall` | Stalls when division instruction is executing |
+| `ex_stall` | Stalls EX when MEM is busy, waiting for AXI, or division in progress |
 
 ### Memory Control
 
@@ -445,95 +436,11 @@ Target:                  IF             ID   EX   MEM  WB
 
 ---
 
-## Supported Instructions
-
-All RV32IM instructions are fully supported:
-
-| Category | Instructions | Status |
-|----------|--------------|--------|
-| **R-type** | ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU | [x] Working |
-| **I-type (ALU)** | ADDI, ANDI, ORI, XORI, SLLI, SRLI, SRAI, SLTI, SLTIU | [x] Working |
-| **I-type (Load)** | LW, LH, LB, LHU, LBU | [x] Working |
-| **S-type (Store)** | SW, SH, SB | [x] Working |
-| **U-type** | LUI, AUIPC | [x] Working |
-| **J-type** | JAL, JALR | [x] Working |
-| **B-type** | BEQ, BNE, BLT, BGE, BLTU, BGEU | [x] Working |
-
----
-
-## Test Status
-
-All 19 tests pass:
-
-| Test | Description | Status |
-|------|-------------|--------|
-| 1 | Arithmetic (ADD, SUB, ADDI) | [x] PASS |
-| 2 | Logical (AND, OR, XOR) | [x] PASS |
-| 3 | Shifts (SLL, SRL, SRA) | [x] PASS |
-| 4 | Memory (LW, SW) | [x] PASS |
-| 5 | Compare (SLT, SLTU) | [x] PASS |
-| 6 | LUI/AUIPC | [x] PASS |
-| 7 | Fibonacci Integration | [x] PASS |
-| 8 | Branches (BEQ, BNE, BLT, BGE, BLTU, BGEU) | [x] PASS |
-| 9 | Jumps (JAL, JALR) | [x] PASS |
-| 10 | Backward Branch Loop | [x] PASS |
-| 11 | IO Access (UART/GPIO) | [x] PASS |
-| 12 | GPIO Bidirectional | [x] PASS |
-| 13 | Byte/Halfword Load/Store | [x] PASS |
-| 14 | UART Loopback | [x] PASS |
-| 15 | RAW Hazard Stress | [x] PASS |
-| 16 | Full ALU Coverage | [x] PASS |
-| 17 | Nested Loops | [x] PASS |
-| 18 | Memory Access Pattern Stress | [x] PASS |
-| 19 | Mixed Instruction Stress | [x] PASS |
-
----
-
-## File Structure
-
-```
-rtl/
-├── z_core_control_u.v    # Main pipeline control unit (5-stage pipeline)
-├── z_core_decoder.v      # Instruction decoder
-├── z_core_alu.v          # Arithmetic Logic Unit
-├── z_core_alu_ctrl.v     # ALU control signal decoder
-├── z_core_reg_file.v     # 32x32 Register file
-├── axil_master.v         # AXI-Lite master interface
-├── axil_interconnect.v   # AXI-Lite interconnect (address routing)
-├── axi_mem.v             # AXI-Lite RAM
-├── axil_uart.v           # AXI-Lite UART
-└── axil_gpio.v           # AXI-Lite GPIO
-
-doc/
-├── PIPELINE.md           # This file
-└── Z_CORE_ARCHITECTURE.md # High-level architecture overview
-
-tb/
-└── z_core_control_u_tb.sv # Comprehensive testbench with 13 test cases
-```
-
----
-
-## Key Implementation Notes
-
-### Critical Timing Fixes
-
-The pipeline required several non-obvious timing fixes:
-
-1. **IF/ID Consumption**: `if_id_valid` must be cleared when instruction advances to ID/EX
-2. **Fetch PC Tracking**: `fetch_pc` captures address at fetch start, used when complete
-3. **AXI Busy Check**: New fetches wait for `!mem_busy` to prevent overlap
-4. **Combinational Load Data**: `mem_load_data` is combinational for same-cycle WB use
-5. **STATE_READ_DONE**: AXI master ensures data stable before ready assertion
-6. **Bubble Signal Clearing**: `reg_write` signals must be cleared when stalling to prevent incorrect forwarding.
-
-
-
 ### Performance Characteristics
 
 - **CPI (ideal)**: 10-11 cycles per instruction (dominated by AXI latency)
 - **Branch Penalty**: 11+ cycles (flush + re-fetch)
-- **Load Penalty**: 10-11 cycles for memory access
+- **Load Penalty**: 10 cycles for memory access
 - **Forwarding**: Zero-cycle penalty for RAW hazards (except load-use)
 
 ---
