@@ -14,8 +14,8 @@ The Z-Core processor communicates with external memory through an AXI4-Lite inte
 │└─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘ │
 │                                                                   │
 │┌─────────────────────────────────────────────────────────────────┐│
-││                    FSM Controller                               ││
-││  FETCH → FETCH_WAIT → DECODE → EXECUTE → [MEM] → [WRITE]        ││
+││                    5-Stage Pipeline Controller                  ││
+││        IF → ID → EX → MEM → WB (with AXI memory arbiter)        ││
 │└─────────────────────────────────────────────────────────────────┘│
 │                              │                                    │
 │                   ┌──────────┴──────────┐                         │
@@ -98,118 +98,125 @@ The `axil_master` module implements the AXI-Lite protocol with the following sta
 
 ```
                     ┌──────────┐
-                    │   IDLE   │◄─────────────────────┐
-                    └────┬─────┘                      │
-                         │ mem_req                    │
-            ┌────────────┴────────────┐               │
-            │                         │               │
-            ▼                         ▼               │
-     ┌─────────────┐          ┌─────────────┐         │
-     │ READ_ADDR   │          │ WRITE_ADDR  │         │
-     │(arvalid=1)  │          │(awvalid=1)  │         │
-     └──────┬──────┘          │(wvalid=1)   │         │
-            │ arready         └──────┬──────┘         │
-            ▼                        │ awready &      │
-     ┌─────────────┐                 │ wready         │
-     │ READ_DATA   │                 ▼                │
-     │(rready=1)   │          ┌─────────────┐         │
-     └──────┬──────┘          │ WRITE_RESP  │         │
-            │ rvalid          │(bready=1)   │         │
-            │                 └──────┬──────┘         │
-            │                        │ bvalid         │
-            │                        │                │
-            └────────────────────────┴────────────────┘
-                         mem_ready pulse
+                    │   IDLE   │◄───────────────────────────┐
+                    └────┬─────┘                            │
+                         │ mem_req                          │
+            ┌────────────┴────────────┐                     │
+            │                         │                     │
+            ▼                         ▼                     │
+     ┌─────────────┐          ┌─────────────┐               │
+     │ READ_ADDR   │          │ WRITE_ADDR  │               │
+     │(arvalid=1)  │          │(awvalid=1)  │               │
+     └──────┬──────┘          │(wvalid=1)   │               │
+            │ arready         └──────┬──────┘               │
+            ▼                        │ awready &            │
+     ┌─────────────┐                 │ wready               │
+     │ READ_DATA   │                 ▼                      │
+     │(rready=1)   │          ┌─────────────┐               │
+     └──────┬──────┘          │ WRITE_RESP  │               │
+            │ rvalid          │(bready=1)   │               │
+            ▼                 └──────┬──────┘               │
+     ┌─────────────┐                 │ bvalid               │
+     │ READ_DONE   │                 │                      │
+     │(mem_ready=1)│                 │                      │
+     └──────┬──────┘                 │                      │
+            │                        │                      │
+            └────────────────────────┴──────────────────────┘
 ```
 
 ### State Descriptions
 
-| State       | Description                                              |
-|-------------|----------------------------------------------------------|
-| IDLE        | Waiting for memory request                               |
-| READ_ADDR   | Assert arvalid, wait for arready                         |
-| READ_DATA   | Assert rready, wait for rvalid, capture data             |
-| WRITE_ADDR  | Assert awvalid & wvalid, wait for ready signals          |
-| WRITE_RESP  | Assert bready, wait for bvalid                           |
+| State       | Description                                                  |
+|-------------|--------------------------------------------------------------|
+| IDLE        | Waiting for memory request                                   |
+| READ_ADDR   | Assert arvalid, wait for arready                             |
+| READ_DATA   | Assert rready, wait for rvalid, capture data                 |
+| READ_DONE   | Signal mem_ready with stable data                            |
+| WRITE_ADDR  | Assert awvalid & wvalid, wait for ready signals              |
+| WRITE_RESP  | Assert bready, wait for bvalid                               |
 
 ## Timing Diagrams
 
 ### Read Transaction
 
 ```
-           ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐
-clk        │   │   │   │   │   │   │   │   │   │   │   │
-       ────┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───
+           ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌──
+clk        │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │
+       ────┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘
 
-               ┌───────────────┐
-mem_req    ────┘               └───────────────────────────
+           ┌───────────────────────────────────────────────────────────────────────┐
+mem_req  ──┘                                                                       └───────────
            
                    ┌───────────────────────┐
-arvalid    ────────┘                       └───────────────
+arvalid  ──────────┘                       └───────────────────────────────────────────────────
 
-                       ┌───────────────┐
-arready    ────────────┘               └───────────────────
+                                   ┌───────┐
+arready  ──────────────────────────┘       └───────────────────────────────────────────────────
 
-                               ┌───────────────────────────
-rready     ────────────────────┘                           
+                                           ┌───────────────────────────────┐
+rready   ──────────────────────────────────┘                               └───────────────────
 
-                               ┌───────────────┐
-rvalid     ────────────────────┘               └───────────
+                                                                   ┌───────┐
+rvalid   ──────────────────────────────────────────────────────────┘       └───────────────────
 
-                                       ┌───────┐
-mem_ready  ────────────────────────────┘       └───────────
+                                                                                    ┌───────┐
+mem_ready  ─────────────────────────────────────────────────────────────────────────┘       └──
 ```
 
 ### Write Transaction
 
 ```
-           ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐
-clk        │   │   │   │   │   │   │   │   │   │   │   │
-       ────┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───
+           ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌───┐   ┌─
+clk        │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │   │     
+       ────┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   └───┘   
 
-               ┌───────────────┐
-mem_req    ────┘               └───────────────────────────
-               ┌───────────────────────────────────────────
-mem_wen    ────┘                                           
+           ┌───────────────────────────────────────────────────────────────┐
+mem_req  ──┘                                                               └─────────
+
+           ┌───────────────────────────────────────────────────────────────┐
+mem_wen  ──┘                                                               └─────────
 
                    ┌───────────────────────┐
-awvalid    ────────┘                       └───────────────
-                   ┌───────────────────────┐
-wvalid     ────────┘                       └───────────────
+awvalid  ──────────┘                       └─────────────────────────────────────────
 
-                       ┌───────────────┐
-awready    ────────────┘               └───────────────────
-                       ┌───────────────┐
-wready     ────────────┘               └───────────────────
+                   ┌───────────────────────────────┐
+wvalid   ──────────┘                               └─────────────────────────────────
 
-                               ┌───────────────────────────
-bready     ────────────────────┘                           
+                                   ┌───────┐
+awready  ──────────────────────────┘       └─────────────────────────────────────────
+                  
+                                           ┌───────┐
+wready   ──────────────────────────────────┘       └─────────────────────────────────       
 
-                               ┌───────────────┐
-bvalid     ────────────────────┘               └───────────
+                                                   ┌───────────────────────┐
+bready   ──────────────────────────────────────────┘                       └─────────
 
-                                       ┌───────┐
-mem_ready  ────────────────────────────┘       └───────────
+                                                                   ┌───────┐
+bvalid   ──────────────────────────────────────────────────────────┘       └─────────
+
+                                                                           ┌───────┐
+mem_ready  ────────────────────────────────────────────────────────────────┘       └─
 ```
 
-## Control Unit FSM Integration
+## Control Unit Pipeline Integration
 
-The Z-Core control unit uses a multi-cycle FSM that interfaces with memory through the AXI master:
+The Z-Core control unit uses a 5-stage pipeline that interfaces with memory through a unified AXI master:
 
-| State       | Memory Operation | Description                           |
+| Stage       | Memory Operation | Description                           |
 |-------------|------------------|---------------------------------------|
-| FETCH       | Read (PC)        | Initiate instruction fetch            |
-| FETCH_WAIT  | -                | Wait for instruction data             |
-| DECODE      | -                | Decode instruction                    |
-| EXECUTE     | Read/Write       | For load/store, initiate data access  |
-| MEM         | -                | Wait for data memory operation        |
-| WRITE       | -                | Write result to register file         |
+| IF          | Read (PC)        | Initiate instruction fetch            |
+| ID          | -                | Decode instruction                    |
+| EX          | -                | Execute ALU operations                |
+| MEM         | Read/Write       | Load/store via AXI                    |
+| WB          | -                | Write result to register file         |
 
 ### Memory Access Timing
 
-- **Instruction Fetch**: ~4-5 clock cycles (request + AXI handshake)
-- **Data Load**: ~4-5 clock cycles (same as fetch)
-- **Data Store**: ~4-5 clock cycles (write + response)
+- **Instruction Fetch**: ~10 clock cycles (including AXI interconnect and RAM latency)
+- **Data Load**: ~10 clock cycles (same as fetch)
+- **Data Store**: ~10 clock cycles (write + response through interconnect)
+
+> **Note**: The state machine itself has 4-5 states, but the total latency includes waiting for the AXI interconnect routing and RAM response times.
 
 ## Usage Example
 
