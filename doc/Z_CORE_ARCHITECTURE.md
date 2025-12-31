@@ -85,6 +85,14 @@ Generates ALU operation codes based on instruction opcode and function fields.
 | 13   | BGE       | Branch if >= (s)    |
 | 14   | BLTU      | Branch if < (u)     |
 | 15   | BGEU      | Branch if >= (u)    |
+| 16   | MUL       | Multiplication      |
+| 17   | MULH      | Multiplication high |
+| 18   | MULHSU    | Multiplication high (signed) |
+| 19   | MULHU     | Multiplication high (unsigned) |
+| 20   | DIV       | Division                    |
+| 21   | DIVU      | Division (unsigned)         |
+| 22   | REM       | Remainder                   |
+| 23   | REMU      | Remainder (unsigned)        |
 
 ### 1.4 ALU (`z_core_alu`)
 
@@ -257,9 +265,11 @@ Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
 ## Supported Instructions
 
+The Z-Core implements the RV32IM Instruction Set Archiecture, supporting the following instructions.
+
 ### R-Type (Register-Register)
 ```
-ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND
+ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND, MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
 ```
 
 ### I-Type (Immediate)
