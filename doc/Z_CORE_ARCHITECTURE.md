@@ -26,6 +26,10 @@ The **Control Unit** is the top-level module of the processor core. It orchestra
 
 The following components are **instantiated internally** within the Control Unit structure:
 
+### 1.0 Instruction Cache (`z_core_instr_cache`)
+
+Z-Core includes a small **direct-mapped instruction cache** (`rtl/z_core_instr_cache.v`) used by the fetch stage to reduce repeated AXI-Lite instruction fetches on tight loops and hot code paths. At a high level it stores recently fetched 32-bit instructions indexed by PC and validates them using a tag.
+
 ### 1.1 Instruction Decoder (`z_core_decoder`)
 
 Decodes 32-bit RISC-V instructions into control signals and immediate values.

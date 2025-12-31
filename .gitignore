@@ -12,4 +12,7 @@ sim/*.vvp
 __pycache__/
 *.pyc
 
+# Documentation
+doc/INSTR-FIFO.md
+
 .DS_Store
