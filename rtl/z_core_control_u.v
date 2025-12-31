@@ -227,7 +227,7 @@ z_core_instr_cache#(
     .cache_miss(instr_cache_cache_miss)
 );
 
-// Cache address: use fetch_pc during write, otherwise current PC
+// Cache address: use fetch_pc during write, otherwise use PC or branch/jump targets
 assign instr_cache_address = instr_cache_wen ? fetch_pc : (branch_taken ? branch_target : (jump_taken ? jalr_target : PC));
 
 // ##################################################

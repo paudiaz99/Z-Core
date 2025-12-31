@@ -43,6 +43,7 @@ module z_core_riscof_tb;
     parameter ADDR_WIDTH = 32;
     parameter STRB_WIDTH = (DATA_WIDTH/8);
     parameter N_GPIO     = 64;
+    parameter CACHE_DEPTH = 256;
 
     // Plusargs for RISCOF
     reg [512*8-1:0] hex_file;
@@ -183,7 +184,8 @@ module z_core_riscof_tb;
     z_core_control_u #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
-        .STRB_WIDTH(STRB_WIDTH)
+        .STRB_WIDTH(STRB_WIDTH),
+        .CACHE_DEPTH(CACHE_DEPTH)
     ) uut (
         .clk(clk),
         .rstn(rstn),

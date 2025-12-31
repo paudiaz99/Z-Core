@@ -23,12 +23,9 @@ The **Control Unit** is the top-level module of the processor core. It orchestra
   - Detects Control Hazards (Branch/Jump) and flushes the pipeline.
 - **Forwarding Unit**: Solves Data Hazards by forwarding results from EX/MEM and MEM/WB stages to the ID/EX stage.
 - **System Signals**: Handles reset logic and halt signals (for simulation/verification).
+- **Instruction Cache**: Z-Core includes a small direct-mapped instruction cache (`rtl/z_core_instr_cache.v`) used by the fetch stage to reduce repeated AXI-Lite instruction fetches on tight loops and hot code paths. At a high level it stores recently fetched 32-bit instructions indexed by PC and validates them using a tag.
 
 The following components are **instantiated internally** within the Control Unit structure:
-
-### 1.0 Instruction Cache (`z_core_instr_cache`)
-
-Z-Core includes a small **direct-mapped instruction cache** (`rtl/z_core_instr_cache.v`) used by the fetch stage to reduce repeated AXI-Lite instruction fetches on tight loops and hot code paths. At a high level it stores recently fetched 32-bit instructions indexed by PC and validates them using a tag.
 
 ### 1.1 Instruction Decoder (`z_core_decoder`)
 
@@ -89,6 +86,14 @@ Generates ALU operation codes based on instruction opcode and function fields.
 | 13   | BGE       | Branch if >= (s)    |
 | 14   | BLTU      | Branch if < (u)     |
 | 15   | BGEU      | Branch if >= (u)    |
+| 16   | MUL       | Multiplication      |
+| 17   | MULH      | Multiplication high |
+| 18   | MULHSU    | Multiplication high (signed) |
+| 19   | MULHU     | Multiplication high (unsigned) |
+| 20   | DIV       | Division                    |
+| 21   | DIVU      | Division (unsigned)         |
+| 22   | REM       | Remainder                   |
+| 23   | REMU      | Remainder (unsigned)        |
 
 ### 1.4 ALU (`z_core_alu`)
 
@@ -129,19 +134,11 @@ Two implementations are available, selectable via `define` in `z_core_mult_unit.
 ```
 
 > [!TIP]
-> The **synthesis-optimized version** is the default. It allows the synthesis tool to use DSP blocks on FPGAs or optimized multiplier cells on ASICs. The tree version is provided for educational purposes to understand the Patterson & Hennessy Figure 3.7 architecture.
-
-#### 1.4.1.2 Signed Multiplication Approach
-
-Both implementations use the same area-efficient signed multiplication approach:
-
-1. **Input Conversion**: Convert signed operands to absolute values
-2. **Unsigned Multiplication**: Perform unsigned multiply
-3. **Sign Correction**: Negate result if exactly one operand was negative
+> The **synthesis-optimized version** is the default. It allows the synthesis tool to use DSP blocks on FPGAs or optimized multiplier cells on ASICs. The tree version is provided for educational purposes to understand the Patterson & Hennessy fast multiplication architecture in the Computer Organization and Design book.
 
 #### 1.4.1.3 Tree Implementation Details (Educational)
 
-The tree version follows Patterson & Hennessy Figure 3.7:
+The tree version follows Patterson & Hennessy Computer Organization and Design book Figure 3.7:
 - 32 partial products summed in a binary tree
 - 31 64-bit additions = 62 `adder_32b` instances
 - O(log₂n) = 5 tree levels for 32-bit operands
@@ -171,14 +168,6 @@ Based on **Patterson & Hennessy "Computer Organization and Design" RISC-V Editio
    c. Shift divisor right by 1
 3. Apply sign correction for signed operations
 ```
-
-#### 1.5.1 Signed Division Handling
-
-1. **Convert** operands to absolute values
-2. **Divide** using unsigned algorithm
-3. **Correct signs**:
-   - Quotient: negative if operand signs differ
-   - Remainder: same sign as dividend (per RISC-V spec)
 
 #### 1.5.2 Performance & Pipeline Integration
 
@@ -231,6 +220,7 @@ A separate module instantiated within the Control Unit (`u_axil_master`) to hand
   - Handles handshake signals (`VALID`/`READY`).
   - Serializes requests if necessary (though current CPU is single-issue blocking).
   - Converts internal read/write signals into AXI address and data phases.
+
 
 ## 2. Peripherals & Interconnect
 
@@ -303,24 +293,3 @@ The processor uses a unified address space for instructions and data:
 | `0x0400_0000` - `0x0400_0FFF` | UART          | Serial Communication  |
 | `0x0400_1000` - `0x0400_1FFF` | GPIO          | General Purpose I/O   |
 
-**Note:** The current implementation uses word-aligned (4-byte) accesses only.
-
-## Simulation
-
-### Running Tests
-
-```bash
-# Compile and run ALU test
-iverilog -o sim/z_core_alu_tb.vvp tb/z_core_alu_tb.v
-vvp sim/z_core_alu_tb.vvp
-
-# Compile and run full system test
-iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv
-vvp sim/z_core_control_u_tb.vvp
-```
-
-### Viewing Waveforms
-
-```bash
-gtkwave sim/z_core_control_u_tb.vcd
-```
