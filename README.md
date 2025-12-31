@@ -163,7 +163,7 @@ gtkwave sim/z_core_control_u_tb.vcd
 
 ## Test Coverage
 
-The processor has been verified with **183 comprehensive tests** across 17 test suites:
+The processor has been verified with a comprehensive system-level testbench (`tb/z_core_control_u_tb.sv`) plus dedicated module/unit testbenches.
 
 | Test Suite | Description | Tests |
 |------------|-------------|-------|
@@ -181,9 +181,10 @@ The processor has been verified with **183 comprehensive tests** across 17 test 
 | GPIO | Bidirectional GPIO | 2 |
 | Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
 | UART Loopback | TX→RX data verification | 1 |
-| **M Extension** | MUL, DIV, REM, Forwarding Stress | 10 |
+| M Extension | MUL, DIV, REM, Forwarding Stress | 10 |
 | **RISCOF Compliance** | **Official RISC-V RV32IM Architectural Tests** | **49** |
 | Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 53 |
+| I-Cache Stress | Locality loops + direct-mapped conflict-miss thrash | 12 |
 
 ## Performance
 
@@ -233,7 +234,8 @@ Detailed documentation is available in the `doc/` directory:
 - [x] Pipelining for improved throughput
 - [x] FPGA synthesis and validation **[Z-Core-FPGA repository](https://github.com/paudiaz99/Z-Core-FPGA)** 
 - [x] M extension (multiply/divide)
-- [ ] **Branch prediction & Instruction Cache**
+- [x] **Instruction cache (simple direct-mapped, 1-word lines)**
+- [ ] Branch prediction
 - [ ] C extension (compressed instructions)
 - [ ] Interrupt support
 - [ ] Extra Peripherals (VGA Controller, Timer, etc.)

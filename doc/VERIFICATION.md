@@ -296,6 +296,18 @@ Tests three forwarding scenarios:
 | 7 | JALR return | Jump back |
 | 8 | DIVU x9 = 98/7 | x9 = 14 |
 
+## Test 24: Cache Locality Exploitation (Instruction Cache)
+**Purpose:** Exercise the instruction cache with tight loops and nested control flow to validate high cache-hit behavior while preserving architectural correctness.
+
+- Runs multiple short loops designed to remain in a small hot working set.
+- Verifies final register/memory results and prints cache performance counters.
+
+## Test 25: I-Cache Conflict Miss Thrash (Direct-Mapped)
+**Purpose:** Stress the instruction cache’s **direct-mapped** behavior by alternating execution between two hot code regions that intentionally **alias** to the same cache indices (separated by `0x400` bytes).
+
+- Validates that control flow remains correct under heavy conflict misses (correctness first).
+- Helps catch tag/index or valid-bit corner cases that don’t show up in pure-locality loops.
+
 ## Instruction Coverage
 
 ### RV32IM Base Integer Instructions

@@ -35,11 +35,13 @@ SOFTWARE.
 `include "rtl/z_core_alu.v"
 `include "rtl/z_core_div_unit.v"
 `include "rtl/axil_master.v"
+`include "rtl/z_core_instr_cache.v"
 
 module z_core_control_u #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
-    parameter STRB_WIDTH = (DATA_WIDTH/8)
+    parameter STRB_WIDTH = (DATA_WIDTH/8),
+    parameter CACHE_DEPTH = 256
 )(
     input  wire                   clk,
     input  wire                   rstn,
@@ -100,12 +102,11 @@ wire                  mem_busy;
 reg                   mem_wen_comb;
 reg                   mem_req_comb;
 
-assign mem_req = mem_req_comb;
-assign mem_wen = mem_wen_comb;
-
-
 reg  [31:0]           mem_data_out_r;
 reg  [STRB_WIDTH-1:0] mem_wstrb_r;
+
+wire mem_req = mem_req_comb;
+wire mem_wen = mem_wen_comb;
 
 axil_master #(
     .DATA_WIDTH(DATA_WIDTH),
@@ -149,45 +150,6 @@ axil_master #(
 
 localparam PC_INIT = 32'd0;
 reg [31:0] PC;
-
-// **************************************************
-//                Instruction FIFO
-// **************************************************
-
-localparam FIFO_DEPTH = 16;
-localparam FIFO_DEPTH_WIDTH = $clog2(FIFO_DEPTH);
-
-// FIFO Data Signals
-reg [31:0] instr_fifo_data [FIFO_DEPTH-1:0];
-reg [31:0] instr_fifo_pc [FIFO_DEPTH-1:0];
-reg        instr_fifo_valid [FIFO_DEPTH-1:0];
-
-// FIFO Control Signals
-
-wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_rd_ptr;
-wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_wr_ptr;
-wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_count;
-wire                        fifo_ctrl_full;
-wire                        fifo_ctrl_empty;
-
-assign fifo_ctrl_full = (fifo_ctrl_count == FIFO_DEPTH);
-assign fifo_ctrl_empty = (fifo_ctrl_count == 0);
-
-
-// TODO...
-
-// 1. Instruction prefetcher Reads Burst from AXI-Lite 
-//    and stores it in the Instruction FIFO 
-//    TODO: When does it read?
-//      a. It reads separately from the fetch unit (Prefecther unit), which 
-//         is the main unit responsible for fetching instructions from the
-//         memory. And is a separate master of the AXI-Lite bus.
-// 2. Fetch unit reads from the Instruction FIFO each cycle if:
-//    a. FIFO is not empty
-//    b. FIFO instructions are valid (TODO: All or any?)
-//    c. IF/ID pipeline stage is not occupied
-//    
-
 
 // ##################################################
 //              PIPELINE REGISTERS
@@ -237,7 +199,39 @@ reg        mem_wb_reg_write;
 reg        mem_wb_valid;
 
 // ##################################################
-//             INSTRUCTION DECODER (uses z_core_decoder)
+//       INSTRUCTION CACHE (uses z_core_instr_cache)
+// ##################################################
+
+wire [31:0] instr_cache_address;
+reg [31:0] instr_cache_data_in;
+reg instr_cache_wen;
+
+wire [31:0] instr_cache_data_out;
+wire instr_cache_valid;
+wire instr_cache_cache_hit;
+wire instr_cache_cache_miss;
+
+z_core_instr_cache#(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(ADDR_WIDTH),
+    .CACHE_DEPTH(CACHE_DEPTH)
+) instr_cache (
+    .clk(clk),
+    .rstn(rstn),
+    .wen(instr_cache_wen), 
+    .address(instr_cache_address),
+    .data_in(instr_cache_data_in),
+    .data_out(instr_cache_data_out),
+    .valid(instr_cache_valid),
+    .cache_hit(instr_cache_cache_hit),
+    .cache_miss(instr_cache_cache_miss)
+);
+
+// Cache address: use fetch_pc during write, otherwise current PC
+assign instr_cache_address = instr_cache_wen ? fetch_pc : (branch_taken ? branch_target : (jump_taken ? jalr_target : PC));
+
+// ##################################################
+//      INSTRUCTION DECODER (uses z_core_decoder)
 // ##################################################
 
 wire [6:0]  dec_op;
@@ -455,6 +449,11 @@ reg mem_op_pending;
 reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
 reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
 
+// New instruction arriving this cycle (from any source)
+wire new_instr_arriving = fetch_buffer_valid || 
+                          (fetch_wait && mem_ready) ||
+                          (instr_cache_valid && instr_cache_cache_hit);
+
 always @(posedge clk) begin
     if (~rstn) begin
         PC <= PC_INIT;
@@ -467,10 +466,12 @@ always @(posedge clk) begin
         fetch_buffer_valid <= 1'b0;
         fetch_buffer_ir <= 32'b0;
         fetch_buffer_pc <= 32'b0;
-    end else begin
+        instr_cache_wen <= 1'b0;
+    end else begin        
+        // Cache write enable is a single-cycle pulse
+        instr_cache_wen <= 1'b0;
+        
         if (flush) begin
-            // Flush: invalidate IF/ID (delay slot) and redirect PC to target
-            // The delay slot is invalidated by if_id_valid=0
             // Flush: invalidate IF/ID (delay slot) and redirect PC to target
             if_id_valid <= 1'b0;
             if_id_ir <= 32'h00000013;
@@ -480,57 +481,54 @@ always @(posedge clk) begin
             fetch_wait <= 1'b0;
             flush_r <= 1'b1;  // Register that flush happened
         end else begin
-            // Clear if_id_valid when instruction is consumed by decode stage
-            // (unless a new instruction is arriving to replace it)
-            // new_instr_from_buffer: !stall && fetch_buffer_valid
-            // new_instr_from_fetch: fetch_wait && mem_ready && !stall && !fetch_buffer_valid
-            if (!stall && if_id_valid && 
-                !(!stall && fetch_buffer_valid) && 
-                !(fetch_wait && mem_ready && !stall && !fetch_buffer_valid)) begin
-                // Instruction consumed by decode, no new instruction arriving
-                if_id_valid <= 1'b0;
-            end
+            flush_r <= 1'b0;
             
-            // Move buffer to IF/ID if not stalled and buffer valid
+            // Clear if_id_valid when consumed (unless new instruction arriving)
+            if (!stall && if_id_valid && !new_instr_arriving)
+                if_id_valid <= 1'b0;
+            
             if (!stall && fetch_buffer_valid) begin
+                // Move buffer to IF/ID
                 if_id_ir <= fetch_buffer_ir;
                 if_id_pc <= fetch_buffer_pc;
                 if_id_valid <= 1'b1;
                 fetch_buffer_valid <= 1'b0;
-            end
-            
-            // Check if we can start a new fetch:
-            // 1. Not currently waiting for a fetch
-            // 2. Memory bus not busy with data access (mem_op_pending)
-            // 3. AXI master not busy (prevents overlap with cancelled fetch)
-            // 4. Either buffer is empty OR (buffer will be emptied this cycle because !stall)
-            // 5. EX stage does not need memory (prevent structural hazard)
-            if (!fetch_wait && !mem_op_pending && !mem_busy &&
-                !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
-                (!fetch_buffer_valid || !stall)) begin
-                 // Start fetch - capture the PC we're fetching from
-                 fetch_wait <= 1'b1;
-                 fetch_pc <= PC;  // Capture PC for this fetch
             end else if (fetch_wait && mem_ready) begin
                 // Fetch complete - use fetch_pc for the address, not current PC
+                // Write the new instruction to the cache
+                instr_cache_wen <= 1'b1;
+                instr_cache_data_in <= mem_rdata;
+
                 if (!stall && !fetch_buffer_valid) begin
                     // Pipeline active and buffer empty: load directly to IF/ID
                     if_id_ir <= mem_rdata;
-                    if_id_pc <= fetch_pc;  // Use the PC that was captured when fetch started
+                    if_id_pc <= fetch_pc;
                     if_id_valid <= 1'b1;
                 end else begin
                     // Pipeline stalled or buffer full: load to buffer
                     fetch_buffer_ir <= mem_rdata;
-                    fetch_buffer_pc <= fetch_pc;  // Use the PC that was captured when fetch started
+                    fetch_buffer_pc <= fetch_pc;
                     fetch_buffer_valid <= 1'b1;
                 end
                 
                 // Advance PC from the address we just fetched and clear flags
                 PC <= fetch_pc + 4;
                 fetch_wait <= 1'b0;
+            end else if (!fetch_wait && !stall && (instr_cache_valid && instr_cache_cache_hit) && !fetch_buffer_valid) begin
+                // Cache hit: load instruction and advance PC
+                if_id_ir <= instr_cache_data_out;
+                if_id_pc <= PC;
+                if_id_valid <= 1'b1;
+                PC <= PC + 4;
+                perf_cache_hits <= perf_cache_hits + 1;
+            end else if (!fetch_wait && !mem_op_pending && !mem_busy &&
+                         !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
+                         (!fetch_buffer_valid || !stall) && 
+                         !instr_cache_valid && !instr_cache_cache_hit) begin
+                // Cache miss - start memory fetch
+                fetch_wait <= 1'b1;
+                fetch_pc <= PC;
             end
-            // Handle flush_r clearing (legacy from original code logic)
-            flush_r <= 1'b0;
         end
     end
 end
@@ -574,8 +572,10 @@ always @(posedge clk) begin
         id_ex_is_i_alu <= 1'b0;
         id_ex_is_div <= 1'b0;
         id_ex_reg_write <= 1'b0;
-    end else if (flush || load_use_hazard) begin
+    end else if (flush || (load_use_hazard && !ex_stall)) begin
         // Insert bubble - flush handles current cycle squash
+        // For load_use_hazard: only insert bubble if EX stage can accept the load
+        // (i.e., !ex_stall). Otherwise, we must hold id_ex until EX is ready.
         id_ex_valid <= 1'b0;
         id_ex_reg_write <= 1'b0;
         id_ex_is_load <= 1'b0;
@@ -708,9 +708,6 @@ always @(posedge clk) begin
         // - mem_busy is false (AXI bus available - either idle or just completed)
         // This allows stores to be queued while waiting for fetch to complete
         if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy) begin
-            // mem_addr assignment removed
-            // mem_wen assignment removed
-            // mem_req assignment removed
             mem_op_pending <= 1'b1;
             
             if (ex_mem_is_store) begin
@@ -746,9 +743,10 @@ always @(posedge clk) begin
         mem_wb_pc <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
-    end else if (!mem_stall || (mem_op_pending && mem_ready)) begin
-        // NOTE: Use mem_stall not ex_stall here - div_stall should NOT block WB
-        // This allows instructions ahead of division to complete their writeback
+    end else if ((!mem_stall && !ex_stall) || (mem_op_pending && mem_ready)) begin
+        // Advance MEM/WB pipeline register when:
+        // 1. No stalls (neither memory nor EX stage stalled), OR
+        // 2. A memory operation just completed (even if stalled, we take the result)
         mem_wb_rd <= ex_mem_rd;
         mem_wb_pc <= ex_mem_pc;
         mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
@@ -760,9 +758,10 @@ always @(posedge clk) begin
             mem_wb_result <= ex_mem_alu_result;
         end
     end else begin
+        // Stalled - insert bubble (don't retire any instruction)
         mem_wb_valid <= 1'b0;
-        mem_wb_reg_write <= 1'b0; // IMPORTANT: Must clear to prevent incorrect forwarding
-        mem_wb_rd <= 5'b0;        // Safer to clear destination too
+        mem_wb_reg_write <= 1'b0;
+        mem_wb_rd <= 5'b0;
     end
 end
 
@@ -798,6 +797,28 @@ always @* begin
         mem_req_comb = 1'b0;
         mem_wen_comb = 1'b0;
         mem_addr = 32'b0;
+    end
+end
+
+// ##################################################
+//           PERFORMANCE COUNTERS
+// ##################################################
+reg [63:0] perf_cycle;
+reg [63:0] perf_instret;
+reg [63:0] perf_cache_hits;
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        perf_cycle <= 64'd0;
+        perf_instret <= 64'd0;
+        perf_cache_hits <= 64'd0;
+    end else begin
+        perf_cycle <= perf_cycle + 1;
+        
+        // Count committed instructions (MEM/WB stage valid)
+        if (mem_wb_valid) begin
+            perf_instret <= perf_instret + 1;
+        end
     end
 end
 
