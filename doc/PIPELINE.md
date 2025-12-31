@@ -36,6 +36,9 @@ graph LR
 
 ## Detailed Stage Architecture
 
+> [!IMPORTANT]
+> Some of the diagrams may not be up to date with the current implementation and the instruction cache.
+
 ### IF Stage (Instruction Fetch)
 
 The IF stage manages instruction fetching with these key components:
@@ -386,7 +389,7 @@ Cycle:  1    2    3    4    5    6    7    8    9    10   11   12
 
 ## Pipeline Timing Diagrams
 
-### Normal Instruction Flow
+### Normal Instruction Flow (1-cycle CPI fetching from cache)
 
 ```
 Cycle:    1    2    3    4    5    6    7    ...
@@ -395,7 +398,7 @@ I2:            IF   ID   EX   MEM  WB
 I3:                 IF   ID   EX   MEM  WB
 ```
 
-### With Multi-Cycle Fetch (11-cycle AXI latency)
+### With Multi-Cycle Fetch (11-cycle AXI latency fetching from memory)
 
 ```
 Cycle:    1----11  12   13   14   15   16----23  24   25   26   27
@@ -438,8 +441,8 @@ I2:                IF                        ID  EX        MEM  WB
 
 ### Performance Characteristics
 
-- **CPI (ideal)**: 10-11 cycles per instruction (dominated by AXI latency)
-- **Branch Penalty**: 11+ cycles (flush + re-fetch)
+- **CPI (ideal)**: 1 cycle per instruction (ideally, depends on code locality and memory access patterns)
+- **Branch Penalty**: 2-11 cycles (flush + re-fetch from cache or memory)
 - **Load Penalty**: 10 cycles for memory access
 - **Forwarding**: Zero-cycle penalty for RAW hazards (except load-use)
 
