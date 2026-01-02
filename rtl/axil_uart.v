@@ -27,7 +27,6 @@ SOFTWARE.
 //    8N1 Format: 8 data bits, no parity, 1 stop bit
 // **************************************************
 
-`timescale 1ns / 1ps
 
 module axil_uart #(
     parameter DATA_WIDTH = 32,

@@ -1,5 +1,3 @@
-`timescale 1ns / 1ps
-`include "rtl/z_core_mult_unit.v"
 
 module tb_mult_unit;
 

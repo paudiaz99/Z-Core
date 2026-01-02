@@ -105,8 +105,9 @@ Z-Core/
 
 ### Prerequisites
 
-- [Icarus Verilog](http://iverilog.icarus.com/) (iverilog) for simulation
-- [GTKWave](http://gtkwave.sourceforge.net/) for waveform viewing (optional)
+- [QuestaSim FPGA Edition](https://www.altera.com/downloads/simulation-tools/questa-fpgas-pro-edition-software-version-25-3) (questa) or [Altair DSim](https://learn.altair.com/courses/getting-started-with-dsim-elearning) (dsim) for simulation
+- [GTKWave](http://gtkwave.sourceforge.net/) or [Surfer](https://gitlab.com/surfer-project/surfer) for waveform viewing (optional)
+- [Slang - System Verilog Language Services](https://github.com/MikePopoloski/slang) for linting (optional)
 
 ### Installation
 
@@ -120,45 +121,63 @@ mkdir -p sim
 ```
 
 ### Running Tests
+- assumes Questa FPGA Edition or Altair DSim is installed and contained in user's PATH environment variable 
 
 ```bash
-# Run individual module tests
-iverilog -o sim/z_core_alu_tb.vvp tb/z_core_alu_tb.v && vvp sim/z_core_alu_tb.vvp
+# Run full system batch-mode test using Questa Sim (default)
+cd sim
+make -f ../tb/Makefile run
 
-# Run full system test (comprehensive)
-iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv
-vvp sim/z_core_control_u_tb.vvp
+# Run full system debug test using Questa Sim
+cd sim
+make -f ../tb/Makefile run debug=1
+
+# Run full system batch-mode test using Altair Dsim
+cd sim
+make -f ../tb/Makefile run SIM=dsim
+
+# Run full system debug test using Altair Dsim
+cd sim
+make -f ../tb/Makefile run SIM=dsim debug=1
 ```
 
 ### Expected Output
 
 ```
-╔═══════════════════════════════════════════════════════════╗
-║           Z-Core RISC-V Processor Test Suite              ║
-║                   RV32I Instruction Set                   ║
-╚═══════════════════════════════════════════════════════════╝
-
---- Loading Test 1: Arithmetic Operations ---
-=== Test 1 Results: Arithmetic ===
-  [PASS] ADDI x2, x0, 10: x2 = 10
-  [PASS] ADD x4, x2, x3: x4 = 17
+  ___________________________________________________________
+ |           Z-Core RISC-V Processor Test Suite              |
+ |                   RV32I Instruction Set                   |
+ |___________________________________________________________|
+ 
+ --- Loading Test 1: Arithmetic Operations ---
+ 
+ === Test 1 Results: Arithmetic ===
+   [PASS] ADDI x2, x0, 10: x2 = 10 (10 signed)
+   [PASS] ADDI x3, x0, 7: x3 = 7 (7 signed)
   ...
 
-╔═══════════════════════════════════════════════════════════╗
-║                    TEST SUMMARY                           ║
-╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  183                                         ║
-║  Passed:       183                                         ║
-║  Failed:        0                                          ║
-╠═══════════════════════════════════════════════════════════╣
-║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║
-╚═══════════════════════════════════════════════════════════╝
+  ___________________________________________________________
+ |                    TEST SUMMARY                           |
+ |___________________________________________________________|
+ |  Total Tests: 183                                         |
+ |  Passed:      183                                         |
+ |  Failed:        0                                         |
+ |___________________________________________________________|
+ |         ALL TESTS PASSED SUCCESSFULLY                     |
+ |  Test Duration: 634825 ns                                 |
+ |  Clock Cycles:  63482                                     |
+ |  Instructions:  37096                                     |
+ |___________________________________________________________|
 ```
 
 ### Viewing Waveforms
 
 ```bash
+# With GTK Wave
 gtkwave sim/z_core_control_u_tb.vcd
+
+# With Surfer
+surfer sim/z_core_control_u_tb.vcd
 ```
 
 ## Test Coverage
@@ -238,6 +257,8 @@ Detailed documentation is available in the `doc/` directory:
 - [ ] Interrupt support
 - [ ] Extra Peripherals (VGA Controller, Timer, etc.)
 - [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
+- [ ] Fix all lint warnings
+- [ ] Fix all axil_gpio.v compilation errors related to invalid bit ranges
 
 ## Contributing
 

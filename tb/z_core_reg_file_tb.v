@@ -22,9 +22,6 @@ SOFTWARE.
 
 */
 
-`timescale 1ns / 1ns
-`include "rtl/z_core_reg_file.v"
-
 module z_core_reg_file_tb;
 
     // Initialize clk to 0
