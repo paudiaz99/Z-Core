@@ -30,18 +30,12 @@ SOFTWARE.
 //
 // **************************************************
 
-`include "rtl/z_core_control_u.v"
-`include "rtl/axi_mem.v"
-`include "rtl/axil_interconnect.v"
-`include "rtl/axil_uart.v"
-`include "rtl/axil_gpio.v"
-
 module z_core_top #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     parameter MEM_ADDR_WIDTH = 16,      // 64KB memory
-    parameter N_GPIO = 8,
+    parameter N_GPIO = 32,
     parameter PIPELINE_OUTPUT = 0
 )(
     input wire clk,

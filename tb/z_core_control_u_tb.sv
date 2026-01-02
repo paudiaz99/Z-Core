@@ -27,15 +27,6 @@ SOFTWARE.
 //    Comprehensive test suite for RV32I instructions
 // **************************************************
 
-`timescale 1ns / 1ns
-`include "rtl/z_core_control_u.v"
-`include "rtl/axi_mem.v"
-`include "rtl/axil_interconnect.v"
-`include "rtl/axil_uart.v"
-`include "rtl/axil_gpio.v"
-`include "rtl/arbiter.v"
-`include "rtl/priority_encoder.v"
-
 module z_core_control_u_tb;
 
     // Parameters
@@ -888,10 +879,10 @@ module z_core_control_u_tb;
         uart_rx_tb_en = 1'b0;     // Use loopback by default
 
         $display("");
-        $display("╔═══════════════════════════════════════════════════════════╗");
-        $display("║           Z-Core RISC-V Processor Test Suite              ║");
-        $display("║                   RV32I Instruction Set                    ║");
-        $display("╚═══════════════════════════════════════════════════════════╝");
+        $display(" ___________________________________________________________");
+        $display("|           Z-Core RISC-V Processor Test Suite              |");
+        $display("|                   RV32I Instruction Set                   |");
+        $display("|___________________________________________________________|");
 
         // ==========================================
         // Test 1: Arithmetic Operations
@@ -1370,24 +1361,24 @@ module z_core_control_u_tb;
         // Final Summary
         // ==========================================
         $display("");
-        $display("╔═══════════════════════════════════════════════════════════╗");
-        $display("║                    TEST SUMMARY                           ║");
-        $display("╠═══════════════════════════════════════════════════════════╣");
-        $display("║  Total Tests: %3d                                         ║", test_count);
-        $display("║  Passed:      %3d                                         ║", pass_count);
-        $display("║  Failed:      %3d                                         ║", fail_count);
-        $display("╠═══════════════════════════════════════════════════════════╣");
+        $display(" ___________________________________________________________");
+        $display("|                    TEST SUMMARY                           |");
+        $display("|___________________________________________________________|");
+        $display("|  Total Tests: %3d                                         |", test_count);
+        $display("|  Passed:      %3d                                         |", pass_count);
+        $display("|  Failed:      %3d                                         |", fail_count);
+        $display("|___________________________________________________________|");
         
         if (fail_count == 0) begin
-            $display("║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║");
+            $display("|         ALL TESTS PASSED SUCCESSFULLY                     |");
         end else begin
-            $display("║              ✗ SOME TESTS FAILED ✗                        ║");
+            $display("|              SOME TESTS FAILED                            |");
         end
 
-        $display("║  Test Duration: %0d ns                                 ║", $time);
-        $display("║  Clock Cycles:  %0d                                     ║", $time / 10);
-        $display("║  Instructions:  %0d                                      ║", instruction_count);
-        $display("╚═══════════════════════════════════════════════════════════╝");
+        $display("|  Test Duration: %0d ns                                 |", $time);
+        $display("|  Clock Cycles:  %0d                                     |", $time / 10);
+        $display("|  Instructions:  %0d                                     |", instruction_count);
+        $display("|___________________________________________________________|");
         $display("");
         
         $finish;

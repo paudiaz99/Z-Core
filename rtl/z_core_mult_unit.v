@@ -12,12 +12,6 @@
 // === SELECT IMPLEMENTATION HERE ===
 // `define USE_TREE_MULTIPLIER  // Uncomment for educational tree version
 
-`ifdef USE_TREE_MULTIPLIER
-    `include "rtl/z_core_mult_tree.v"
-`else
-    `include "rtl/z_core_mult_synth.v"
-`endif
-
 
 module z_core_mult_unit (
     input [31:0] op1,

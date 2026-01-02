@@ -1,5 +1,3 @@
-`timescale 1ns / 1ns
-`include "rtl/z_core_div_unit.v"
 
 module z_core_div_unit_tb;
 
