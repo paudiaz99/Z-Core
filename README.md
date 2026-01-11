@@ -128,6 +128,10 @@ mkdir -p sim
 cd sim
 make -f ../tb/Makefile run
 
+# Run full system batch-mode test using Icarus Verilog
+cd sim
+make -f ../tb/Makefile run SIM=iverilog
+
 # Run full system debug test using Questa Sim
 cd sim
 make -f ../tb/Makefile run debug=1
@@ -258,7 +262,6 @@ Detailed documentation is available in the `doc/` directory:
 - [ ] Extra Peripherals (VGA Controller, Timer, etc.)
 - [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
 - [ ] Fix all lint warnings
-- [ ] Fix all axil_gpio.v compilation errors related to invalid bit ranges
 
 ## Contributing
 
