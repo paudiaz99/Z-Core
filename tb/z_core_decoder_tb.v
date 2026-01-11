@@ -22,8 +22,6 @@ SOFTWARE.
 
 */
 
-`timescale 1ns / 1ns
-`include "rtl/z_core_decoder.v"
 
 module z_core_decoder_tb;
 

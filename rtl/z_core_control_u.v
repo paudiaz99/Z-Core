@@ -27,15 +27,6 @@ SOFTWARE.
 //        5-Stage Pipelined RISC-V RV32I Processor
 // **************************************************
 
-`timescale 1ns / 1ns
-
-`include "rtl/z_core_decoder.v"
-`include "rtl/z_core_reg_file.v"
-`include "rtl/z_core_alu_ctrl.v"
-`include "rtl/z_core_alu.v"
-`include "rtl/z_core_div_unit.v"
-`include "rtl/axil_master.v"
-
 module z_core_control_u #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
@@ -188,6 +179,12 @@ assign fifo_ctrl_empty = (fifo_ctrl_count == 0);
 //    c. IF/ID pipeline stage is not occupied
 //    
 
+reg fetch_wait;
+reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
+reg mem_op_pending;
+reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
+reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
+
 
 // ##################################################
 //              PIPELINE REGISTERS
@@ -314,7 +311,8 @@ z_core_reg_file reg_file (
     .rs2_out(rf_rs2_data)
 );
 
-
+wire [31:0] fwd_rs1_data;
+wire [31:0] fwd_rs2_data;
 // ##################################################
 //                   ALU (uses z_core_alu)
 // ##################################################
@@ -382,12 +380,12 @@ z_core_div_unit div_unit (
 // ##################################################
 
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
-wire [31:0] fwd_rs1_data = 
+assign fwd_rs1_data = 
     (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs1_data;
 
-wire [31:0] fwd_rs2_data = 
+assign fwd_rs2_data = 
     (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs2_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs2_data;
@@ -449,11 +447,6 @@ wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
 //              PIPELINE STAGE: FETCH
 // ##################################################
 
-reg fetch_wait;
-reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
-reg mem_op_pending;
-reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
-reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
 
 always @(posedge clk) begin
     if (~rstn) begin
@@ -777,7 +770,7 @@ localparam STATE_EXECUTE_b = 2;
 localparam STATE_MEM_b = 3;
 localparam STATE_WRITE_b = 4;
 
-reg [N_STATES-1:0] state;
+wire [N_STATES-1:0] state;
 
 assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait};
 

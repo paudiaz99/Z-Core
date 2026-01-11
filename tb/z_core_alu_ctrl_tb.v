@@ -23,9 +23,6 @@ SOFTWARE.
 */
 
 
-`timescale 1ns / 1ps
-`include "rtl/z_core_alu_ctrl.v"
-
 module z_core_alu_ctrl_tb;
 
     // Inputs
