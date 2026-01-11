@@ -1562,14 +1562,16 @@ module z_core_control_u_tb;
 
         $display("╠═══════════════════════════════════════════════════════════╣");
         $display("║  Mode: AXI (memory-based fetch)                           ║");
-        $display("║  Total Cycles:       %8d                              ║", total_cycles);
-        $display("║  Total Instructions: %8d                              ║", total_instrs);
-        $display("║  CPI (Cycles/Instr): %8.2f                              ║", real'(total_cycles) / real'(total_instrs));
+        $display("║  Total Cycles:       %8d                             ║", total_cycles);
+        $display("║  Total Instructions: %8d                             ║", total_instrs);
+        $display("║  CPI (Cycles/Instr): %8.2f                             ║", real'(total_cycles) / real'(total_instrs));
         $display("╠═══════════════════════════════════════════════════════════╣");
         $display("║  Internal Perf Counters (Total Accumulated):              ║");
-        $display("║  Cycles: %d  Instrs: %d  Cache Hits: %d", total_internal_cycles, total_internal_instrs, total_internal_cache_hits);
+        $display("║  Cycles:%d  Instrs:%d ║", total_internal_cycles, total_internal_instrs);
+        $display("║  Cache Hits: %d                         ║", total_internal_cache_hits);
         if (total_memory_writes == total_internal_memory_writes && total_memory_reads == total_internal_memory_reads) begin
-             $display("║  Memory Access Counters match: Writes=%d, Reads=%d          ║", total_memory_writes, total_memory_reads);
+             $display("║  Memory Access Counters match:                            ║");
+             $display("║  Writes=%d, Reads=%d                    ║", total_memory_writes, total_memory_reads);
         end else begin
              $display("║  [WARNING] Memory Counter Mismatch!                       ║");
              $display("║  Expected Writes: %d, Internal: %d                        ║", total_memory_writes, total_internal_memory_writes);
