@@ -90,6 +90,10 @@ module axil_gpio #
     // GPIO Internal Registers
     reg [N_GPIO-1:0] gpio_data_out; // Stores value to drive when DIR=1
     reg [N_GPIO-1:0] gpio_dir;      // 1 = Output, 0 = Input
+    
+    // Padded GPIO input for safe reading when N_GPIO > 32
+    wire [63:0] gpio_in_padded;
+    assign gpio_in_padded = {{(64-N_GPIO){1'b0}}, gpio};
 
     // Assignments
     assign s_axil_awready = s_axil_awready_reg;
