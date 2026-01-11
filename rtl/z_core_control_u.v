@@ -447,12 +447,11 @@ reg fetch_wait;
 reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
 reg mem_op_pending;
 reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
-reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
 
 // New instruction arriving this cycle (from any source)
-wire new_instr_arriving = fetch_buffer_valid || 
-                          (fetch_wait && mem_ready) ||
-                          (instr_cache_valid && instr_cache_cache_hit);
+wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
+                          (fetch_wait && mem_ready) || // From Memory
+                          (instr_cache_valid && instr_cache_cache_hit); // From I-Cache
 
 always @(posedge clk) begin
     if (~rstn) begin
@@ -462,7 +461,6 @@ always @(posedge clk) begin
         if_id_ir <= 32'h00000013;  // NOP
         if_id_pc <= 32'b0;
         if_id_valid <= 1'b0;
-        flush_r <= 1'b0;
         fetch_buffer_valid <= 1'b0;
         fetch_buffer_ir <= 32'b0;
         fetch_buffer_pc <= 32'b0;
@@ -479,10 +477,7 @@ always @(posedge clk) begin
             fetch_buffer_valid <= 1'b0;
             PC <= id_ex_is_jalr ? jalr_target : branch_target;
             fetch_wait <= 1'b0;
-            flush_r <= 1'b1;  // Register that flush happened
-        end else begin
-            flush_r <= 1'b0;
-            
+        end else begin            
             // Clear if_id_valid when consumed (unless new instruction arriving)
             if (!stall && if_id_valid && !new_instr_arriving)
                 if_id_valid <= 1'b0;
@@ -668,6 +663,7 @@ end
 // ##################################################
 
 // Combinational load data extraction from mem_rdata
+// Acts as a LSU (Load Store Unit)
 // This allows WB stage to use the correct data immediately
 reg [31:0] mem_load_data;
 always @* begin
@@ -709,8 +705,8 @@ always @(posedge clk) begin
         // This allows stores to be queued while waiting for fetch to complete
         if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy) begin
             mem_op_pending <= 1'b1;
-            
             if (ex_mem_is_store) begin
+                perf_memory_writes <= perf_memory_writes + 1;
                 case (ex_mem_funct3[1:0])
                     2'b00: begin
                         mem_data_out_r <= {4{ex_mem_rs2_data[7:0]}};
@@ -725,6 +721,8 @@ always @(posedge clk) begin
                         mem_wstrb_r <= 4'b1111;
                     end
                 endcase
+            end else if (ex_mem_is_load) begin
+                perf_memory_reads <= perf_memory_reads + 1;
             end
         end else if (mem_op_pending && mem_ready) begin
             mem_op_pending <= 1'b0;
@@ -778,7 +776,7 @@ localparam STATE_WRITE_b = 4;
 
 reg [N_STATES-1:0] state;
 
-assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait};
+assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait | (instr_cache_valid && instr_cache_cache_hit)};
 
 // Unified Memory Request Logic (Arbiter)
 // mem_addr is defined as reg above but driven combinationally here.
@@ -806,12 +804,18 @@ end
 reg [63:0] perf_cycle;
 reg [63:0] perf_instret;
 reg [63:0] perf_cache_hits;
+reg [63:0] perf_cache_misses;
+reg [63:0] perf_memory_reads;
+reg [63:0] perf_memory_writes;
 
 always @(posedge clk) begin
     if (~rstn) begin
         perf_cycle <= 64'd0;
         perf_instret <= 64'd0;
         perf_cache_hits <= 64'd0;
+        perf_cache_misses <= 64'd0;
+        perf_memory_reads <= 64'd0;
+        perf_memory_writes <= 64'd0;
     end else begin
         perf_cycle <= perf_cycle + 1;
         

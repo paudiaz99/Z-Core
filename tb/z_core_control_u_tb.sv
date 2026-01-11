@@ -62,11 +62,15 @@ module z_core_control_u_tb;
     integer instr_counter = 0;
     integer total_cycles = 0;
     integer total_instrs = 0;
+    integer total_memory_writes = 0;
+    integer total_memory_reads = 0;
     
     // Internal Performance Counter Accumulators
     reg [63:0] total_internal_cycles = 0;
     reg [63:0] total_internal_instrs = 0;
     reg [63:0] total_internal_cache_hits = 0;
+    reg [63:0] total_internal_memory_writes = 0;
+    reg [63:0] total_internal_memory_reads = 0;
 
 
     // Interconnect Parameters
@@ -465,6 +469,8 @@ module z_core_control_u_tb;
                 total_internal_cycles = total_internal_cycles + uut.perf_cycle;
                 total_internal_instrs = total_internal_instrs + uut.perf_instret;
                 total_internal_cache_hits = total_internal_cache_hits + uut.perf_cache_hits;
+                total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
+                total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
             end
             resets_done = resets_done + 1;
             
@@ -476,6 +482,25 @@ module z_core_control_u_tb;
             wait_cycles(10);  // Increased from 4 to allow pipeline flush
             rstn = 1;
             wait_cycles(5);   // Increased from 2 to allow pipeline fill
+        end
+    endtask
+
+    task verify_counters;
+        input integer exp_writes;
+        input integer exp_reads;
+        input [255:0] test_name;
+        begin
+            total_memory_writes = total_memory_writes + exp_writes;
+            total_memory_reads = total_memory_reads + exp_reads;
+            
+            // Check against current test counters (which reset on reset_cpu)
+            if (uut.perf_memory_writes == exp_writes && uut.perf_memory_reads == exp_reads) begin
+                $display("  [PERF] %0s: Writes=%0d, Reads=%0d (MATCH)", test_name, uut.perf_memory_writes, uut.perf_memory_reads);
+            end else begin
+                $display("  [PERF-FAIL] %0s: Writes=%0d (Exp %0d), Reads=%0d (Exp %0d)", 
+                         test_name, uut.perf_memory_writes, exp_writes, uut.perf_memory_reads, exp_reads);
+                fail_count = fail_count + 1;
+            end
         end
     endtask
 
@@ -934,6 +959,32 @@ module z_core_control_u_tb;
         // Test 1: Arithmetic Operations
         // ==========================================
         load_test1_arithmetic();
+        // Wait for test to complete before checking counters (though reset_cpu reads them too)
+        // But reset_cpu is called AFTER we want to check.
+        // Wait time is handled inside the test execution delays below, but we need to check BEFORE reset_cpu
+        // The delays in the original code were AFTER reset_cpu.
+        // Wait, the original code structure: load -> reset -> wait -> check results.
+        // The counters reset on reset_cpu. So we must check counters BEFORE reset_cpu.
+        // BUT the simulation runs *during* the #delay.
+        // The original code:
+        // load_test1...
+        // reset_cpu
+        // #1500
+        // check_reg...
+        
+        // Use a different structure:
+        // load -> reset -> run simulation -> check reg -> check counters
+        // uut.perf counters will effectively be valid for the whole run since last reset.
+        // BUT reset_cpu toggles reset.
+        // So counters are cleared at start of reset_cpu's reset pulse.
+        // We need to check them *after* the run but *before* the NEXT reset.
+        // The current structure does `reset_cpu` immediately after `load`.
+        // `reset_cpu` releases reset at the end.
+        // So the run happens during the `#1500`.
+        // So we should check counters AFTER `#1500`, but BEFORE the Next `reset_cpu`.
+        
+        // Let's adjust the calls.
+        // Test 1
         reset_cpu();
         #1500;
         
@@ -944,6 +995,7 @@ module z_core_control_u_tb;
         check_reg(5, 3,  "SUB x5, x2, x3");
         check_reg(6, -5, "ADDI x6, x0, -5");
         check_reg(7, 12, "ADD x7, x4, x6");
+        verify_counters(0, 0, "Test 1");
 
         // ==========================================
         // Test 2: Logical Operations
@@ -961,6 +1013,7 @@ module z_core_control_u_tb;
         check_reg(7, 85,  "ANDI x7, x2, 0x55");
         check_reg(8, 170, "ORI x8, x0, 0xAA");
         check_reg(9, 85,  "XORI x9, x8, 0xFF");
+        verify_counters(0, 0, "Test 2");
 
         // ==========================================
         // Test 3: Shift Operations
@@ -978,6 +1031,7 @@ module z_core_control_u_tb;
         check_reg(9, 256, "SLL x9, x2, x8");
         check_reg(10, 32'h00FFFFFF, "SRL x10, x5, x8");
         check_reg(11, -1, "SRA x11, x5, x8");
+        verify_counters(0, 0, "Test 3");
 
         // ==========================================
         // Test 4: Memory Load/Store
@@ -995,6 +1049,7 @@ module z_core_control_u_tb;
         check_mem(256, 42,  "SW x2, 256(x0)");
         check_mem(260, 100, "SW x3, 260(x0)");
         check_mem(264, 142, "SW x6, 264(x0)");
+        verify_counters(3, 2, "Test 4");
 
         // ==========================================
         // Test 5: Compare Operations
@@ -1012,6 +1067,7 @@ module z_core_control_u_tb;
         check_reg(10, 1, "SLTIU x10 (10 < 100)");
         check_reg(11, 0, "SLTIU x11 (0xFFFFFFFF < 1)");
         check_reg(12, 1, "SLTU x12 (10 < 0xFFFFFFFF)");
+        verify_counters(0, 0, "Test 5");
 
         // ==========================================
         // Test 6: LUI and AUIPC
@@ -1025,6 +1081,7 @@ module z_core_control_u_tb;
         check_reg(3, 32'h12345678, "ADDI x3, x2, 0x678");
         check_reg(4, 8,            "AUIPC x4, 0");
         check_reg(5, 32'hFFFFF000, "LUI x5, 0xFFFFF");
+        verify_counters(0, 0, "Test 6");
 
         // ==========================================
         // Test 7: Full Integration (Fibonacci)
@@ -1043,6 +1100,7 @@ module z_core_control_u_tb;
         check_reg(8, 13, "f[6] = 13");
         check_reg(9, 21, "f[7] = 21");
         check_mem(256, 21, "Stored f[7]");
+        verify_counters(1, 0, "Test 7");
 
         // ==========================================
         // Test 8: Branch Operations
@@ -1059,6 +1117,7 @@ module z_core_control_u_tb;
         check_reg(14, 0, "BGE taken (should be 0)");
         check_reg(15, 0, "BLTU taken (should be 0)");
         check_reg(1,  0, "BGEU taken (should be 0)");
+        verify_counters(0, 0, "Test 8");
 
         // ==========================================
         // Test 9: Jump Operations (JAL/JALR)
@@ -1075,6 +1134,7 @@ module z_core_control_u_tb;
         check_reg(11, 0, "JAL path check (should be 0)");
         check_reg(12, 0, "JALR path check (should be 0)");
         check_reg(13, 0, "JALR+offset path (should be 0)");
+        verify_counters(0, 0, "Test 9");
 
         // ==========================================
         // Test 10: Backward Branch (Loop)
@@ -1087,6 +1147,7 @@ module z_core_control_u_tb;
         check_reg(2, 5,  "Loop counter final (5)");
         check_reg(3, 5,  "Loop limit (5)");
         check_reg(10, 10, "Sum 0+1+2+3+4 = 10");
+        verify_counters(0, 0, "Test 10");
 
         // ==========================================
         // Test 11: IO Access (UART/GPIO)
@@ -1110,6 +1171,7 @@ module z_core_control_u_tb;
             $display("  [FAIL] UART STATUS invalid: x4 = x");
         end
         // NOTE: GPIO read removed - bidirectional GPIO is tested in Test 12
+        verify_counters(2, 2, "Test 11");
 
         // ==========================================
         // Test 12: GPIO Bidirectional Verification
@@ -1137,6 +1199,7 @@ module z_core_control_u_tb;
         // Wait for CPU to read the value
         #500;
         check_reg(6, 32'hCAFEBABE, "GPIO Input Read");
+        verify_counters(3, 1, "Test 12");
 
         // ==========================================
         // Test 13: Byte/Halfword Load/Store
@@ -1163,6 +1226,7 @@ module z_core_control_u_tb;
         check_reg(12, 32'hFFFFDEAD, "LH offset 2 (sign-ext 0xDEAD)");
         // LHU from offset 2: 0xDEAD, zero-extended -> 0x0000DEAD
         check_reg(13, 32'h0000DEAD, "LHU offset 2 (zero-ext 0xDEAD)");
+        verify_counters(3, 8, "Test 13");
 
         // ==========================================
         // Test 14: UART Loopback Test
@@ -1187,6 +1251,7 @@ module z_core_control_u_tb;
             $display("  [FAIL] UART TX/RX loopback: tx_empty=%b, rx_valid=%b, rx_data=0x%02h (expected 0x55)",
                      u_uart.tx_empty, u_uart.rx_valid, u_uart.rx_data);
         end
+        verify_counters(1, 2, "Test 14");
 
         // ==========================================
         // Test 15: RAW Hazard Stress Test
@@ -1212,6 +1277,7 @@ module z_core_control_u_tb;
         check_reg(13, 512,  "SUB x13 = 1536-1024 = 512");
         check_reg(14, 512,  "AND x14 = 512&1536 = 512");
         check_reg(15, 0,    "SLT x15 = (512<512) = 0");
+        verify_counters(0, 0, "Test 15");
 
         // ==========================================
         // Test 16: Full ALU Instruction Coverage
@@ -1235,6 +1301,7 @@ module z_core_control_u_tb;
         check_mem(512, 103, "SW x7 mem[512] = 103");
         check_mem(516, 0,   "SW x10 mem[516] = 0");
         check_mem(520, 1,   "SW x13 mem[520] = 1");
+        verify_counters(3, 0, "Test 16");
 
         // ==========================================
         // Test 17: Nested Loops
@@ -1253,6 +1320,7 @@ module z_core_control_u_tb;
         check_reg(2, 3,   "Inner counter final j=3");
         check_reg(10, 18, "Sum = 18");
         check_mem(768, 18, "SW mem[768] = 18");
+        verify_counters(1, 0, "Test 17");
 
         // ==========================================
         // Test 18: Memory Access Pattern Stress
@@ -1274,6 +1342,7 @@ module z_core_control_u_tb;
         check_reg(13, 32'h55,  "LB x13 = sign(0x55) = 0x55");
         check_reg(14, 32'hAA,  "LHU x14 = 0x00AA");
         check_reg(15, 32'h321, "ADD x15 = 0x1FE+0x123 = 0x321");
+        verify_counters(7, 7, "Test 18");
 
         // ==========================================
         // Test 19: Mixed Instruction Stress
@@ -1302,6 +1371,7 @@ module z_core_control_u_tb;
             fail_count = fail_count + 1;
             $display("  [FAIL] JAL/JALR skip path violated (x15 = 0xBAD)");
         end
+        verify_counters(5, 1, "Test 19");
 
         // ==========================================
         // Test 20: Multiplication Operations (M Extension)
@@ -1329,6 +1399,7 @@ module z_core_control_u_tb;
         check_mem(256, 42,       "SW mem[256] = 42 (MUL result)");
         check_mem(260, 32'h0,    "SW mem[260] = 0 (MUL overflow lower)");
         check_mem(264, 32'h1,    "SW mem[264] = 1 (MULH upper)");
+        verify_counters(3, 0, "Test 20");
 
         // ==========================================
         // Test 21: Division Operations (M Extension)
@@ -1356,6 +1427,7 @@ module z_core_control_u_tb;
         check_mem(256, 14,       "SW mem[256] = 14 (100/7)");
         check_mem(260, 2,        "SW mem[260] = 2 (100%7)");
         check_mem(264, 1000,     "SW mem[264] = 1000 (1M/1K)");
+        verify_counters(3, 0, "Test 21");
 
         // ==========================================
         // Test 22: Division Forwarding Tests (ADD->DIV, MUL->DIV, DIV->DIV)
@@ -1379,6 +1451,7 @@ module z_core_control_u_tb;
         check_reg(8, 14,         "ADDI x8 = x7 = 14 (verify first div)");
         check_reg(12, 2,         "DIVU x12 = 14/6 = 2 (DIV->DIV)");
         check_mem(520, 2,        "SW mem[520] = 2 (DIV->DIV result)");
+        verify_counters(4, 0, "Test 22");
 
         // ==========================================
         // Test 23: M Extension + Control Flow (MUL+DIV+Branches+Jumps)
@@ -1405,6 +1478,7 @@ module z_core_control_u_tb;
         check_mem(528, 3,        "SW mem[528] = 3 (branch counter)");
         check_reg(21, 32'h44,    "JAL return addr x21 = 0x44");
         check_mem(532, 32'h44,   "SW mem[532] = 0x44 (JAL return addr)");
+        verify_counters(6, 0, "Test 23");
 
         // ==========================================
         // Test 24: Cache Locality Exploitation
@@ -1435,6 +1509,7 @@ module z_core_control_u_tb;
         $display("  Cycles: %0d", uut.perf_cycle);
         $display("  Instructions: %0d", uut.perf_instret);
         $display("  ─────────────────────────────────────────────");
+        verify_counters(3, 0, "Test 24");
 
         // ==========================================
         // Test 25: I-Cache Conflict Miss Thrash (Direct-Mapped)
@@ -1451,6 +1526,7 @@ module z_core_control_u_tb;
         check_reg(11, 70, "Accum B (10 iters * +7) = 70");
         check_mem(256, 60, "SW mem[256] = 60 (A)");
         check_mem(260, 70, "SW mem[260] = 70 (B)");
+        verify_counters(2, 0, "Test 25");
 
         $display("  Cache Hits (cumulative): %0d", uut.perf_cache_hits);
         $display("  Cycles (cumulative):     %0d", uut.perf_cycle);
@@ -1467,6 +1543,8 @@ module z_core_control_u_tb;
         total_internal_cycles = total_internal_cycles + uut.perf_cycle;
         total_internal_instrs = total_internal_instrs + uut.perf_instret;
         total_internal_cache_hits = total_internal_cache_hits + uut.perf_cache_hits;
+        total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
+        total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
         $display("");
         $display("╔═══════════════════════════════════════════════════════════╗");
         $display("║                    TEST SUMMARY                           ║");
@@ -1490,6 +1568,13 @@ module z_core_control_u_tb;
         $display("╠═══════════════════════════════════════════════════════════╣");
         $display("║  Internal Perf Counters (Total Accumulated):              ║");
         $display("║  Cycles: %d  Instrs: %d  Cache Hits: %d", total_internal_cycles, total_internal_instrs, total_internal_cache_hits);
+        if (total_memory_writes == total_internal_memory_writes && total_memory_reads == total_internal_memory_reads) begin
+             $display("║  Memory Access Counters match: Writes=%d, Reads=%d          ║", total_memory_writes, total_memory_reads);
+        end else begin
+             $display("║  [WARNING] Memory Counter Mismatch!                       ║");
+             $display("║  Expected Writes: %d, Internal: %d                        ║", total_memory_writes, total_internal_memory_writes);
+             $display("║  Expected Reads:  %d, Internal: %d                        ║", total_memory_reads, total_internal_memory_reads);
+        end
         if (total_instrs != total_internal_instrs) 
              $display("║  [WARNING] TB Instr Count (%d) != Internal (%d)", total_instrs, total_internal_instrs);
         $display("╚═══════════════════════════════════════════════════════════╝");
@@ -1670,6 +1755,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[13] = 32'h00000013;
             u_axil_ram.mem[14] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[15] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2058,6 +2145,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[29] = 32'h00000013;
             u_axil_ram.mem[30] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[31] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2190,7 +2279,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[30] = 32'h00000013;
             u_axil_ram.mem[31] = 32'h00000013;
-            u_axil_ram.mem[32] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[32] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2298,7 +2388,8 @@ module z_core_control_u_tb;
             // NOPs  
             u_axil_ram.mem[20] = 32'h00000013;
             u_axil_ram.mem[21] = 32'h00000013;
-            u_axil_ram.mem[22] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[22] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2370,7 +2461,8 @@ module z_core_control_u_tb;
             
             // NOPs
             u_axil_ram.mem[23] = 32'h00000013;
-            u_axil_ram.mem[24] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[24] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2475,6 +2567,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[33] = 32'h00000013;
             u_axil_ram.mem[34] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[35] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
