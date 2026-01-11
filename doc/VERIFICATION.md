@@ -308,6 +308,9 @@ Tests three forwarding scenarios:
 - Validates that control flow remains correct under heavy conflict misses (correctness first).
 - Helps catch tag/index or valid-bit corner cases that don’t show up in pure-locality loops.
 
+## Test 26: I-Cache Conflict Miss Thrash (Direct-Mapped)
+**Purpose:** Squeezee the pipeline as much as possible by exploiting instruction locallity. This locallity enables a throughput of one intruction per cycle.
+
 ## Instruction Coverage
 
 ### RV32IM Base Integer Instructions

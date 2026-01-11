@@ -1533,6 +1533,48 @@ module z_core_control_u_tb;
         $display("  Instructions (cumulative): %0d", uut.perf_instret);
 
         // ==========================================
+        // Test 26: Full Pipeline Exploitation
+        // ==========================================
+        load_test26_pipeline_exploitation();
+        reset_cpu();
+        #50000;  // Time for 10*20 = 200 loop iterations + setup + stores
+        
+        $display("\n=== Test 26 Results: Full Pipeline Exploitation ===");
+        // Total iterations: 10 outer * 20 inner = 200
+        // Each accumulator increments by its value each iteration
+        check_reg(2, 200, "acc0 (200 * 1) = 200");
+        check_reg(3, 400, "acc1 (200 * 2) = 400");
+        check_reg(4, 600, "acc2 (200 * 3) = 600");
+        check_reg(5, 800, "acc3 (200 * 4) = 800");
+        check_reg(6, 1000, "acc4 (200 * 5) = 1000");
+        check_reg(7, 1200, "acc5 (200 * 6) = 1200");
+        check_reg(8, 1400, "acc6 (200 * 7) = 1400");
+        check_reg(9, 1600, "acc7 (200 * 8) = 1600");
+        check_reg(20, 7200, "sum of all accs = 7200");
+        
+        // Memory checks
+        check_mem(512, 200, "SW mem[512] = 200 (acc0)");
+        check_mem(516, 400, "SW mem[516] = 400 (acc1)");
+        check_mem(520, 600, "SW mem[520] = 600 (acc2)");
+        check_mem(524, 800, "SW mem[524] = 800 (acc3)");
+        check_mem(528, 1000, "SW mem[528] = 1000 (acc4)");
+        check_mem(532, 1200, "SW mem[532] = 1200 (acc5)");
+        check_mem(536, 1400, "SW mem[536] = 1400 (acc6)");
+        check_mem(540, 1600, "SW mem[540] = 1600 (acc7)");
+        check_mem(544, 7200, "SW mem[544] = 7200 (sum)");
+        
+        verify_counters(9, 0, "Test 26");
+        
+        // Performance analysis
+        $display("  ─────────────────────────────────────────────");
+        $display("  Pipeline Exploitation Performance:");
+        $display("  Cache Hits: %0d", uut.perf_cache_hits);
+        $display("  Cycles: %0d", uut.perf_cycle);
+        $display("  Instructions: %0d", uut.perf_instret);
+        $display("  IPC (Instructions/Cycle): %0.3f", real'(uut.perf_instret) / real'(uut.perf_cycle));
+        $display("  ─────────────────────────────────────────────");
+
+        // ==========================================
         // Final Summary
         // ==========================================
         // Accumulate final counters
@@ -2733,6 +2775,157 @@ module z_core_control_u_tb;
             u_axil_ram.mem[16'h106] = 32'h10b02223;
             // 0x41C: NOP
             u_axil_ram.mem[16'h107] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 26: Full Pipeline Exploitation
+    //   Maximizes I-Cache locality (all code fits in 256-entry cache)
+    //   Uses independent register operations to minimize hazards
+    // ==========================================
+    task load_test26_pipeline_exploitation;
+        integer i;
+        begin
+            $display("\n--- Loading Test 26: Full Pipeline Exploitation ---");
+            // Clear memory first
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // ========================================================================
+            // STRATEGY: Keep all instructions within 256-word (1KB) region
+            // With 256-entry direct-mapped cache, index = address[9:2]
+            // All instructions at 0x000-0x3FC will map to unique cache lines
+            // After initial cold misses, we get 100% hit rate on loop iterations
+            // 
+            // We use multiple independent registers to avoid RAW hazards:
+            // - x2-x9: accumulators (8 parallel accumulators)
+            // - x10: outer loop counter
+            // - x11: inner loop counter  
+            // - x12-x13: loop limits
+            // - x20: final result accumulator
+            // ========================================================================
+            
+            // ----- INITIALIZATION (0x00 - 0x24) -----
+            // 0x00: ADDI x2, x0, 0       - acc0 = 0
+            u_axil_ram.mem[0] = 32'h00000113;
+            // 0x04: ADDI x3, x0, 0       - acc1 = 0
+            u_axil_ram.mem[1] = 32'h00000193;
+            // 0x08: ADDI x4, x0, 0       - acc2 = 0
+            u_axil_ram.mem[2] = 32'h00000213;
+            // 0x0C: ADDI x5, x0, 0       - acc3 = 0
+            u_axil_ram.mem[3] = 32'h00000293;
+            // 0x10: ADDI x6, x0, 0       - acc4 = 0
+            u_axil_ram.mem[4] = 32'h00000313;
+            // 0x14: ADDI x7, x0, 0       - acc5 = 0
+            u_axil_ram.mem[5] = 32'h00000393;
+            // 0x18: ADDI x8, x0, 0       - acc6 = 0
+            u_axil_ram.mem[6] = 32'h00000413;
+            // 0x1C: ADDI x9, x0, 0       - acc7 = 0
+            u_axil_ram.mem[7] = 32'h00000493;
+            
+            // 0x20: ADDI x12, x0, 10     - outer_limit = 10
+            u_axil_ram.mem[8] = 32'h00a00613;
+            // 0x24: ADDI x13, x0, 20     - inner_limit = 20
+            u_axil_ram.mem[9] = 32'h01400693;
+            // 0x28: ADDI x10, x0, 0      - outer_counter = 0
+            u_axil_ram.mem[10] = 32'h00000513;
+            
+            // ----- OUTER LOOP START (0x2C) -----
+            // 0x2C: ADDI x11, x0, 0      - inner_counter = 0
+            u_axil_ram.mem[11] = 32'h00000593;
+            
+            // ----- INNER LOOP START (0x30) - Tight 8-instruction body -----
+            // All 8 instructions use independent accumulators (no RAW hazards!)
+            // This allows the pipeline to run at maximum throughput
+            
+            // 0x30: ADDI x2, x2, 1       - acc0++
+            u_axil_ram.mem[12] = 32'h00110113;
+            // 0x34: ADDI x3, x3, 2       - acc1 += 2
+            u_axil_ram.mem[13] = 32'h00218193;
+            // 0x38: ADDI x4, x4, 3       - acc2 += 3
+            u_axil_ram.mem[14] = 32'h00320213;
+            // 0x3C: ADDI x5, x5, 4       - acc3 += 4
+            u_axil_ram.mem[15] = 32'h00428293;
+            // 0x40: ADDI x6, x6, 5       - acc4 += 5
+            u_axil_ram.mem[16] = 32'h00530313;
+            // 0x44: ADDI x7, x7, 6       - acc5 += 6
+            u_axil_ram.mem[17] = 32'h00638393;
+            // 0x48: ADDI x8, x8, 7       - acc6 += 7
+            u_axil_ram.mem[18] = 32'h00740413;
+            // 0x4C: ADDI x9, x9, 8       - acc7 += 8
+            u_axil_ram.mem[19] = 32'h00848493;
+            
+            // Inner loop control
+            // 0x50: ADDI x11, x11, 1     - inner_counter++
+            u_axil_ram.mem[20] = 32'h00158593;
+            // 0x54: BLT x11, x13, -36    - if inner_counter < 20, branch to 0x30
+            u_axil_ram.mem[21] = 32'hfcd5cee3;
+            
+            // ----- INNER LOOP END -----
+            
+            // Outer loop control
+            // 0x58: ADDI x10, x10, 1     - outer_counter++
+            u_axil_ram.mem[22] = 32'h00150513;
+            // 0x5C: BLT x10, x12, -48    - if outer_counter < 10, branch to 0x2C
+            u_axil_ram.mem[23] = 32'hfcc548e3;
+            
+            // ----- OUTER LOOP END -----
+            
+            // ----- COMPUTE FINAL RESULT -----
+            // Total iterations: 10 * 20 = 200
+            // Expected values:
+            // x2 = 200 * 1 = 200
+            // x3 = 200 * 2 = 400
+            // x4 = 200 * 3 = 600
+            // x5 = 200 * 4 = 800
+            // x6 = 200 * 5 = 1000
+            // x7 = 200 * 6 = 1200
+            // x8 = 200 * 7 = 1400
+            // x9 = 200 * 8 = 1600
+            // Sum = 200 + 400 + 600 + 800 + 1000 + 1200 + 1400 + 1600 = 7200
+            
+            // 0x60: ADD x20, x2, x3      - x20 = x2 + x3 = 600
+            u_axil_ram.mem[24] = 32'h00310a33;
+            // 0x64: ADD x20, x20, x4     - x20 += x4 = 1200
+            u_axil_ram.mem[25] = 32'h004a0a33;
+            // 0x68: ADD x20, x20, x5     - x20 += x5 = 2000
+            u_axil_ram.mem[26] = 32'h005a0a33;
+            // 0x6C: ADD x20, x20, x6     - x20 += x6 = 3000
+            u_axil_ram.mem[27] = 32'h006a0a33;
+            // 0x70: ADD x20, x20, x7     - x20 += x7 = 4200
+            u_axil_ram.mem[28] = 32'h007a0a33;
+            // 0x74: ADD x20, x20, x8     - x20 += x8 = 5600
+            u_axil_ram.mem[29] = 32'h008a0a33;
+            // 0x78: ADD x20, x20, x9     - x20 += x9 = 7200
+            u_axil_ram.mem[30] = 32'h009a0a33;
+            
+            // ----- STORE RESULTS -----
+            // 0x7C: SW x2, 512(x0)       - mem[512] = 200
+            u_axil_ram.mem[31] = 32'h20202023;
+            // 0x80: SW x3, 516(x0)       - mem[516] = 400
+            u_axil_ram.mem[32] = 32'h20302223;
+            // 0x84: SW x4, 520(x0)       - mem[520] = 600
+            u_axil_ram.mem[33] = 32'h20402423;
+            // 0x88: SW x5, 524(x0)       - mem[524] = 800
+            u_axil_ram.mem[34] = 32'h20502623;
+            // 0x8C: SW x6, 528(x0)       - mem[528] = 1000
+            u_axil_ram.mem[35] = 32'h20602823;
+            // 0x90: SW x7, 532(x0)       - mem[532] = 1200
+            u_axil_ram.mem[36] = 32'h20702a23;
+            // 0x94: SW x8, 536(x0)       - mem[536] = 1400
+            u_axil_ram.mem[37] = 32'h20802c23;
+            // 0x98: SW x9, 540(x0)       - mem[540] = 1600
+            u_axil_ram.mem[38] = 32'h20902e23;
+            // 0x9C: SW x20, 544(x0)      - mem[544] = 7200 (sum)
+            u_axil_ram.mem[39] = 32'h23402023;
+            
+            // 0xA0: NOP
+            u_axil_ram.mem[40] = 32'h00000013;
+            // 0xA4: NOP
+            u_axil_ram.mem[41] = 32'h00000013;
+            // 0xA8: JAL x0, 0            - Infinite loop to stop execution
+            u_axil_ram.mem[42] = 32'h0000006f;
         end
     endtask
 
