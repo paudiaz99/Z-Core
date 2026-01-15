@@ -73,15 +73,24 @@ Z-Core/
 │   ├── z_core_reg_file.v      # 32x32-bit register file
 │   ├── z_core_alu.v           # Arithmetic logic unit
 │   ├── z_core_alu_ctrl.v      # ALU control
-│   ├── z_core_mult_unit.v     # Multiplier unit
+│   ├── z_core_mult_tree.v     # Multiplier unit (Tree version)
+│   ├── z_core_mult_synth.v    # Multiplier unit (Synthesis version)
+│   ├── z_core_mult_unit.v     # Multiplier unit top level
 │   ├── z_core_div_unit.v      # Divider unit
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
 │   ├── axil_master.v          # AXI-Lite Master
 │   ├── axil_uart.v            # UART Module
 │   ├── axil_gpio.v            # GPIO Module
-│   └── axi_mem.v              # AXI-Lite RAM
+│   ├── arbiter.v              # AXI-Lite Arbiter
+│   ├── priority_encoder.v     # Priority Encoder Module
+│   ├── axi_mem.v              # AXI-Lite RAM
+│   └── flist.vc               # File list for simulation
 │
 ├── tb/                        # Testbenches
+│   ├── questa/                # QuestaSim scripts
+│   │   ├── plot_axi.tcl       # AXI plot script
+│   │   └── sim.tcl            # Simulation script
+│   ├── Makefile               # Makefile for testbenches
 │   ├── z_core_control_u_tb.sv # Full system test
 │   ├── z_core_alu_tb.v        # ALU unit test
 │   ├── z_core_alu_ctrl_tb.v   # ALU control test
