@@ -141,43 +141,6 @@ axil_master #(
 localparam PC_INIT = 32'd0;
 reg [31:0] PC;
 
-// **************************************************
-//                Instruction FIFO
-// **************************************************
-
-localparam FIFO_DEPTH = 16;
-localparam FIFO_DEPTH_WIDTH = $clog2(FIFO_DEPTH);
-
-// FIFO Data Signals
-reg [31:0] instr_fifo_data [FIFO_DEPTH-1:0];
-reg [31:0] instr_fifo_pc [FIFO_DEPTH-1:0];
-reg        instr_fifo_valid [FIFO_DEPTH-1:0];
-
-// FIFO Control Signals
-
-wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_rd_ptr;
-wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_wr_ptr;
-wire [FIFO_DEPTH_WIDTH-1:0] fifo_ctrl_count;
-wire                        fifo_ctrl_full;
-wire                        fifo_ctrl_empty;
-
-assign fifo_ctrl_full = (fifo_ctrl_count == FIFO_DEPTH);
-assign fifo_ctrl_empty = (fifo_ctrl_count == 0);
-
-
-// TODO...
-
-// 1. Instruction prefetcher Reads Burst from AXI-Lite 
-//    and stores it in the Instruction FIFO 
-//    TODO: When does it read?
-//      a. It reads separately from the fetch unit (Prefecther unit), which 
-//         is the main unit responsible for fetching instructions from the
-//         memory. And is a separate master of the AXI-Lite bus.
-// 2. Fetch unit reads from the Instruction FIFO each cycle if:
-//    a. FIFO is not empty
-//    b. FIFO instructions are valid (TODO: All or any?)
-//    c. IF/ID pipeline stage is not occupied
-//    
 
 reg fetch_wait;
 reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
@@ -212,23 +175,21 @@ reg [4:0]  id_ex_alu_op;
 reg [2:0]  id_ex_funct3;
 reg        id_ex_is_load, id_ex_is_store, id_ex_is_branch;
 reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc, id_ex_is_div;
-reg        id_ex_is_r_type, id_ex_is_i_alu;
+reg        id_ex_is_i_alu;
 reg        id_ex_reg_write;
 reg        id_ex_valid;
 
 // --- EX/MEM Pipeline Register ---
-reg [31:0] ex_mem_pc;
 reg [31:0] ex_mem_alu_result;
 reg [31:0] ex_mem_rs2_data;
 reg [4:0]  ex_mem_rd;
 reg [2:0]  ex_mem_funct3;
-reg        ex_mem_is_load, ex_mem_is_store, ex_mem_is_div;
+reg        ex_mem_is_load, ex_mem_is_store;
 reg        ex_mem_reg_write;
 reg        ex_mem_valid;
 
 // --- MEM/WB Pipeline Register ---
 reg [31:0] mem_wb_result;
-reg [31:0] mem_wb_pc;  // PC for debug tracing
 reg [4:0]  mem_wb_rd;
 reg        mem_wb_reg_write;
 reg        mem_wb_valid;
@@ -563,7 +524,6 @@ always @(posedge clk) begin
         id_ex_is_jalr <= 1'b0;
         id_ex_is_lui <= 1'b0;
         id_ex_is_auipc <= 1'b0;
-        id_ex_is_r_type <= 1'b0;
         id_ex_is_i_alu <= 1'b0;
         id_ex_is_div <= 1'b0;
         id_ex_reg_write <= 1'b0;
@@ -603,7 +563,6 @@ always @(posedge clk) begin
         id_ex_is_jalr <= dec_is_jalr;
         id_ex_is_lui <= dec_is_lui;
         id_ex_is_auipc <= dec_is_auipc;
-        id_ex_is_r_type <= dec_is_r_type;
         id_ex_is_i_alu <= dec_is_i_alu;
         id_ex_is_div <= dec_is_div;
         id_ex_reg_write <= dec_reg_write;
@@ -633,24 +592,20 @@ wire [31:0] ex_result = id_ex_is_lui   ? id_ex_imm :
 always @(posedge clk) begin
     if (~rstn) begin
         ex_mem_valid <= 1'b0;
-        ex_mem_pc <= 32'b0;
         ex_mem_alu_result <= 32'b0;
         ex_mem_rs2_data <= 32'b0;
         ex_mem_rd <= 5'b0;
         ex_mem_funct3 <= 3'b0;
         ex_mem_is_load <= 1'b0;
         ex_mem_is_store <= 1'b0;
-        ex_mem_is_div <= 1'b0;
         ex_mem_reg_write <= 1'b0;
     end else if (!mem_stall && !ex_stall) begin
-        ex_mem_pc <= id_ex_pc;
         ex_mem_alu_result <= ex_result;
         ex_mem_rs2_data <= fwd_rs2_data;
         ex_mem_rd <= id_ex_rd;
         ex_mem_funct3 <= id_ex_funct3;
         ex_mem_is_load <= id_ex_is_load;
         ex_mem_is_store <= id_ex_is_store;
-        ex_mem_is_div <= id_ex_is_div;
         ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store;
         ex_mem_valid <= id_ex_valid && !id_ex_is_branch;
     end
@@ -736,14 +691,12 @@ always @(posedge clk) begin
     if (~rstn) begin
         mem_wb_valid <= 1'b0;
         mem_wb_result <= 32'b0;
-        mem_wb_pc <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
     end else if (!mem_stall || (mem_op_pending && mem_ready)) begin
         // NOTE: Use mem_stall not ex_stall here - div_stall should NOT block WB
         // This allows instructions ahead of division to complete their writeback
         mem_wb_rd <= ex_mem_rd;
-        mem_wb_pc <= ex_mem_pc;
         mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
         mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
         
