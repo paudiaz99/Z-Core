@@ -440,11 +440,6 @@ wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
 //              PIPELINE STAGE: FETCH
 // ##################################################
 
-reg fetch_wait;
-reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
-reg mem_op_pending;
-reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
-
 // New instruction arriving this cycle (from any source)
 wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
                           (fetch_wait && mem_ready) || // From Memory
