@@ -471,6 +471,7 @@ always @(posedge clk) begin
         
         if (flush) begin
             // Flush: invalidate IF/ID (delay slot) and redirect PC to target
+            perf_pipeline_flush <= perf_pipeline_flush + 1;
             if_id_valid <= 1'b0;
             if_id_ir <= 32'h00000013;
             // Also invalidate the fetch buffer to prevent stale instructions from being loaded
@@ -490,6 +491,7 @@ always @(posedge clk) begin
                 fetch_buffer_valid <= 1'b0;
             end else if (fetch_wait && mem_ready) begin
                 // Fetch complete - use fetch_pc for the address, not current PC
+                perf_inst_fetch <= perf_inst_fetch + 1;
                 // Write the new instruction to the cache
                 instr_cache_wen <= 1'b1;
                 instr_cache_data_in <= mem_rdata;
@@ -515,7 +517,7 @@ always @(posedge clk) begin
                 if_id_pc <= PC;
                 if_id_valid <= 1'b1;
                 PC <= PC + 4;
-                perf_cache_hits <= perf_cache_hits + 1;
+                perf_inst_cache_hits <= perf_inst_cache_hits + 1;
             end else if (!fetch_wait && !mem_op_pending && !mem_busy &&
                          !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
                          (!fetch_buffer_valid || !stall) && 
@@ -803,19 +805,21 @@ end
 // ##################################################
 reg [63:0] perf_cycle;
 reg [63:0] perf_instret;
-reg [63:0] perf_cache_hits;
-reg [63:0] perf_cache_misses;
+reg [63:0] perf_inst_cache_hits;
+reg [63:0] perf_inst_fetch;
 reg [63:0] perf_memory_reads;
 reg [63:0] perf_memory_writes;
+reg [63:0] perf_pipeline_flush;
 
 always @(posedge clk) begin
     if (~rstn) begin
         perf_cycle <= 64'd0;
         perf_instret <= 64'd0;
-        perf_cache_hits <= 64'd0;
-        perf_cache_misses <= 64'd0;
+        perf_inst_cache_hits <= 64'd0;
+        perf_inst_fetch <= 64'd0;
         perf_memory_reads <= 64'd0;
         perf_memory_writes <= 64'd0;
+        perf_pipeline_flush <= 64'd0;
     end else begin
         perf_cycle <= perf_cycle + 1;
         

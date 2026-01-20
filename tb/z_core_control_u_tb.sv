@@ -468,7 +468,7 @@ module z_core_control_u_tb;
             if (resets_done > 0) begin
                 total_internal_cycles = total_internal_cycles + uut.perf_cycle;
                 total_internal_instrs = total_internal_instrs + uut.perf_instret;
-                total_internal_cache_hits = total_internal_cache_hits + uut.perf_cache_hits;
+                total_internal_cache_hits = total_internal_cache_hits + uut.perf_inst_cache_hits;
                 total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
                 total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
             end
@@ -1505,9 +1505,9 @@ module z_core_control_u_tb;
         // Performance info
         $display("  ─────────────────────────────────────────────");
         $display("  Cache Locality Performance:");
-        $display("  Cache Hits: %0d", uut.perf_cache_hits);
+        $display("  Cache Hits: %0d", uut.perf_inst_cache_hits);
         $display("  Cycles: %0d", uut.perf_cycle);
-        $display("  Instructions: %0d", uut.perf_instret);
+        $display("  Retired Instructions: %0d", uut.perf_instret);
         $display("  ─────────────────────────────────────────────");
         verify_counters(3, 0, "Test 24");
 
@@ -1528,9 +1528,9 @@ module z_core_control_u_tb;
         check_mem(260, 70, "SW mem[260] = 70 (B)");
         verify_counters(2, 0, "Test 25");
 
-        $display("  Cache Hits (cumulative): %0d", uut.perf_cache_hits);
+        $display("  Cache Hits (cumulative): %0d", uut.perf_inst_cache_hits);
         $display("  Cycles (cumulative):     %0d", uut.perf_cycle);
-        $display("  Instructions (cumulative): %0d", uut.perf_instret);
+        $display("  Retired Instructions (cumulative): %0d", uut.perf_instret);
 
         // ==========================================
         // Test 26: Full Pipeline Exploitation
@@ -1568,9 +1568,9 @@ module z_core_control_u_tb;
         // Performance analysis
         $display("  ─────────────────────────────────────────────");
         $display("  Pipeline Exploitation Performance:");
-        $display("  Cache Hits: %0d", uut.perf_cache_hits);
+        $display("  Cache Hits: %0d", uut.perf_inst_cache_hits);
         $display("  Cycles: %0d", uut.perf_cycle);
-        $display("  Instructions: %0d", uut.perf_instret);
+        $display("  Retired Instructions: %0d", uut.perf_instret);
         $display("  IPC (Instructions/Cycle): %0.3f", real'(uut.perf_instret) / real'(uut.perf_cycle));
         $display("  ─────────────────────────────────────────────");
 
@@ -1584,7 +1584,7 @@ module z_core_control_u_tb;
         // Accumulate internal counters for the final test
         total_internal_cycles = total_internal_cycles + uut.perf_cycle;
         total_internal_instrs = total_internal_instrs + uut.perf_instret;
-        total_internal_cache_hits = total_internal_cache_hits + uut.perf_cache_hits;
+        total_internal_cache_hits = total_internal_cache_hits + uut.perf_inst_cache_hits;
         total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
         total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
         $display("");
