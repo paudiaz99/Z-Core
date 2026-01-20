@@ -22,8 +22,6 @@ SOFTWARE.
 
 */
 
-`timescale 1ns / 1ps
-
 module axil_gpio_tb;
 
     // Parameters

@@ -76,16 +76,25 @@ Z-Core/
 │   ├── z_core_reg_file.v      # 32x32-bit register file
 │   ├── z_core_alu.v           # Arithmetic logic unit
 │   ├── z_core_alu_ctrl.v      # ALU control
-│   ├── z_core_mult_unit.v     # Multiplier unit
+│   ├── z_core_mult_tree.v     # Multiplier unit (Tree version)
+│   ├── z_core_mult_synth.v    # Multiplier unit (Synthesis version)
+│   ├── z_core_mult_unit.v     # Multiplier unit top level
 │   ├── z_core_div_unit.v      # Divider unit
 │   ├── z_core_instr_cache.v   # Instruction cache
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
 │   ├── axil_master.v          # AXI-Lite Master
 │   ├── axil_uart.v            # UART Module
 │   ├── axil_gpio.v            # GPIO Module
-│   └── axi_mem.v              # AXI-Lite RAM
+│   ├── arbiter.v              # AXI-Lite Arbiter
+│   ├── priority_encoder.v     # Priority Encoder Module
+│   ├── axi_mem.v              # AXI-Lite RAM
+│   └── flist.vc               # File list for simulation
 │
 ├── tb/                        # Testbenches
+│   ├── questa/                # QuestaSim scripts
+│   │   ├── plot_axi.tcl       # AXI plot script
+│   │   └── sim.tcl            # Simulation script
+│   ├── Makefile               # Makefile for testbenches
 │   ├── z_core_control_u_tb.sv # Full system test
 │   ├── z_core_alu_tb.v        # ALU unit test
 │   ├── z_core_alu_ctrl_tb.v   # ALU control test
@@ -110,8 +119,9 @@ Z-Core/
 
 ### Prerequisites
 
-- [Icarus Verilog](http://iverilog.icarus.com/) (iverilog) for simulation
-- [GTKWave](http://gtkwave.sourceforge.net/) for waveform viewing (optional)
+- [QuestaSim FPGA Edition](https://www.altera.com/downloads/simulation-tools/questa-fpgas-pro-edition-software-version-25-3) (questa) or [Altair DSim](https://learn.altair.com/courses/getting-started-with-dsim-elearning) (dsim) for simulation
+- [GTKWave](http://gtkwave.sourceforge.net/) or [Surfer](https://gitlab.com/surfer-project/surfer) for waveform viewing (optional)
+- [Slang - System Verilog Language Services](https://github.com/MikePopoloski/slang) for linting (optional)
 
 ### Installation
 
@@ -125,45 +135,67 @@ mkdir -p sim
 ```
 
 ### Running Tests
+- assumes Questa FPGA Edition or Altair DSim is installed and contained in user's PATH environment variable 
 
 ```bash
-# Run individual module tests
-iverilog -o sim/z_core_alu_tb.vvp tb/z_core_alu_tb.v && vvp sim/z_core_alu_tb.vvp
+# Run full system batch-mode test using Questa Sim (default)
+cd sim
+make -f ../tb/Makefile run
 
-# Run full system test (comprehensive)
-iverilog -g2012 -o sim/z_core_control_u_tb.vvp tb/z_core_control_u_tb.sv
-vvp sim/z_core_control_u_tb.vvp
+# Run full system batch-mode test using Icarus Verilog
+cd sim
+make -f ../tb/Makefile run SIM=iverilog
+
+# Run full system debug test using Questa Sim
+cd sim
+make -f ../tb/Makefile run debug=1
+
+# Run full system batch-mode test using Altair Dsim
+cd sim
+make -f ../tb/Makefile run SIM=dsim
+
+# Run full system debug test using Altair Dsim
+cd sim
+make -f ../tb/Makefile run SIM=dsim debug=1
 ```
 
 ### Expected Output
 
 ```
-╔═══════════════════════════════════════════════════════════╗
-║           Z-Core RISC-V Processor Test Suite              ║
-║                   RV32I Instruction Set                   ║
-╚═══════════════════════════════════════════════════════════╝
-
---- Loading Test 1: Arithmetic Operations ---
-=== Test 1 Results: Arithmetic ===
-  [PASS] ADDI x2, x0, 10: x2 = 10
-  [PASS] ADD x4, x2, x3: x4 = 17
+  ___________________________________________________________
+ |           Z-Core RISC-V Processor Test Suite              |
+ |                   RV32I Instruction Set                   |
+ |___________________________________________________________|
+ 
+ --- Loading Test 1: Arithmetic Operations ---
+ 
+ === Test 1 Results: Arithmetic ===
+   [PASS] ADDI x2, x0, 10: x2 = 10 (10 signed)
+   [PASS] ADDI x3, x0, 7: x3 = 7 (7 signed)
   ...
 
-╔═══════════════════════════════════════════════════════════╗
-║                    TEST SUMMARY                           ║
-╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  213                                        ║
-║  Passed:       213                                        ║
-║  Failed:        0                                         ║
-╠═══════════════════════════════════════════════════════════╣
-║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║
-╚═══════════════════════════════════════════════════════════╝
+  ___________________________________________________________
+ |                    TEST SUMMARY                           |
+ |___________________________________________________________|
+ |  Total Tests: 213                                         |
+ |  Passed:      213                                         |
+ |  Failed:        0                                         |
+ |___________________________________________________________|
+ |         ALL TESTS PASSED SUCCESSFULLY                     |
+ |  Test Duration: 634825 ns                                 |
+ |  Clock Cycles:  63482                                     |
+ |  Instructions:  37096                                     |
+ |___________________________________________________________|
 ```
 
 ### Viewing Waveforms
 
 ```bash
+# With GTK Wave
 gtkwave sim/z_core_control_u_tb.vcd
+
+# With Surfer
+surfer sim/z_core_control_u_tb.vcd
 ```
 
 ## Test Coverage
@@ -243,10 +275,11 @@ Detailed documentation is available in the `doc/` directory:
 - [x] **Instruction cache (simple direct-mapped, 1-word lines)**
 - [ ] Interrupt support
 - [ ] Extra Peripherals (VGA Controller, Timer, etc.)
-- [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
-- [ ] C extension (compressed instructions)
 - [ ] CSR Unit & Zicsr extension (CSR instructions)
+- [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
+- [ ] RISC-V C extension (compressed instructions)
 - [ ] Branch prediction
+- [ ] Fix all lint warnings
 
 ## Contributing
 

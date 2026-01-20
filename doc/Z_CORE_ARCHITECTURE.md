@@ -251,9 +251,11 @@ Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
 ## Supported Instructions
 
+The Z-Core implements the RV32IM Instruction Set Archiecture, supporting the following instructions.
+
 ### R-Type (Register-Register)
 ```
-ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND
+ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND, MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
 ```
 
 ### I-Type (Immediate)
