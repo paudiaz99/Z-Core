@@ -1570,7 +1570,7 @@ module z_core_control_u_tb;
         $display("|  Test Duration: %0d ns                                 |", $time);
         $display("|  Clock Cycles:  %0d                                     |", $time / 10);
         $display("|  Instructions:  %0d                                     |", total_internal_instrs);
-        $display("|  Writes=%d, Reads=%d                                    |", total_memory_writes, total_memory_reads);
+        $display("|  Writes=%d, Reads=%d                    |", total_memory_writes, total_memory_reads);
         $display("|___________________________________________________________|");
         $display("");
         
