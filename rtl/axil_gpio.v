@@ -31,7 +31,6 @@ SOFTWARE.
 //      Offset 0x08: DIR[31:0]   (0 = Input/High-Z, 1 = Output)
 //      Offset 0x0C: DIR[63:32]
 // **************************************************
-`timescale 1ns / 1ps
 
 module axil_gpio #
 (
@@ -91,6 +90,10 @@ module axil_gpio #
     // GPIO Internal Registers
     reg [N_GPIO-1:0] gpio_data_out; // Stores value to drive when DIR=1
     reg [N_GPIO-1:0] gpio_dir;      // 1 = Output, 0 = Input
+    
+    // Padded GPIO input for safe reading when N_GPIO > 32
+    wire [63:0] gpio_in_padded;
+    assign gpio_in_padded = {{(64-N_GPIO){1'b0}}, gpio};
 
     // Assignments
     assign s_axil_awready = s_axil_awready_reg;
@@ -216,42 +219,16 @@ module axil_gpio #
                     end
                     2'b01: begin // 0x04: Read DATA[63:32]
                         s_axil_rdata_reg <= 32'b0;
-                        if (N_GPIO > 32)
-                            s_axil_rdata_reg[N_GPIO-33:0] <= gpio[N_GPIO-1:32]; // Simplistic mapping
-                            // Correct mapping:
-                            // s_axil_rdata_reg <= 0;
-                            // s_axil_rdata_reg[0 +: (N_GPIO-32)] <= gpio[N_GPIO-1:32];
-                            // Let's use loop for safety if needed, or simple assign
                         if (N_GPIO > 32) begin
-                             // Avoid range errors by using slicing carefully or generate
-                             // For N_GPIO=64: [63:32] -> [31:0]
-                             // For N_GPIO=48: [47:32] -> [15:0]
-                             s_axil_rdata_reg <= 32'b0; // clear upper bits
-                             // This part logic depends on synthesis tool, simpler:
-                             // bits to read = min(32, N_GPIO-32)
-                             // just assign whole upper slice assuming 0 padding
-                             // We leverage 2's complement blocking in Verilog for partial selects?
-                             // No, just mask.
-                             // s_axil_rdata_reg <= gpio >> 32; is cleaner
-                             // but 'gpio' is N_GPIO wide.
-                             // Verilog shift works.
+                            // Safe read using padded wire
+                             s_axil_rdata_reg <= gpio_in_padded[63:32];
                         end
-                        // Clean implementation given N_GPIO parameter:
-                        if (N_GPIO >= 64) 
-                            s_axil_rdata_reg <= gpio[63:32];
-                        else if (N_GPIO > 32)
-                            s_axil_rdata_reg[N_GPIO-33:0] <= gpio[N_GPIO-1:32];
                     end
                     2'b10: begin // 0x08: Read DIR[31:0]
                         s_axil_rdata_reg <= gpio_dir[31:0];
                     end
                     2'b11: begin // 0x0C: Read DIR[63:32]
-                        if (N_GPIO >= 64) 
-                            s_axil_rdata_reg <= gpio_dir[63:32];
-                        else if (N_GPIO > 32)
-                            s_axil_rdata_reg[N_GPIO-33:0] <= gpio_dir[N_GPIO-1:32];
-                        else 
-                            s_axil_rdata_reg <= 32'b0;
+                        s_axil_rdata_reg <= gpio_dir[63:32];
                     end
                     default: s_axil_rdata_reg <= 32'b0;
                 endcase

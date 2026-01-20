@@ -27,15 +27,6 @@ SOFTWARE.
 //    Comprehensive test suite for RV32I instructions
 // **************************************************
 
-`timescale 1ns / 1ns
-`include "rtl/z_core_control_u.v"
-`include "rtl/axi_mem.v"
-`include "rtl/axil_interconnect.v"
-`include "rtl/axil_uart.v"
-`include "rtl/axil_gpio.v"
-`include "rtl/arbiter.v"
-`include "rtl/priority_encoder.v"
-
 module z_core_control_u_tb;
 
     // Parameters
@@ -949,41 +940,15 @@ module z_core_control_u_tb;
         uart_rx_tb_en = 1'b0;     // Use loopback by default
 
         $display("");
-        $display("╔═══════════════════════════════════════════════════════════╗");
-        $display("║           Z-Core RISC-V Processor Test Suite              ║");
-        $display("║                   RV32I Instruction Set                    ║");
-        $display("╚═══════════════════════════════════════════════════════════╝");
-        $display("║    MODE: AXI (Normal memory access via AXI-Lite)          ║");
+        $display(" ___________________________________________________________");
+        $display("|           Z-Core RISC-V Processor Test Suite              |");
+        $display("|                   RV32I Instruction Set                   |");
+        $display("|___________________________________________________________|");
 
         // ==========================================
         // Test 1: Arithmetic Operations
         // ==========================================
         load_test1_arithmetic();
-        // Wait for test to complete before checking counters (though reset_cpu reads them too)
-        // But reset_cpu is called AFTER we want to check.
-        // Wait time is handled inside the test execution delays below, but we need to check BEFORE reset_cpu
-        // The delays in the original code were AFTER reset_cpu.
-        // Wait, the original code structure: load -> reset -> wait -> check results.
-        // The counters reset on reset_cpu. So we must check counters BEFORE reset_cpu.
-        // BUT the simulation runs *during* the #delay.
-        // The original code:
-        // load_test1...
-        // reset_cpu
-        // #1500
-        // check_reg...
-        
-        // Use a different structure:
-        // load -> reset -> run simulation -> check reg -> check counters
-        // uut.perf counters will effectively be valid for the whole run since last reset.
-        // BUT reset_cpu toggles reset.
-        // So counters are cleared at start of reset_cpu's reset pulse.
-        // We need to check them *after* the run but *before* the NEXT reset.
-        // The current structure does `reset_cpu` immediately after `load`.
-        // `reset_cpu` releases reset at the end.
-        // So the run happens during the `#1500`.
-        // So we should check counters AFTER `#1500`, but BEFORE the Next `reset_cpu`.
-        
-        // Let's adjust the calls.
         // Test 1
         reset_cpu();
         #1500;
@@ -1588,40 +1553,25 @@ module z_core_control_u_tb;
         total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
         total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
         $display("");
-        $display("╔═══════════════════════════════════════════════════════════╗");
-        $display("║                    TEST SUMMARY                           ║");
-        $display("╠═══════════════════════════════════════════════════════════╣");
-        $display("║  Total Tests: %3d                                         ║", test_count);
-        $display("║  Passed:      %3d                                         ║", pass_count);
-        $display("║  Failed:      %3d                                         ║", fail_count);
-        $display("╠═══════════════════════════════════════════════════════════╣");
+        $display(" ___________________________________________________________");
+        $display("|                    TEST SUMMARY                           |");
+        $display("|___________________________________________________________|");
+        $display("|  Total Tests: %3d                                         |", test_count);
+        $display("|  Passed:      %3d                                         |", pass_count);
+        $display("|  Failed:      %3d                                         |", fail_count);
+        $display("|___________________________________________________________|");
         
         if (fail_count == 0) begin
-            $display("║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║");
+            $display("|         ALL TESTS PASSED SUCCESSFULLY                     |");
         end else begin
-            $display("║              ✗ SOME TESTS FAILED ✗                        ║");
+            $display("|              SOME TESTS FAILED                            |");
         end
 
-        $display("╠═══════════════════════════════════════════════════════════╣");
-        $display("║  Mode: AXI (memory-based fetch)                           ║");
-        $display("║  Total Cycles:       %8d                             ║", total_cycles);
-        $display("║  Total Instructions: %8d                             ║", total_instrs);
-        $display("║  CPI (Cycles/Instr): %8.2f                             ║", real'(total_cycles) / real'(total_instrs));
-        $display("╠═══════════════════════════════════════════════════════════╣");
-        $display("║  Internal Perf Counters (Total Accumulated):              ║");
-        $display("║  Cycles:%d  Instrs:%d ║", total_internal_cycles, total_internal_instrs);
-        $display("║  Cache Hits: %d                         ║", total_internal_cache_hits);
-        if (total_memory_writes == total_internal_memory_writes && total_memory_reads == total_internal_memory_reads) begin
-             $display("║  Memory Access Counters match:                            ║");
-             $display("║  Writes=%d, Reads=%d                    ║", total_memory_writes, total_memory_reads);
-        end else begin
-             $display("║  [WARNING] Memory Counter Mismatch!                       ║");
-             $display("║  Expected Writes: %d, Internal: %d                        ║", total_memory_writes, total_internal_memory_writes);
-             $display("║  Expected Reads:  %d, Internal: %d                        ║", total_memory_reads, total_internal_memory_reads);
-        end
-        if (total_instrs != total_internal_instrs) 
-             $display("║  [WARNING] TB Instr Count (%d) != Internal (%d)", total_instrs, total_internal_instrs);
-        $display("╚═══════════════════════════════════════════════════════════╝");
+        $display("|  Test Duration: %0d ns                                 |", $time);
+        $display("|  Clock Cycles:  %0d                                     |", $time / 10);
+        $display("|  Instructions:  %0d                                     |", total_internal_instrs);
+        $display("|  Writes=%d, Reads=%d                                    |", total_memory_writes, total_memory_reads);
+        $display("|___________________________________________________________|");
         $display("");
         
         $finish;
