@@ -50,6 +50,9 @@
 
 > **Note**: For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
 
+> [!IMPORTANT]
+>**The diagram is not up to date and does not include the instruction cache.**
+
 ## Supported Instructions
 
 | Type | Instructions | Description |
@@ -77,6 +80,7 @@ Z-Core/
 │   ├── z_core_mult_synth.v    # Multiplier unit (Synthesis version)
 │   ├── z_core_mult_unit.v     # Multiplier unit top level
 │   ├── z_core_div_unit.v      # Divider unit
+│   ├── z_core_instr_cache.v   # Instruction cache
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
 │   ├── axil_master.v          # AXI-Lite Master
 │   ├── axil_uart.v            # UART Module
@@ -99,6 +103,7 @@ Z-Core/
 │   ├── z_core_mult_unit_tb.v  # Multiplier unit test
 │   ├── z_core_div_unit_tb.v   # Divider unit test
 │   ├── axil_gpio_tb.v         # GPIO testbench
+│   ├── z_core_instr_cache_tb.v # Instruction cache testbench
 │   └── z_core_riscof_tb.sv    # RISCOF compliance testbench
 │
 └── doc/                       # Documentation
@@ -172,8 +177,8 @@ make -f ../tb/Makefile run SIM=dsim debug=1
   ___________________________________________________________
  |                    TEST SUMMARY                           |
  |___________________________________________________________|
- |  Total Tests: 183                                         |
- |  Passed:      183                                         |
+ |  Total Tests: 213                                         |
+ |  Passed:      213                                         |
  |  Failed:        0                                         |
  |___________________________________________________________|
  |         ALL TESTS PASSED SUCCESSFULLY                     |
@@ -195,39 +200,40 @@ surfer sim/z_core_control_u_tb.vcd
 
 ## Test Coverage
 
-The processor has been verified with **183 comprehensive tests** across 17 test suites:
+The processor has been verified with a comprehensive system-level testbench (`tb/z_core_control_u_tb.sv`) plus dedicated module/unit testbenches.
 
-| Test Suite | Description | Tests |
-|------------|-------------|-------|
-| Arithmetic | ADD, SUB, ADDI | 6 |
-| Logical | AND, OR, XOR, ANDI, ORI, XORI | 8 |
-| Shifts | SLL, SRL, SRA, SLLI, SRLI, SRAI | 8 |
-| Memory | LW, SW with AXI transactions | 8 |
-| Compare | SLT, SLTU, SLTI, SLTIU | 8 |
-| Upper Immediate | LUI, AUIPC | 4 |
-| Integration | Fibonacci sequence | 9 |
-| Branches | BEQ, BNE, BLT, BGE, BLTU, BGEU | 7 |
-| Jumps | JAL, JALR, JALR+offset | 7 |
-| Loop | Backward branch (sum 0..4) | 3 |
-| IO Access | UART STATUS register | 1 |
-| GPIO | Bidirectional GPIO | 2 |
-| Byte/Halfword | LB, LH, LBU, LHU, SB, SH | 8 |
-| UART Loopback | TX→RX data verification | 1 |
-| **M Extension** | MUL, DIV, REM, Forwarding Stress | 10 |
-| **RISCOF Compliance** | **Official RISC-V RV32IM Architectural Tests** | **49** |
-| Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns | 53 |
+| Test Suite | Description |
+|------------|-------------|
+| Arithmetic | ADD, SUB, ADDI |
+| Logical | AND, OR, XOR, ANDI, ORI, XORI |
+| Shifts | SLL, SRL, SRA, SLLI, SRLI, SRAI |
+| Memory | LW, SW with AXI transactions |
+| Compare | SLT, SLTU, SLTI, SLTIU |
+| Upper Immediate | LUI, AUIPC |
+| Integration | Fibonacci sequence |
+| Branches | BEQ, BNE, BLT, BGE, BLTU, BGEU |
+| Jumps | JAL, JALR, JALR+offset |
+| Loop | Backward branch (sum 0..4) |
+| IO Access | UART STATUS register |
+| GPIO | Bidirectional GPIO |
+| Byte/Halfword | LB, LH, LBU, LHU, SB, SH |
+| UART Loopback | TX→RX data verification |
+| M Extension | MUL, DIV, REM, Forwarding Stress |
+| Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns |
+| I-Cache Stress | Locality loops + direct-mapped conflict-miss thrash |
+| **RISCOF Compliance** | **Official RISC-V RV32IM Architectural Tests** |
+
 
 ## Performance
 
 | Metric | Value |
 |--------|-------|
 | Pipeline Stages | 5-Stage (IF, ID, EX, MEM, WB) |
-| Throughput | ~1 cycle per instruction (ideal) |
+| Throughput | ~1 cycle per instruction (ideal, depends on instruction locality) |
 | Register File | 32 x 32-bit |
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
-
-> Note: The processor throughput is now limited by the memory latency (Around 10 cycles per memory access). Therefore, the current processor implementation cannot reach the ideal throughput of 1 cycle per instruction.
+| Cache Size | 256 Entries (configurable) |
 
 ## Configuration
 
@@ -239,6 +245,7 @@ module z_core_top #(
     parameter ADDR_WIDTH = 32,      // Address bus width
     parameter MEM_ADDR_WIDTH = 16,  // Memory size (2^16 = 64KB)
     parameter PIPELINE_OUTPUT = 0   // Memory pipeline stage
+    parameter CACHE_DEPTH = 256      // Cache size (2^8 = 256 entries)
 )(
     input wire clk,
     input wire rstn
@@ -265,16 +272,25 @@ Detailed documentation is available in the `doc/` directory:
 - [x] Pipelining for improved throughput
 - [x] FPGA synthesis and validation **[Z-Core-FPGA repository](https://github.com/paudiaz99/Z-Core-FPGA)** 
 - [x] M extension (multiply/divide)
-- [ ] **Branch prediction & Instruction Cache**
-- [ ] C extension (compressed instructions)
+- [x] **Instruction cache (simple direct-mapped, 1-word lines)**
 - [ ] Interrupt support
 - [ ] Extra Peripherals (VGA Controller, Timer, etc.)
+- [ ] CSR Unit & Zicsr extension (CSR instructions)
 - [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
+- [ ] RISC-V C extension (compressed instructions)
+- [ ] Branch prediction
 - [ ] Fix all lint warnings
 
 ## Contributing
 
 Contributions are welcome. Please feel free to submit a Pull Request.
+
+### Possible Contributions
+
+- Any feature in the roadmap.
+- AXI4 interface for memory, replacing the current AXI4-Lite interface.
+- Extensive verification of corner cases and error handling.
+- Any cool feature you can think of!:D
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`)

@@ -33,7 +33,9 @@ module z_core_control_u_tb;
     parameter DATA_WIDTH = 32;
     parameter ADDR_WIDTH = 32;
     parameter STRB_WIDTH = (DATA_WIDTH/8);
+    parameter CACHE_DEPTH = 256;
     parameter N_GPIO     = 64;
+    
 
     // Clock and Reset
     reg clk = 0;
@@ -43,8 +45,24 @@ module z_core_control_u_tb;
     integer test_count = 0;
     integer pass_count = 0;
     integer fail_count = 0;
+    integer resets_done = 0; // Track number of times reset_cpu called
     reg [4:0] current_state = 0;
-    real instruction_count = 0;
+    
+    // Performance counters for throughput comparison
+    integer cycle_counter = 0;
+    integer instr_counter = 0;
+    integer total_cycles = 0;
+    integer total_instrs = 0;
+    integer total_memory_writes = 0;
+    integer total_memory_reads = 0;
+    
+    // Internal Performance Counter Accumulators
+    reg [63:0] total_internal_cycles = 0;
+    reg [63:0] total_internal_instrs = 0;
+    reg [63:0] total_internal_cache_hits = 0;
+    reg [63:0] total_internal_memory_writes = 0;
+    reg [63:0] total_internal_memory_reads = 0;
+
 
     // Interconnect Parameters
     localparam S_COUNT = 1;
@@ -192,7 +210,8 @@ module z_core_control_u_tb;
     z_core_control_u #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
-        .STRB_WIDTH(STRB_WIDTH)
+        .STRB_WIDTH(STRB_WIDTH),
+        .CACHE_DEPTH(CACHE_DEPTH)
     ) uut (
         .clk(clk),
         .rstn(rstn),
@@ -334,10 +353,14 @@ module z_core_control_u_tb;
     // Clock generation (100MHz)
     always #5 clk = ~clk;
 
+    // Cycle and Instruction counters for throughput comparison
     always @(posedge clk) begin
-        current_state <= uut.state[5:0];
-        if (current_state == 1) begin
-            instruction_count <= instruction_count + 1;
+        if (rstn) begin
+            cycle_counter <= cycle_counter + 1;
+            // Count instruction when WB stage completes a valid instruction
+            if (uut.mem_wb_valid) begin
+                instr_counter <= instr_counter + 1;
+            end
         end
     end
 
@@ -427,10 +450,48 @@ module z_core_control_u_tb;
 
     task reset_cpu;
         begin
+            // Accumulate counters from previous test
+            total_cycles = total_cycles + cycle_counter;
+            total_instrs = total_instrs + instr_counter;
+            
+            // Accumulate internal counters (read before reset)
+            // Skip first call (before any test runs) to avoid X/garbage
+            if (resets_done > 0) begin
+                total_internal_cycles = total_internal_cycles + uut.perf_cycle;
+                total_internal_instrs = total_internal_instrs + uut.perf_instret;
+                total_internal_cache_hits = total_internal_cache_hits + uut.perf_inst_cache_hits;
+                total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
+                total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
+            end
+            resets_done = resets_done + 1;
+            
+            // Reset per-test counters
+            cycle_counter = 0;
+            instr_counter = 0;
+            
             rstn = 0;
             wait_cycles(10);  // Increased from 4 to allow pipeline flush
             rstn = 1;
             wait_cycles(5);   // Increased from 2 to allow pipeline fill
+        end
+    endtask
+
+    task verify_counters;
+        input integer exp_writes;
+        input integer exp_reads;
+        input [255:0] test_name;
+        begin
+            total_memory_writes = total_memory_writes + exp_writes;
+            total_memory_reads = total_memory_reads + exp_reads;
+            
+            // Check against current test counters (which reset on reset_cpu)
+            if (uut.perf_memory_writes == exp_writes && uut.perf_memory_reads == exp_reads) begin
+                $display("  [PERF] %0s: Writes=%0d, Reads=%0d (MATCH)", test_name, uut.perf_memory_writes, uut.perf_memory_reads);
+            end else begin
+                $display("  [PERF-FAIL] %0s: Writes=%0d (Exp %0d), Reads=%0d (Exp %0d)", 
+                         test_name, uut.perf_memory_writes, exp_writes, uut.perf_memory_reads, exp_reads);
+                fail_count = fail_count + 1;
+            end
         end
     endtask
 
@@ -888,6 +949,7 @@ module z_core_control_u_tb;
         // Test 1: Arithmetic Operations
         // ==========================================
         load_test1_arithmetic();
+        // Test 1
         reset_cpu();
         #1500;
         
@@ -898,6 +960,7 @@ module z_core_control_u_tb;
         check_reg(5, 3,  "SUB x5, x2, x3");
         check_reg(6, -5, "ADDI x6, x0, -5");
         check_reg(7, 12, "ADD x7, x4, x6");
+        verify_counters(0, 0, "Test 1");
 
         // ==========================================
         // Test 2: Logical Operations
@@ -915,6 +978,7 @@ module z_core_control_u_tb;
         check_reg(7, 85,  "ANDI x7, x2, 0x55");
         check_reg(8, 170, "ORI x8, x0, 0xAA");
         check_reg(9, 85,  "XORI x9, x8, 0xFF");
+        verify_counters(0, 0, "Test 2");
 
         // ==========================================
         // Test 3: Shift Operations
@@ -932,6 +996,7 @@ module z_core_control_u_tb;
         check_reg(9, 256, "SLL x9, x2, x8");
         check_reg(10, 32'h00FFFFFF, "SRL x10, x5, x8");
         check_reg(11, -1, "SRA x11, x5, x8");
+        verify_counters(0, 0, "Test 3");
 
         // ==========================================
         // Test 4: Memory Load/Store
@@ -949,6 +1014,7 @@ module z_core_control_u_tb;
         check_mem(256, 42,  "SW x2, 256(x0)");
         check_mem(260, 100, "SW x3, 260(x0)");
         check_mem(264, 142, "SW x6, 264(x0)");
+        verify_counters(3, 2, "Test 4");
 
         // ==========================================
         // Test 5: Compare Operations
@@ -966,6 +1032,7 @@ module z_core_control_u_tb;
         check_reg(10, 1, "SLTIU x10 (10 < 100)");
         check_reg(11, 0, "SLTIU x11 (0xFFFFFFFF < 1)");
         check_reg(12, 1, "SLTU x12 (10 < 0xFFFFFFFF)");
+        verify_counters(0, 0, "Test 5");
 
         // ==========================================
         // Test 6: LUI and AUIPC
@@ -979,6 +1046,7 @@ module z_core_control_u_tb;
         check_reg(3, 32'h12345678, "ADDI x3, x2, 0x678");
         check_reg(4, 8,            "AUIPC x4, 0");
         check_reg(5, 32'hFFFFF000, "LUI x5, 0xFFFFF");
+        verify_counters(0, 0, "Test 6");
 
         // ==========================================
         // Test 7: Full Integration (Fibonacci)
@@ -997,6 +1065,7 @@ module z_core_control_u_tb;
         check_reg(8, 13, "f[6] = 13");
         check_reg(9, 21, "f[7] = 21");
         check_mem(256, 21, "Stored f[7]");
+        verify_counters(1, 0, "Test 7");
 
         // ==========================================
         // Test 8: Branch Operations
@@ -1013,6 +1082,7 @@ module z_core_control_u_tb;
         check_reg(14, 0, "BGE taken (should be 0)");
         check_reg(15, 0, "BLTU taken (should be 0)");
         check_reg(1,  0, "BGEU taken (should be 0)");
+        verify_counters(0, 0, "Test 8");
 
         // ==========================================
         // Test 9: Jump Operations (JAL/JALR)
@@ -1029,6 +1099,7 @@ module z_core_control_u_tb;
         check_reg(11, 0, "JAL path check (should be 0)");
         check_reg(12, 0, "JALR path check (should be 0)");
         check_reg(13, 0, "JALR+offset path (should be 0)");
+        verify_counters(0, 0, "Test 9");
 
         // ==========================================
         // Test 10: Backward Branch (Loop)
@@ -1041,6 +1112,7 @@ module z_core_control_u_tb;
         check_reg(2, 5,  "Loop counter final (5)");
         check_reg(3, 5,  "Loop limit (5)");
         check_reg(10, 10, "Sum 0+1+2+3+4 = 10");
+        verify_counters(0, 0, "Test 10");
 
         // ==========================================
         // Test 11: IO Access (UART/GPIO)
@@ -1064,6 +1136,7 @@ module z_core_control_u_tb;
             $display("  [FAIL] UART STATUS invalid: x4 = x");
         end
         // NOTE: GPIO read removed - bidirectional GPIO is tested in Test 12
+        verify_counters(2, 2, "Test 11");
 
         // ==========================================
         // Test 12: GPIO Bidirectional Verification
@@ -1091,6 +1164,7 @@ module z_core_control_u_tb;
         // Wait for CPU to read the value
         #500;
         check_reg(6, 32'hCAFEBABE, "GPIO Input Read");
+        verify_counters(3, 1, "Test 12");
 
         // ==========================================
         // Test 13: Byte/Halfword Load/Store
@@ -1117,6 +1191,7 @@ module z_core_control_u_tb;
         check_reg(12, 32'hFFFFDEAD, "LH offset 2 (sign-ext 0xDEAD)");
         // LHU from offset 2: 0xDEAD, zero-extended -> 0x0000DEAD
         check_reg(13, 32'h0000DEAD, "LHU offset 2 (zero-ext 0xDEAD)");
+        verify_counters(3, 8, "Test 13");
 
         // ==========================================
         // Test 14: UART Loopback Test
@@ -1141,6 +1216,7 @@ module z_core_control_u_tb;
             $display("  [FAIL] UART TX/RX loopback: tx_empty=%b, rx_valid=%b, rx_data=0x%02h (expected 0x55)",
                      u_uart.tx_empty, u_uart.rx_valid, u_uart.rx_data);
         end
+        verify_counters(1, 2, "Test 14");
 
         // ==========================================
         // Test 15: RAW Hazard Stress Test
@@ -1166,6 +1242,7 @@ module z_core_control_u_tb;
         check_reg(13, 512,  "SUB x13 = 1536-1024 = 512");
         check_reg(14, 512,  "AND x14 = 512&1536 = 512");
         check_reg(15, 0,    "SLT x15 = (512<512) = 0");
+        verify_counters(0, 0, "Test 15");
 
         // ==========================================
         // Test 16: Full ALU Instruction Coverage
@@ -1189,21 +1266,26 @@ module z_core_control_u_tb;
         check_mem(512, 103, "SW x7 mem[512] = 103");
         check_mem(516, 0,   "SW x10 mem[516] = 0");
         check_mem(520, 1,   "SW x13 mem[520] = 1");
+        verify_counters(3, 0, "Test 16");
 
         // ==========================================
         // Test 17: Nested Loops
         // ==========================================
         load_test17_nested_loops();
         reset_cpu();
-        #15000;  // Nested loops need more time
+        #4000;  // Nested loops need more time
         
         $display("\n=== Test 17 Results: Nested Loops ===");
+        // DEBUG: Direct register read without going through check_reg
+        $display("  [DEBUG] Direct read: reg_r1_q=%0d, reg_r2_q=%0d, reg_r10_q=%0d",
+                 uut.reg_file.reg_r1_q, uut.reg_file.reg_r2_q, uut.reg_file.reg_r10_q);
         // sum = (0+0)+(0+1)+(0+2) + (1+0)+(1+1)+(1+2) + (2+0)+(2+1)+(2+2)
         //     = 0+1+2 + 1+2+3 + 2+3+4 = 3 + 6 + 9 = 18
         check_reg(1, 3,   "Outer counter final i=3");
         check_reg(2, 3,   "Inner counter final j=3");
         check_reg(10, 18, "Sum = 18");
         check_mem(768, 18, "SW mem[768] = 18");
+        verify_counters(1, 0, "Test 17");
 
         // ==========================================
         // Test 18: Memory Access Pattern Stress
@@ -1225,6 +1307,7 @@ module z_core_control_u_tb;
         check_reg(13, 32'h55,  "LB x13 = sign(0x55) = 0x55");
         check_reg(14, 32'hAA,  "LHU x14 = 0x00AA");
         check_reg(15, 32'h321, "ADD x15 = 0x1FE+0x123 = 0x321");
+        verify_counters(7, 7, "Test 18");
 
         // ==========================================
         // Test 19: Mixed Instruction Stress
@@ -1253,6 +1336,7 @@ module z_core_control_u_tb;
             fail_count = fail_count + 1;
             $display("  [FAIL] JAL/JALR skip path violated (x15 = 0xBAD)");
         end
+        verify_counters(5, 1, "Test 19");
 
         // ==========================================
         // Test 20: Multiplication Operations (M Extension)
@@ -1280,6 +1364,7 @@ module z_core_control_u_tb;
         check_mem(256, 42,       "SW mem[256] = 42 (MUL result)");
         check_mem(260, 32'h0,    "SW mem[260] = 0 (MUL overflow lower)");
         check_mem(264, 32'h1,    "SW mem[264] = 1 (MULH upper)");
+        verify_counters(3, 0, "Test 20");
 
         // ==========================================
         // Test 21: Division Operations (M Extension)
@@ -1307,6 +1392,7 @@ module z_core_control_u_tb;
         check_mem(256, 14,       "SW mem[256] = 14 (100/7)");
         check_mem(260, 2,        "SW mem[260] = 2 (100%7)");
         check_mem(264, 1000,     "SW mem[264] = 1000 (1M/1K)");
+        verify_counters(3, 0, "Test 21");
 
         // ==========================================
         // Test 22: Division Forwarding Tests (ADD->DIV, MUL->DIV, DIV->DIV)
@@ -1330,6 +1416,7 @@ module z_core_control_u_tb;
         check_reg(8, 14,         "ADDI x8 = x7 = 14 (verify first div)");
         check_reg(12, 2,         "DIVU x12 = 14/6 = 2 (DIV->DIV)");
         check_mem(520, 2,        "SW mem[520] = 2 (DIV->DIV result)");
+        verify_counters(4, 0, "Test 22");
 
         // ==========================================
         // Test 23: M Extension + Control Flow (MUL+DIV+Branches+Jumps)
@@ -1356,10 +1443,115 @@ module z_core_control_u_tb;
         check_mem(528, 3,        "SW mem[528] = 3 (branch counter)");
         check_reg(21, 32'h44,    "JAL return addr x21 = 0x44");
         check_mem(532, 32'h44,   "SW mem[532] = 0x44 (JAL return addr)");
+        verify_counters(6, 0, "Test 23");
+
+        // ==========================================
+        // Test 24: Cache Locality Exploitation
+        // ==========================================
+        load_test24_cache_locality();
+        reset_cpu();
+        #15000;  // Time for 20+30+20 = 70 loop iterations
+        
+        $display("\n=== Test 24 Results: Cache Locality ===");
+        // Loop 1: sum(0..19) = 190
+        check_reg(2, 20, "Loop 1 counter final (20)");
+        check_reg(10, 190, "Sum 0+1+...+19 = 190");
+        check_mem(256, 190, "SW mem[256] = 190");
+        
+        // Loop 2: counter = 30
+        check_reg(4, 30, "Loop 2 counter final (30)");
+        check_mem(260, 30, "SW mem[260] = 30");
+        
+        // Loop 3: nested 4x5 = 20
+        check_reg(6, 4, "Loop 3 outer final (4)");
+        check_reg(11, 20, "Loop 3 total (4x5=20)");
+        check_mem(264, 20, "SW mem[264] = 20");
+        
+        // Performance info
+        $display("  ─────────────────────────────────────────────");
+        $display("  Cache Locality Performance:");
+        $display("  Cache Hits: %0d", uut.perf_inst_cache_hits);
+        $display("  Cycles: %0d", uut.perf_cycle);
+        $display("  Retired Instructions: %0d", uut.perf_instret);
+        $display("  ─────────────────────────────────────────────");
+        verify_counters(3, 0, "Test 24");
+
+        // ==========================================
+        // Test 25: I-Cache Conflict Miss Thrash (Direct-Mapped)
+        // ==========================================
+        // Idea: two hot code regions separated by 0x400 bytes map to the same cache indices
+        // (index bits are PC[9:2] for CACHE_DEPTH=256), causing systematic evictions.
+        load_test25_icache_conflict_thrash();
+        reset_cpu();
+        #20000;
+
+        $display("\n=== Test 25 Results: I-Cache Conflict Thrash ===");
+        // Correctness checks (independent of cache behavior)
+        check_reg(10, 60, "Accum A (10 iters * +6) = 60");
+        check_reg(11, 70, "Accum B (10 iters * +7) = 70");
+        check_mem(256, 60, "SW mem[256] = 60 (A)");
+        check_mem(260, 70, "SW mem[260] = 70 (B)");
+        verify_counters(2, 0, "Test 25");
+
+        $display("  Cache Hits (cumulative): %0d", uut.perf_inst_cache_hits);
+        $display("  Cycles (cumulative):     %0d", uut.perf_cycle);
+        $display("  Retired Instructions (cumulative): %0d", uut.perf_instret);
+
+        // ==========================================
+        // Test 26: Full Pipeline Exploitation
+        // ==========================================
+        load_test26_pipeline_exploitation();
+        reset_cpu();
+        #50000;  // Time for 10*20 = 200 loop iterations + setup + stores
+        
+        $display("\n=== Test 26 Results: Full Pipeline Exploitation ===");
+        // Total iterations: 10 outer * 20 inner = 200
+        // Each accumulator increments by its value each iteration
+        check_reg(2, 200, "acc0 (200 * 1) = 200");
+        check_reg(3, 400, "acc1 (200 * 2) = 400");
+        check_reg(4, 600, "acc2 (200 * 3) = 600");
+        check_reg(5, 800, "acc3 (200 * 4) = 800");
+        check_reg(6, 1000, "acc4 (200 * 5) = 1000");
+        check_reg(7, 1200, "acc5 (200 * 6) = 1200");
+        check_reg(8, 1400, "acc6 (200 * 7) = 1400");
+        check_reg(9, 1600, "acc7 (200 * 8) = 1600");
+        check_reg(20, 7200, "sum of all accs = 7200");
+        
+        // Memory checks
+        check_mem(512, 200, "SW mem[512] = 200 (acc0)");
+        check_mem(516, 400, "SW mem[516] = 400 (acc1)");
+        check_mem(520, 600, "SW mem[520] = 600 (acc2)");
+        check_mem(524, 800, "SW mem[524] = 800 (acc3)");
+        check_mem(528, 1000, "SW mem[528] = 1000 (acc4)");
+        check_mem(532, 1200, "SW mem[532] = 1200 (acc5)");
+        check_mem(536, 1400, "SW mem[536] = 1400 (acc6)");
+        check_mem(540, 1600, "SW mem[540] = 1600 (acc7)");
+        check_mem(544, 7200, "SW mem[544] = 7200 (sum)");
+        
+        verify_counters(9, 0, "Test 26");
+        
+        // Performance analysis
+        $display("  ─────────────────────────────────────────────");
+        $display("  Pipeline Exploitation Performance:");
+        $display("  Cache Hits: %0d", uut.perf_inst_cache_hits);
+        $display("  Cycles: %0d", uut.perf_cycle);
+        $display("  Retired Instructions: %0d", uut.perf_instret);
+        $display("  IPC (Instructions/Cycle): %0.3f", real'(uut.perf_instret) / real'(uut.perf_cycle));
+        $display("  ─────────────────────────────────────────────");
 
         // ==========================================
         // Final Summary
         // ==========================================
+        // Accumulate final counters
+        total_cycles = total_cycles + cycle_counter;
+        total_instrs = total_instrs + instr_counter;
+        
+        // Accumulate internal counters for the final test
+        total_internal_cycles = total_internal_cycles + uut.perf_cycle;
+        total_internal_instrs = total_internal_instrs + uut.perf_instret;
+        total_internal_cache_hits = total_internal_cache_hits + uut.perf_inst_cache_hits;
+        total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
+        total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
         $display("");
         $display(" ___________________________________________________________");
         $display("|                    TEST SUMMARY                           |");
@@ -1377,7 +1569,8 @@ module z_core_control_u_tb;
 
         $display("|  Test Duration: %0d ns                                 |", $time);
         $display("|  Clock Cycles:  %0d                                     |", $time / 10);
-        $display("|  Instructions:  %0d                                     |", instruction_count);
+        $display("|  Instructions:  %0d                                     |", total_internal_instrs);
+        $display("|  Writes=%d, Reads=%d                                    |", total_memory_writes, total_memory_reads);
         $display("|___________________________________________________________|");
         $display("");
         
@@ -1556,6 +1749,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[13] = 32'h00000013;
             u_axil_ram.mem[14] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[15] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -1944,6 +2139,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[29] = 32'h00000013;
             u_axil_ram.mem[30] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[31] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2076,7 +2273,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[30] = 32'h00000013;
             u_axil_ram.mem[31] = 32'h00000013;
-            u_axil_ram.mem[32] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[32] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2184,7 +2382,8 @@ module z_core_control_u_tb;
             // NOPs  
             u_axil_ram.mem[20] = 32'h00000013;
             u_axil_ram.mem[21] = 32'h00000013;
-            u_axil_ram.mem[22] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[22] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2256,7 +2455,8 @@ module z_core_control_u_tb;
             
             // NOPs
             u_axil_ram.mem[23] = 32'h00000013;
-            u_axil_ram.mem[24] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[24] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -2361,6 +2561,321 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[33] = 32'h00000013;
             u_axil_ram.mem[34] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[35] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // ==========================================
+    //   Test 24: Cache Locality Exploitation
+    //   Multiple loops to demonstrate cache hits
+    // ==========================================
+    task load_test24_cache_locality;
+        integer i;
+        begin
+            $display("\n--- Loading Test 24: Cache Locality Exploitation ---");
+            // Clear memory first
+            for (i = 0; i < 64; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // ========== Loop 1: Sum 0..19 = 190 ==========
+            // x2 = counter, x3 = limit (20), x10 = sum
+            
+            // 0x00: ADDI x2, x0, 0      - x2 = 0 (counter)
+            u_axil_ram.mem[0] = 32'h00000113;
+            // 0x04: ADDI x3, x0, 20     - x3 = 20 (limit)
+            u_axil_ram.mem[1] = 32'h01400193;
+            // 0x08: ADDI x10, x0, 0     - x10 = 0 (sum)
+            u_axil_ram.mem[2] = 32'h00000513;
+            
+            // Loop 1 start (0x0C):
+            // 0x0C: ADD x10, x10, x2    - sum += counter
+            u_axil_ram.mem[3] = 32'h00250533;
+            // 0x10: ADDI x2, x2, 1      - counter++
+            u_axil_ram.mem[4] = 32'h00110113;
+            // 0x14: BLT x2, x3, -8      - if counter < 20, branch back
+            u_axil_ram.mem[5] = 32'hfe314ce3;
+            
+            // 0x18: SW x10, 256(x0)     - store sum = 190
+            u_axil_ram.mem[6] = 32'h10a02023;
+            
+            // ========== Loop 2: Tight counter to 30 ==========
+            // x4 = counter, x5 = limit (30)
+            
+            // 0x1C: ADDI x4, x0, 0      - x4 = 0
+            u_axil_ram.mem[7] = 32'h00000213;
+            // 0x20: ADDI x5, x0, 30     - x5 = 30
+            u_axil_ram.mem[8] = 32'h01e00293;
+            
+            // Loop 2 start (0x24):
+            // 0x24: ADDI x4, x4, 1      - counter++
+            u_axil_ram.mem[9] = 32'h00120213;
+            // 0x28: BLT x4, x5, -4      - if counter < 30, branch back
+            u_axil_ram.mem[10] = 32'hfe524ee3;
+            
+            // 0x2C: SW x4, 260(x0)      - store counter = 30
+            u_axil_ram.mem[11] = 32'h10402223;
+            
+            // ========== Loop 3: Nested 4x5 = 20 iterations ==========
+            // x6 = outer, x7 = outer_limit (4)
+            // x8 = inner, x9 = inner_limit (5)
+            // x11 = total count
+            
+            // 0x30: ADDI x6, x0, 0      - outer = 0
+            u_axil_ram.mem[12] = 32'h00000313;
+            // 0x34: ADDI x7, x0, 4      - outer_limit = 4
+            u_axil_ram.mem[13] = 32'h00400393;
+            // 0x38: ADDI x11, x0, 0     - total = 0
+            u_axil_ram.mem[14] = 32'h00000593;
+            // 0x3C: ADDI x9, x0, 5      - inner_limit = 5
+            u_axil_ram.mem[15] = 32'h00500493;
+            
+            // Outer loop start (0x40):
+            // 0x40: ADDI x8, x0, 0      - inner = 0
+            u_axil_ram.mem[16] = 32'h00000413;
+            
+            // Inner loop start (0x44):
+            // 0x44: ADDI x11, x11, 1    - total++
+            u_axil_ram.mem[17] = 32'h00158593;
+            // 0x48: ADDI x8, x8, 1      - inner++
+            u_axil_ram.mem[18] = 32'h00140413;
+            // 0x4C: BLT x8, x9, -8      - if inner < 5, branch to 0x44
+            u_axil_ram.mem[19] = 32'hfe944ce3;
+            
+            // 0x50: ADDI x6, x6, 1      - outer++
+            u_axil_ram.mem[20] = 32'h00130313;
+            // 0x54: BLT x6, x7, -20     - if outer < 4, branch to 0x40
+            // NOTE: For B-type encodings, rs1/rs2 are part of the word; can't reuse immediates blindly.
+            // Offset = 0x40 - 0x54 = -20
+            // Encoded immediate for -20: imm[12]=1, imm[11]=1, imm[10:5]=111111, imm[4:1]=0110
+            // Full instruction (BLT x6, x7, -20) = 0xFE7346E3
+            u_axil_ram.mem[21] = 32'hfe7346e3;
+            
+            // 0x58: SW x11, 264(x0)     - store total = 20
+            u_axil_ram.mem[22] = 32'h10b02423;
+            
+            // NOPs to finish cleanly
+            u_axil_ram.mem[23] = 32'h00000013;
+            u_axil_ram.mem[24] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 25: I-Cache Conflict Miss Thrash
+    //   Two code blocks at 0x000 and 0x400 (same index bits) ping-pong.
+    // ==========================================
+    task load_test25_icache_conflict_thrash;
+        integer i;
+        begin
+            $display("\n--- Loading Test 25: I-Cache Conflict Miss Thrash ---");
+            // Clear enough memory to cover both regions (0x000.. and 0x400.. => word idx 0x100)
+            for (i = 0; i < 512; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+
+            // We run 10 iterations total.
+            // Block A (0x000): x10 += 6; jump to Block B @ 0x400
+            // Block B (0x400): x11 += 7; i++; if (i<10) jump back to Block A, else store and stop.
+            //
+            // Separation of 0x400 bytes guarantees same direct-mapped indices (PC[9:2]) but different tags.
+            //
+            // Registers:
+            // x1 = iteration counter i
+            // x2 = limit (10)
+            // x10 = accum A (expects 10 * 6 = 60)
+            // x11 = accum B (expects 10 * 7 = 70)
+
+            // ---------------------------
+            // Block A @ 0x000
+            // ---------------------------
+            // 0x000: ADDI x1, x0, 0
+            u_axil_ram.mem[0] = 32'h00000093;
+            // 0x004: ADDI x2, x0, 10
+            u_axil_ram.mem[1] = 32'h00a00113;
+            // 0x008: ADDI x10, x0, 0
+            u_axil_ram.mem[2] = 32'h00000513;
+            // 0x00C: ADDI x11, x0, 0
+            u_axil_ram.mem[3] = 32'h00000593;
+
+            // LoopA @ 0x010:
+            // 0x010: ADDI x10, x10, 6
+            u_axil_ram.mem[4] = 32'h00650513;
+            // 0x014: JAL x0, +0x3EC (to 0x400)
+            // 0x400 - 0x014 = 0x3EC => encoding 0x3EC0006F
+            u_axil_ram.mem[5] = 32'h3ec0006f;
+
+            // ---------------------------
+            // Block B @ 0x400 (word idx 0x100)
+            // ---------------------------
+            // 0x400: ADDI x11, x11, 7
+            u_axil_ram.mem[16'h100] = 32'h00758593;
+            // 0x404: ADDI x1, x1, 1
+            u_axil_ram.mem[16'h101] = 32'h00108093;
+            // 0x408: BLT x1, x2, +8 (to 0x410 continue path)
+            u_axil_ram.mem[16'h102] = 32'h0020c463;
+            // 0x40C: JAL x0, +8 (to 0x414 exit stores)  [executed when loop ends]
+            u_axil_ram.mem[16'h103] = 32'h0080006f;
+            // 0x410: JAL x0, -0x400 (back to 0x010)     [executed when loop continues]
+            // 0x010 - 0x410 = -0x400 => encoding 0xC01FF06F
+            u_axil_ram.mem[16'h104] = 32'hc01ff06f;
+            // 0x414: SW x10, 256(x0)
+            u_axil_ram.mem[16'h105] = 32'h10a02023;
+            // 0x418: SW x11, 260(x0)
+            u_axil_ram.mem[16'h106] = 32'h10b02223;
+            // 0x41C: NOP
+            u_axil_ram.mem[16'h107] = 32'h00000013;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 26: Full Pipeline Exploitation
+    //   Maximizes I-Cache locality (all code fits in 256-entry cache)
+    //   Uses independent register operations to minimize hazards
+    // ==========================================
+    task load_test26_pipeline_exploitation;
+        integer i;
+        begin
+            $display("\n--- Loading Test 26: Full Pipeline Exploitation ---");
+            // Clear memory first
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+            
+            // ========================================================================
+            // STRATEGY: Keep all instructions within 256-word (1KB) region
+            // With 256-entry direct-mapped cache, index = address[9:2]
+            // All instructions at 0x000-0x3FC will map to unique cache lines
+            // After initial cold misses, we get 100% hit rate on loop iterations
+            // 
+            // We use multiple independent registers to avoid RAW hazards:
+            // - x2-x9: accumulators (8 parallel accumulators)
+            // - x10: outer loop counter
+            // - x11: inner loop counter  
+            // - x12-x13: loop limits
+            // - x20: final result accumulator
+            // ========================================================================
+            
+            // ----- INITIALIZATION (0x00 - 0x24) -----
+            // 0x00: ADDI x2, x0, 0       - acc0 = 0
+            u_axil_ram.mem[0] = 32'h00000113;
+            // 0x04: ADDI x3, x0, 0       - acc1 = 0
+            u_axil_ram.mem[1] = 32'h00000193;
+            // 0x08: ADDI x4, x0, 0       - acc2 = 0
+            u_axil_ram.mem[2] = 32'h00000213;
+            // 0x0C: ADDI x5, x0, 0       - acc3 = 0
+            u_axil_ram.mem[3] = 32'h00000293;
+            // 0x10: ADDI x6, x0, 0       - acc4 = 0
+            u_axil_ram.mem[4] = 32'h00000313;
+            // 0x14: ADDI x7, x0, 0       - acc5 = 0
+            u_axil_ram.mem[5] = 32'h00000393;
+            // 0x18: ADDI x8, x0, 0       - acc6 = 0
+            u_axil_ram.mem[6] = 32'h00000413;
+            // 0x1C: ADDI x9, x0, 0       - acc7 = 0
+            u_axil_ram.mem[7] = 32'h00000493;
+            
+            // 0x20: ADDI x12, x0, 10     - outer_limit = 10
+            u_axil_ram.mem[8] = 32'h00a00613;
+            // 0x24: ADDI x13, x0, 20     - inner_limit = 20
+            u_axil_ram.mem[9] = 32'h01400693;
+            // 0x28: ADDI x10, x0, 0      - outer_counter = 0
+            u_axil_ram.mem[10] = 32'h00000513;
+            
+            // ----- OUTER LOOP START (0x2C) -----
+            // 0x2C: ADDI x11, x0, 0      - inner_counter = 0
+            u_axil_ram.mem[11] = 32'h00000593;
+            
+            // ----- INNER LOOP START (0x30) - Tight 8-instruction body -----
+            // All 8 instructions use independent accumulators (no RAW hazards!)
+            // This allows the pipeline to run at maximum throughput
+            
+            // 0x30: ADDI x2, x2, 1       - acc0++
+            u_axil_ram.mem[12] = 32'h00110113;
+            // 0x34: ADDI x3, x3, 2       - acc1 += 2
+            u_axil_ram.mem[13] = 32'h00218193;
+            // 0x38: ADDI x4, x4, 3       - acc2 += 3
+            u_axil_ram.mem[14] = 32'h00320213;
+            // 0x3C: ADDI x5, x5, 4       - acc3 += 4
+            u_axil_ram.mem[15] = 32'h00428293;
+            // 0x40: ADDI x6, x6, 5       - acc4 += 5
+            u_axil_ram.mem[16] = 32'h00530313;
+            // 0x44: ADDI x7, x7, 6       - acc5 += 6
+            u_axil_ram.mem[17] = 32'h00638393;
+            // 0x48: ADDI x8, x8, 7       - acc6 += 7
+            u_axil_ram.mem[18] = 32'h00740413;
+            // 0x4C: ADDI x9, x9, 8       - acc7 += 8
+            u_axil_ram.mem[19] = 32'h00848493;
+            
+            // Inner loop control
+            // 0x50: ADDI x11, x11, 1     - inner_counter++
+            u_axil_ram.mem[20] = 32'h00158593;
+            // 0x54: BLT x11, x13, -36    - if inner_counter < 20, branch to 0x30
+            u_axil_ram.mem[21] = 32'hfcd5cee3;
+            
+            // ----- INNER LOOP END -----
+            
+            // Outer loop control
+            // 0x58: ADDI x10, x10, 1     - outer_counter++
+            u_axil_ram.mem[22] = 32'h00150513;
+            // 0x5C: BLT x10, x12, -48    - if outer_counter < 10, branch to 0x2C
+            u_axil_ram.mem[23] = 32'hfcc548e3;
+            
+            // ----- OUTER LOOP END -----
+            
+            // ----- COMPUTE FINAL RESULT -----
+            // Total iterations: 10 * 20 = 200
+            // Expected values:
+            // x2 = 200 * 1 = 200
+            // x3 = 200 * 2 = 400
+            // x4 = 200 * 3 = 600
+            // x5 = 200 * 4 = 800
+            // x6 = 200 * 5 = 1000
+            // x7 = 200 * 6 = 1200
+            // x8 = 200 * 7 = 1400
+            // x9 = 200 * 8 = 1600
+            // Sum = 200 + 400 + 600 + 800 + 1000 + 1200 + 1400 + 1600 = 7200
+            
+            // 0x60: ADD x20, x2, x3      - x20 = x2 + x3 = 600
+            u_axil_ram.mem[24] = 32'h00310a33;
+            // 0x64: ADD x20, x20, x4     - x20 += x4 = 1200
+            u_axil_ram.mem[25] = 32'h004a0a33;
+            // 0x68: ADD x20, x20, x5     - x20 += x5 = 2000
+            u_axil_ram.mem[26] = 32'h005a0a33;
+            // 0x6C: ADD x20, x20, x6     - x20 += x6 = 3000
+            u_axil_ram.mem[27] = 32'h006a0a33;
+            // 0x70: ADD x20, x20, x7     - x20 += x7 = 4200
+            u_axil_ram.mem[28] = 32'h007a0a33;
+            // 0x74: ADD x20, x20, x8     - x20 += x8 = 5600
+            u_axil_ram.mem[29] = 32'h008a0a33;
+            // 0x78: ADD x20, x20, x9     - x20 += x9 = 7200
+            u_axil_ram.mem[30] = 32'h009a0a33;
+            
+            // ----- STORE RESULTS -----
+            // 0x7C: SW x2, 512(x0)       - mem[512] = 200
+            u_axil_ram.mem[31] = 32'h20202023;
+            // 0x80: SW x3, 516(x0)       - mem[516] = 400
+            u_axil_ram.mem[32] = 32'h20302223;
+            // 0x84: SW x4, 520(x0)       - mem[520] = 600
+            u_axil_ram.mem[33] = 32'h20402423;
+            // 0x88: SW x5, 524(x0)       - mem[524] = 800
+            u_axil_ram.mem[34] = 32'h20502623;
+            // 0x8C: SW x6, 528(x0)       - mem[528] = 1000
+            u_axil_ram.mem[35] = 32'h20602823;
+            // 0x90: SW x7, 532(x0)       - mem[532] = 1200
+            u_axil_ram.mem[36] = 32'h20702a23;
+            // 0x94: SW x8, 536(x0)       - mem[536] = 1400
+            u_axil_ram.mem[37] = 32'h20802c23;
+            // 0x98: SW x9, 540(x0)       - mem[540] = 1600
+            u_axil_ram.mem[38] = 32'h20902e23;
+            // 0x9C: SW x20, 544(x0)      - mem[544] = 7200 (sum)
+            u_axil_ram.mem[39] = 32'h23402023;
+            
+            // 0xA0: NOP
+            u_axil_ram.mem[40] = 32'h00000013;
+            // 0xA4: NOP
+            u_axil_ram.mem[41] = 32'h00000013;
+            // 0xA8: JAL x0, 0            - Infinite loop to stop execution
+            u_axil_ram.mem[42] = 32'h0000006f;
         end
     endtask
 
