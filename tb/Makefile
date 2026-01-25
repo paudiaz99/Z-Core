@@ -52,7 +52,7 @@ help:
 	@echo "	TB_FILE=<tb-file>	: Test-bench to run, e.g.: TB_FILE=z_core_alu_tb.v"
 	@echo "					Supported tests: ${TB_FILES_ALL}"
 	@echo "					Default: z_core_control_u_tb.sv"
-	@echo "	SIM=<simulator>		: Choose simulator (questa or dsim) for compiling the testbench and running the tests"
+	@echo "	SIM=<simulator>		: Choose simulator (questa, dsim or iverilog) for compiling the testbench and running the tests"
 	@echo "					Default: questa"
 	@echo "	debug=1			: Enable debug mode (waveform generation and GUI mode)"
 	@echo
