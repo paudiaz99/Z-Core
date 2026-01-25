@@ -150,6 +150,19 @@ reg flush_r;     // Registered flush - set for one cycle after branch/jump detec
 
 
 // ##################################################
+//           PERFORMANCE COUNTERS
+// ##################################################
+
+reg [63:0] perf_cycle;
+reg [63:0] perf_instret;
+reg [63:0] perf_inst_cache_hits;
+reg [63:0] perf_inst_fetch;
+reg [63:0] perf_memory_reads;
+reg [63:0] perf_memory_writes;
+reg [63:0] perf_pipeline_flush;
+
+
+// ##################################################
 //              PIPELINE REGISTERS
 // ##################################################
 
@@ -222,9 +235,6 @@ z_core_instr_cache#(
     .cache_hit(instr_cache_cache_hit),
     .cache_miss(instr_cache_cache_miss)
 );
-
-// Cache address: use fetch_pc during write, otherwise use PC or branch/jump targets
-assign instr_cache_address = instr_cache_wen ? fetch_pc : (branch_taken ? branch_target : (jump_taken ? jalr_target : PC));
 
 // ##################################################
 //      INSTRUCTION DECODER (uses z_core_decoder)
@@ -439,6 +449,9 @@ wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
 // ##################################################
 //              PIPELINE STAGE: FETCH
 // ##################################################
+
+// Cache address: use fetch_pc during write, otherwise use PC or branch/jump targets
+assign instr_cache_address = instr_cache_wen ? fetch_pc : (branch_taken ? branch_target : (jump_taken ? jalr_target : PC));
 
 // New instruction arriving this cycle (from any source)
 wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
@@ -785,15 +798,8 @@ always @* begin
 end
 
 // ##################################################
-//           PERFORMANCE COUNTERS
+//          PERFORMANCE COUNTERS CONTROL
 // ##################################################
-reg [63:0] perf_cycle;
-reg [63:0] perf_instret;
-reg [63:0] perf_inst_cache_hits;
-reg [63:0] perf_inst_fetch;
-reg [63:0] perf_memory_reads;
-reg [63:0] perf_memory_writes;
-reg [63:0] perf_pipeline_flush;
 
 always @(posedge clk) begin
     if (~rstn) begin
