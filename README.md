@@ -43,15 +43,12 @@
 
 ## Z-Core RV32IM Architecture
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/c02b2a54-ae7c-4070-adcd-875faa8720d2" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/4634f470-e526-4054-b2ef-d4ed0da07c22" alt="centered image">
   <br>
   <sup>Z-Core RV32IM Architecture Diagram.</sup>
 </div>
 
 > **Note**: For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
-
-> [!IMPORTANT]
->**The diagram is not up to date and does not include the instruction cache.**
 
 ## Supported Instructions
 
