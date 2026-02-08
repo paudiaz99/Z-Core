@@ -34,6 +34,7 @@ This document describes the verification strategy, test coverage, and results fo
 │  │                                          │ - Memory (64KB)       │   │  │
 │  │                                          │ - UART (Wrapper)      │   │  │
 │  │                                          │ - GPIO (Wrapper)      │   │  │
+│  │                                          │ - Timer (Wrapper)     │   │  │
 │  │                                          └───────────────────────┘   │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                            │
@@ -311,6 +312,12 @@ Tests three forwarding scenarios:
 ## Test 26: I-Cache Conflict Miss Thrash (Direct-Mapped)
 **Purpose:** Squeezee the pipeline as much as possible by exploiting instruction locallity. This locallity enables a throughput of one intruction per cycle.
 
+## Test 27: Correctness of Timer
+**Purpose:** Verify the correctness of the timer module. Controls timer overflow and underflow.
+
+## Test 28: Correctness of External Counter Timer Mode
+**Purpose:** Verify the correctness of the external counter timer mode.
+
 ## Instruction Coverage
 
 ### RV32IM Base Integer Instructions
@@ -328,7 +335,6 @@ Tests three forwarding scenarios:
 | Store | SW, SB, SH | Yes | 100% |
 | M Extension | MUL, MULH, MULHSU, MULHU | Yes | 100% |
 | M Extension | DIV, DIVU, REM, REMU | Yes | 100% |
-| **NOT IMPLEMENTED** | FENCE, ECALL, EBREAK | N/A | 0% |
 
 ## Test Flow Diagram
 
@@ -402,8 +408,8 @@ gtkwave sim/z_core_control_u_tb.vcd
 ╔═══════════════════════════════════════════════════════════╗
 ║                    TEST SUMMARY                           ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Total Tests:  213                                        ║
-║  Passed:       213                                        ║
+║  Total Tests:  218                                        ║
+║  Passed:       218                                        ║
 ║  Failed:        0                                         ║
 ╠═══════════════════════════════════════════════════════════╣
 ║         ✓ ALL TESTS PASSED SUCCESSFULLY ✓                 ║
