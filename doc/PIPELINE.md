@@ -337,6 +337,7 @@ graph TD
     INTERCONNECT --> RAM[RAM]
     INTERCONNECT --> UART[UART]
     INTERCONNECT --> GPIO[GPIO]
+    INTERCONNECT --> TIMER[TIMER]
 ```
 
 **Arbiter Priority:**

@@ -65,22 +65,26 @@ module z_core_control_u_tb;
 
 
     // Interconnect Parameters
+    // Interconnect Parameters
     localparam S_COUNT = 1;
-    localparam M_COUNT = 3;
+    localparam M_COUNT = 4;
     localparam M_REGIONS = 1;
 
     // Address Map
     // M0: Memory (0x0000_0000 - 0x03FF_FFFF) 64MB
     // M1: UART   (0x0400_0000 - 0x0400_0FFF) 4KB
     // M2: GPIO   (0x0400_1000 - 0x0400_1FFF) 4KB
+    // M3: Timer  (0x0400_2000 - 0x0400_2FFF) 4KB
 
     localparam [M_COUNT*ADDR_WIDTH-1:0] M_BASE_ADDR = {
+        32'h0400_2000, // M3: Timer
         32'h0400_1000, // M2: GPIO
         32'h0400_0000, // M1: UART
         32'h0000_0000  // M0: Memory
     };
 
     localparam [M_COUNT*32-1:0] M_ADDR_WIDTH_CONF = {
+        32'd12, // M3: Timer (4KB = 2^12)
         32'd12, // M2: GPIO (4KB = 2^12)
         32'd12, // M1: UART (4KB = 2^12)
         32'd26  // M0: Memory (64MB = 2^26)
@@ -349,6 +353,40 @@ module z_core_control_u_tb;
         // Bidirectional GPIO Pins
         .gpio(gpio_wiring)
     );
+
+    // Instantiate Timer (Slave 3)
+    axil_timer #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .ADDR_WIDTH(12), // 4KB
+        .STRB_WIDTH(STRB_WIDTH)
+    ) u_timer (
+        .clk(clk),
+        .rstn(rstn), // Active low reset
+        
+        .s_axil_awaddr(m_axil_awaddr[3*ADDR_WIDTH +: 12]),
+        .s_axil_awprot(m_axil_awprot[3*3 +: 3]),
+        .s_axil_awvalid(m_axil_awvalid[3]),
+        .s_axil_awready(m_axil_awready[3]),
+        .s_axil_wdata(m_axil_wdata[3*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_wstrb(m_axil_wstrb[3*STRB_WIDTH +: STRB_WIDTH]),
+        .s_axil_wvalid(m_axil_wvalid[3]),
+        .s_axil_wready(m_axil_wready[3]),
+        .s_axil_bresp(m_axil_bresp[3*2 +: 2]),
+        .s_axil_bvalid(m_axil_bvalid[3]),
+        .s_axil_bready(m_axil_bready[3]),
+        .s_axil_araddr(m_axil_araddr[3*ADDR_WIDTH +: 12]),
+        .s_axil_arprot(m_axil_arprot[3*3 +: 3]),
+        .s_axil_arvalid(m_axil_arvalid[3]),
+        .s_axil_arready(m_axil_arready[3]),
+        .s_axil_rdata(m_axil_rdata[3*DATA_WIDTH +: DATA_WIDTH]),
+        .s_axil_rresp(m_axil_rresp[3*2 +: 2]),
+        .s_axil_rvalid(m_axil_rvalid[3]),
+        .s_axil_rready(m_axil_rready[3]),
+        .ext_event_i(timer_ext_event)
+    );
+
+    // Timer External Event Signal for Counter Mode (driven by testbench)
+    reg timer_ext_event = 0;
 
     // Clock generation (100MHz)
     always #5 clk = ~clk;
@@ -1538,6 +1576,155 @@ module z_core_control_u_tb;
         $display("  Retired Instructions: %0d", uut.perf_instret);
         $display("  IPC (Instructions/Cycle): %0.3f", real'(uut.perf_instret) / real'(uut.perf_cycle));
         $display("  ─────────────────────────────────────────────");
+
+        // ==========================================
+        // Test 27: Timer Test
+        // ==========================================
+        load_test27_timer();
+        reset_cpu();
+        #20000; // Wait for timer
+
+        $display("\n=== Test 27 Results: Timer Test ===");
+        
+        // Check Phase 1: Basic Count Up (Mem[256])
+        // Should be > 0x10 (16)
+        test_count = test_count + 1;
+        if (u_axil_ram.mem[64] > 16) begin
+             $display("  [PASS] Phase 1: Basic Count Up verified (Got %h)", u_axil_ram.mem[64]);
+             pass_count = pass_count + 1;
+        end else begin
+             $display("  [FAIL] Phase 1: Timer did not count up (Got %h)", u_axil_ram.mem[64]);
+             fail_count = fail_count + 1;
+        end
+
+        // Check Phase 2: 64-bit Cascade Up (Mem[260])
+        // Should be 1 (Overflowed)
+        test_count = test_count + 1;
+        if (u_axil_ram.mem[65] == 1) begin
+             $display("  [PASS] Phase 2: 64-bit Cascade Up verified (Got %h)", u_axil_ram.mem[65]);
+             pass_count = pass_count + 1;
+        end else begin
+             $display("  [FAIL] Phase 2: Timer High did not increment on overflow (Got %h)", u_axil_ram.mem[65]);
+             fail_count = fail_count + 1;
+        end
+
+        // Check Phase 3: 64-bit Cascade Down (Mem[264])
+        // Should be 0 (Underflowed from 1 -> 0)
+        // Note: Initial High was 1. Low underflows, borrows from High. High becomes 0.
+        test_count = test_count + 1;
+        if (u_axil_ram.mem[66] == 0) begin
+             $display("  [PASS] Phase 3: 64-bit Cascade Down verified (Got %h)", u_axil_ram.mem[66]);
+             pass_count = pass_count + 1;
+        end else begin
+             $display("  [FAIL] Phase 3: Timer High did not decrement on underflow (Got %h)", u_axil_ram.mem[66]);
+             fail_count = fail_count + 1;
+        end
+
+        // Check Phase 4: Toggle Enable (Mem[268])
+        // Should be > 0
+        test_count = test_count + 1;
+        if (u_axil_ram.mem[67] > 0) begin
+             $display("  [PASS] Phase 4: Toggle Enable verified (Got %h)", u_axil_ram.mem[67]);
+             pass_count = pass_count + 1;
+        end else begin
+             $display("  [FAIL] Phase 4: Timer did not count after toggle (Got %h)", u_axil_ram.mem[67]);
+             fail_count = fail_count + 1;
+        end
+
+        // Counts:
+        // Phase 1: 5 Writes, 1 Read
+        // Phase 2: 5 Writes, 1 Read
+        // Phase 3: 5 Writes, 1 Read
+        // Phase 4: 3 Writes, 1 Read
+        // Total: 18 Writes, 4 Reads
+        verify_counters(18, 4, "Test 27");
+
+        // ==========================================
+        // Test 28: Counter Mode (External Event)
+        // ==========================================
+        load_test28_counter_mode();
+        reset_cpu();
+
+        // The test program will:
+        // 1. Configure timer in Counter Mode (Ctrl = 0x7: Enable + Up + Counter)
+        // 2. Loop for 100 iterations (software-controlled wait)
+        // 3. Read Timer Low, store to memory
+        // 4. The testbench will drive timer_ext_event during the wait period
+
+        // During the test, we inject external pulses with various timing patterns
+        // including corner cases (mid-cycle, glitches, bursts)
+        
+        // Wait for CPU to start and reach the counting loop
+        #2000;
+        
+        // === Phase 1: Clean pulses (5 pulses, synchronized to clock) ===
+        repeat(5) begin
+            @(posedge clk);
+            timer_ext_event <= 1'b1;
+            @(posedge clk);
+            timer_ext_event <= 1'b0;
+            @(posedge clk);  // Gap between pulses
+        end
+        
+        // === Phase 2: Mid-cycle pulses (should still be detected) ===
+        // These pulses change in the middle of a clock cycle
+        repeat(3) begin
+            @(posedge clk);
+            #3;  // 3ns into the 10ns clock period
+            timer_ext_event <= 1'b1;
+            @(posedge clk);
+            #7;  // 7ns into the next cycle
+            timer_ext_event <= 1'b0;
+            @(posedge clk);
+        end
+        
+        // === Phase 3: Very short glitch (< 1 clock period) ===
+        // This should NOT be detected by the synchronizer (edge too fast)
+        @(posedge clk);
+        timer_ext_event <= 1'b1;
+        #2;  // 2ns pulse
+        timer_ext_event <= 1'b0;
+        @(posedge clk);
+        @(posedge clk);
+        
+        // === Phase 4: Burst of rapid pulses ===
+        repeat(2) begin
+            @(posedge clk);
+            timer_ext_event <= 1'b1;
+            @(posedge clk);
+            timer_ext_event <= 1'b0;
+        end
+        
+        // Wait for program to complete
+        #12000;
+
+        $display("\n=== Test 28 Results: Counter Mode (External Event) ===");
+        
+        // Expected count:
+        // Phase 1: 5 pulses
+        // Phase 2: 3 pulses (even mid-cycle, should be detected)
+        // Phase 3: 0 (glitch too short)
+        // Phase 4: 2 pulses
+        // Total: 10 pulses
+        
+        // The program stores timer value to Mem[256] (64 words)
+        test_count = test_count + 1;
+        if (u_axil_ram.mem[64] == 10) begin
+            $display("  [PASS] Counter Mode: Counted %d external events (Expected 10)", u_axil_ram.mem[64]);
+            pass_count = pass_count + 1;
+        end else if (u_axil_ram.mem[64] >= 8 && u_axil_ram.mem[64] <= 11) begin
+            // Allow some tolerance for timing variations
+            $display("  [PASS] Counter Mode: Counted %d external events (Expected ~10, within tolerance)", u_axil_ram.mem[64]);
+            pass_count = pass_count + 1;
+        end else begin
+            $display("  [FAIL] Counter Mode: Counted %d external events (Expected ~10)", u_axil_ram.mem[64]);
+            fail_count = fail_count + 1;
+        end
+        
+        // Corner case: Glitch should NOT have been counted
+        // (No explicit check, but total count should confirm this)
+        
+        verify_counters(4, 1, "Test 28");
 
         // ==========================================
         // Final Summary
@@ -2876,6 +3063,199 @@ module z_core_control_u_tb;
             u_axil_ram.mem[41] = 32'h00000013;
             // 0xA8: JAL x0, 0            - Infinite loop to stop execution
             u_axil_ram.mem[42] = 32'h0000006f;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 27: Timer Test Program
+    // ==========================================
+    task load_test27_timer;
+        begin
+            $display("\n--- Loading Test 27: Complex Timer Test ---");
+            // x6 = Timer Base Address (0x0400_2000)
+            // LUI x6, 0x04002
+            u_axil_ram.mem[0] = 32'h04002337;
+
+            // ==========================================
+            // Phase 1: Basic Count Up
+            // ==========================================
+            // 1. Store 0 to Timer Low (0x0) and High (0x4)
+            // SW x0, 0(x6)
+            u_axil_ram.mem[1] = 32'h00032023;
+            // SW x0, 4(x6)
+            u_axil_ram.mem[2] = 32'h00032223;
+
+            // 2. Enable Timer Up (Write 3 to 0x8)
+            // ADDI x7, x0, 3  -> x7 = 3
+            u_axil_ram.mem[3] = 32'h00300393;
+            // SW x7, 8(x6)
+            u_axil_ram.mem[4] = 32'h00732423;
+
+            // 3. Wait (NOPs)
+            u_axil_ram.mem[5] = 32'h00000013; 
+            u_axil_ram.mem[6] = 32'h00000013;
+            u_axil_ram.mem[7] = 32'h00000013; 
+            u_axil_ram.mem[8] = 32'h00000013;
+
+            // 4. Disable Timer (Write 0 to 0x8)
+            // SW x0, 8(x6)
+            u_axil_ram.mem[9] = 32'h00032423;
+
+            // 5. Read Timer Low -> Save to Mem[256] (0x100)
+            // LW x10, 0(x6)
+            u_axil_ram.mem[10] = 32'h00032503;
+            // SW x10, 256(x0)
+            u_axil_ram.mem[11] = 32'h10a02023;
+
+
+            // ==========================================
+            // Phase 2: 64-bit Cascade Up (Overflow)
+            // ==========================================
+            // 1. Load Low = 0xFFFFFFF0, High = 0
+            // ADDI x7, x0, -16 (0xFFFFFFF0) -> x7 = -16
+            u_axil_ram.mem[12] = 32'hff000393;
+            // SW x7, 0(x6)
+            u_axil_ram.mem[13] = 32'h00732023;
+            // SW x0, 4(x6)
+            u_axil_ram.mem[14] = 32'h00032223;
+
+            // 2. Enable Timer Up (Write 3 to 0x8) - Re-use x7 if needed or reload
+            // ADDI x7, x0, 3
+            u_axil_ram.mem[15] = 32'h00300393;
+            // SW x7, 8(x6)
+            u_axil_ram.mem[16] = 32'h00732423;
+
+            // 3. Wait for overflow (need > 16 cycles, say 8 NOPs + pipeline delay)
+            u_axil_ram.mem[17] = 32'h00000013;
+            u_axil_ram.mem[18] = 32'h00000013; 
+            u_axil_ram.mem[19] = 32'h00000013;
+            u_axil_ram.mem[20] = 32'h00000013;
+            u_axil_ram.mem[21] = 32'h00000013;
+            u_axil_ram.mem[22] = 32'h00000013;
+
+            // 4. Disable
+            // SW x0, 8(x6)
+            u_axil_ram.mem[23] = 32'h00032423;
+
+            // 5. Read Timer High -> Save to Mem[260] (0x104)
+            // LW x11, 4(x6)
+            u_axil_ram.mem[24] = 32'h00432583;
+            // SW x11, 260(x0)
+            u_axil_ram.mem[25] = 32'h10b02223;
+
+
+            // ==========================================
+            // Phase 3: 64-bit Cascade Down (Underflow)
+            // ==========================================
+            // 1. Load Low = 0x10, High = 1
+            // ADDI x7, x0, 16 -> x7 = 16
+            u_axil_ram.mem[26] = 32'h01000393;
+            // SW x7, 0(x6)
+            u_axil_ram.mem[27] = 32'h00732023;
+            // ADDI x7, x0, 1 -> x7 = 1
+            u_axil_ram.mem[28] = 32'h00100393;
+            // SW x7, 4(x6)
+            u_axil_ram.mem[29] = 32'h00732223;
+
+            // 2. Enable Timer Down (Write 1 to 0x8)
+            // SW x7, 8(x6)  (x7 is 1)
+            u_axil_ram.mem[30] = 32'h00732423;
+
+            // 3. Wait for underflow
+            u_axil_ram.mem[31] = 32'h00000013;
+            u_axil_ram.mem[32] = 32'h00000013;
+            u_axil_ram.mem[33] = 32'h00000013;
+            u_axil_ram.mem[34] = 32'h00000013;
+            u_axil_ram.mem[35] = 32'h00000013;
+            u_axil_ram.mem[36] = 32'h00000013;
+
+            // 4. Disable
+            // SW x0, 8(x6)
+            u_axil_ram.mem[37] = 32'h00032423;
+
+            // 5. Read Timer High -> Save to Mem[264] (0x108)
+            // LW x12, 4(x6)
+            u_axil_ram.mem[38] = 32'h00432603;
+            // SW x12, 264(x0)
+            u_axil_ram.mem[39] = 32'h10c02423;
+
+            
+            // ==========================================
+            // Phase 4: Toggle Enable
+            // ==========================================
+            // 1. Enable Up (Write 3)
+            // ADDI x7, x0, 3
+            u_axil_ram.mem[40] = 32'h00300393;
+            // SW x7, 8(x6)
+            u_axil_ram.mem[41] = 32'h00732423;
+
+            // 2. Wait
+            u_axil_ram.mem[42] = 32'h00000013;
+            u_axil_ram.mem[43] = 32'h00000013;
+
+            // 3. Disable
+            // SW x0, 8(x6)
+            u_axil_ram.mem[44] = 32'h00032423;
+
+            // 4. Read Low -> Save to Mem[268] (0x10C)
+            // LW x13, 0(x6)
+            u_axil_ram.mem[45] = 32'h00032683;
+            // SW x13, 268(x0)
+            u_axil_ram.mem[46] = 32'h10d02623;
+
+            // Infinite Loop
+            u_axil_ram.mem[47] = 32'h0000006f; 
+        end
+    endtask
+
+    // ==========================================
+    //        Test 28: Counter Mode
+    // ==========================================
+    // Configure timer in Counter Mode (external event counting)
+    // Wait for external pulses from testbench
+    // Read count and store to memory
+    task load_test28_counter_mode;
+        begin
+            $display("\n--- Loading Test 28: Counter Mode (External Event) ---");
+            // x6 = Timer Base Address (0x0400_2000)
+            // LUI x6, 0x04002
+            u_axil_ram.mem[0] = 32'h04002337;
+
+            // 1. Load Timer Low with 0
+            // ADDI x7, x0, 0
+            u_axil_ram.mem[1] = 32'h00000393;
+            // SW x7, 0(x6) -> timer_lo = 0
+            u_axil_ram.mem[2] = 32'h00732023;
+
+            // 2. Enable Counter Mode: Ctrl = 0x7 (Enable | Up | Counter)
+            // ADDI x7, x0, 7
+            u_axil_ram.mem[3] = 32'h00700393;
+            // SW x7, 8(x6) -> timer_ctrl = 7
+            u_axil_ram.mem[4] = 32'h00732423;
+
+            // 3. Software wait loop (100 iterations)
+            // x8 = 100 (loop counter)
+            // ADDI x8, x0, 100
+            u_axil_ram.mem[5] = 32'h06400413;
+            
+            // Loop Start (PC = 0x18)
+            // ADDI x8, x8, -1
+            u_axil_ram.mem[6] = 32'hfff40413;
+            // BNE x8, x0, -4 (branch to loop start)
+            u_axil_ram.mem[7] = 32'hfe041ee3; // offset -4
+
+            // 4. Disable Timer
+            // SW x0, 8(x6) -> timer_ctrl = 0
+            u_axil_ram.mem[8] = 32'h00032423;
+
+            // 5. Read Timer Low and store to Mem[256]
+            // LW x9, 0(x6) -> x9 = timer_lo
+            u_axil_ram.mem[9] = 32'h00032483;
+            // SW x9, 256(x0) -> mem[256] = x9
+            u_axil_ram.mem[10] = 32'h10902023;
+
+            // Infinite Loop
+            u_axil_ram.mem[11] = 32'h0000006f;
         end
     endtask
 

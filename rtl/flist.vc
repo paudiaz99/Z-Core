@@ -16,3 +16,5 @@ arbiter.v
 priority_encoder.v
 z_core_top_model.v
 z_core_instr_cache.v
+z_core_32b_timer.v
+axil_timer.v
