@@ -41,6 +41,9 @@
   <sup>Z-Core SoC Architecture.</sup>
 </div>
 
+> [!WARNING]
+> The SoC diagram does not include the Timer module.
+
 ## Z-Core RV32IM Architecture
 <div align="center">
   <img src="https://github.com/user-attachments/assets/4634f470-e526-4054-b2ef-d4ed0da07c22" alt="centered image">
@@ -48,7 +51,8 @@
   <sup>Z-Core RV32IM Architecture Diagram.</sup>
 </div>
 
-> **Note**: For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
+> [!NOTE]
+> For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
 
 ## Supported Instructions
 
@@ -82,6 +86,8 @@ Z-Core/
 │   ├── axil_master.v          # AXI-Lite Master
 │   ├── axil_uart.v            # UART Module
 │   ├── axil_gpio.v            # GPIO Module
+│   ├── axil_timer.v           # Timer Module
+│   ├── z_core_32b_timer.v     # 32-bit Timer Module
 │   ├── arbiter.v              # AXI-Lite Arbiter
 │   ├── priority_encoder.v     # Priority Encoder Module
 │   ├── axi_mem.v              # AXI-Lite RAM
@@ -100,6 +106,7 @@ Z-Core/
 │   ├── z_core_mult_unit_tb.v  # Multiplier unit test
 │   ├── z_core_div_unit_tb.v   # Divider unit test
 │   ├── axil_gpio_tb.v         # GPIO testbench
+│   ├── axil_timer_tb.v        # Timer testbench
 │   ├── z_core_instr_cache_tb.v # Instruction cache testbench
 │   └── z_core_riscof_tb.sv    # RISCOF compliance testbench
 │
@@ -107,6 +114,7 @@ Z-Core/
     ├── AXI_INTERFACE.md       # AXI protocol details
     ├── GPIO.md                # GPIO module documentation
     ├── UART.md                # UART module documentation
+    ├── TIMER.md               # Timer module documentation
     ├── Z_CORE_ARCHITECTURE.md # Architecture overview
     ├── PIPELINE.md            # Pipeline implementation details
     └── VERIFICATION.md        # Verification details
@@ -174,15 +182,15 @@ make -f ../tb/Makefile run SIM=dsim debug=1
  ___________________________________________________________
 |                    TEST SUMMARY                           |
 |___________________________________________________________|
-|  Total Tests: 213                                         |
-|  Passed:      213                                         |
+|  Total Tests: 218                                         |
+|  Passed:      218                                         |
 |  Failed:        0                                         |
 |___________________________________________________________|
 |         ALL TESTS PASSED SUCCESSFULLY                     |
-|  Test Duration: 709245 ns                                 |
-|  Clock Cycles:  70924                                     |
-|  Instructions:  20845                                     |
-|  Writes=         59, Reads=         23                    |
+|  Test Duration: 743825 ns                                 |
+|  Clock Cycles:  74382                                     |
+|  Instructions:  74382                                     |
+|  Writes=         81, Reads=         28                    |
 |___________________________________________________________|
 
 ```
@@ -220,6 +228,8 @@ The processor has been verified with a comprehensive system-level testbench (`tb
 | M Extension | MUL, DIV, REM, Forwarding Stress |
 | Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns |
 | I-Cache Stress | Locality loops + direct-mapped conflict-miss thrash |
+| Timer | Timer overflow and underflow |
+| External Counter Timer | External counter timer mode |
 | **RISCOF Compliance** | **Official RISC-V RV32IM Architectural Tests** |
 
 
@@ -260,6 +270,7 @@ Detailed documentation is available in the `doc/` directory:
 - **[Pipeline](doc/PIPELINE.md)** - Pipeline implementation details
 - **[GPIO](doc/GPIO.md)** - Bidirectional GPIO module
 - **[UART](doc/UART.md)** - Serial UART module
+- **[Timer](doc/TIMER.md)** - Serial Timer module
 - **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
 
 ## Roadmap
@@ -271,9 +282,10 @@ Detailed documentation is available in the `doc/` directory:
 - [x] Pipelining for improved throughput
 - [x] FPGA synthesis and validation **[Z-Core-FPGA repository](https://github.com/paudiaz99/Z-Core-FPGA)** 
 - [x] M extension (multiply/divide)
-- [x] **Instruction cache (simple direct-mapped, 1-word lines)**
+- [x] Instruction cache (simple direct-mapped, 1-word lines)
+- [x] **Timer**
 - [ ] Interrupt support
-- [ ] Extra Peripherals (VGA Controller, Timer, etc.)
+- [ ] VGA Controller
 - [ ] CSR Unit & Zicsr extension (CSR instructions)
 - [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
 - [ ] RISC-V C extension (compressed instructions)

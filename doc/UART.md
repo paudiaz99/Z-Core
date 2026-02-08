@@ -113,3 +113,5 @@ char c = *(volatile uint32_t*)0x04000004;  // RX_DATA
 | Memory     | 0x00000000   | 64MB |
 | **UART**   | 0x04000000   | 4KB  |
 | GPIO       | 0x04001000   | 4KB  |
+| Timer      | 0x04002000   | 4KB  |
+

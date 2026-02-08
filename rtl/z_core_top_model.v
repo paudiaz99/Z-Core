@@ -47,7 +47,10 @@ module z_core_top #(
     output wire uart_tx,
 
     // GPIO
-    inout  wire [N_GPIO-1:0] gpio_pins
+    inout  wire [N_GPIO-1:0] gpio_pins,
+
+    // Timer External Event
+    input wire timer_ext_event_i
 );
 
 // **************************************************
@@ -62,21 +65,24 @@ module z_core_top #(
 
 // Interconnect Parameters
 localparam S_COUNT = 1;
-localparam M_COUNT = 3;
+localparam M_COUNT = 4;
 localparam M_REGIONS = 1;
 
 // Address Map
 // M0: Memory (0x0000_0000 - 0x03FF_FFFF) 64MB
 // M1: UART   (0x0400_0000 - 0x0400_0FFF) 4KB
 // M2: GPIO   (0x0400_1000 - 0x0400_1FFF) 4KB
+// M3: Timer  (0x0400_2000 - 0x0400_2FFF) 4KB
 
 localparam [M_COUNT*ADDR_WIDTH-1:0] M_BASE_ADDR = {
+    32'h0400_2000, // M3: Timer
     32'h0400_1000, // M2: GPIO
     32'h0400_0000, // M1: UART
     32'h0000_0000  // M0: Memory
 };
 
 localparam [M_COUNT*32-1:0] M_ADDR_WIDTH_CONF = {
+    32'd12, // M3: Timer (4KB = 2^12)
     32'd12, // M2: GPIO (4KB = 2^12)
     32'd12, // M1: UART (4KB = 2^12)
     32'd26  // M0: Memory (64MB = 2^26)
@@ -325,6 +331,40 @@ axil_gpio #(
     
     // External Interface
     .gpio(gpio_pins)
+);
+
+// **************************************************
+//              Timer (Slave 3)
+// **************************************************
+
+axil_timer #(
+    .DATA_WIDTH(DATA_WIDTH),
+    .ADDR_WIDTH(12), // 4KB
+    .STRB_WIDTH(STRB_WIDTH)
+) u_timer (
+    .clk(clk),
+    .rstn(rstn), // Active low reset
+    .ext_event_i(timer_ext_event_i), // External event for Counter Mode
+    
+    .s_axil_awaddr(m_axil_awaddr[3*ADDR_WIDTH +: 12]),
+    .s_axil_awprot(m_axil_awprot[3*3 +: 3]),
+    .s_axil_awvalid(m_axil_awvalid[3]),
+    .s_axil_awready(m_axil_awready[3]),
+    .s_axil_wdata(m_axil_wdata[3*DATA_WIDTH +: DATA_WIDTH]),
+    .s_axil_wstrb(m_axil_wstrb[3*STRB_WIDTH +: STRB_WIDTH]),
+    .s_axil_wvalid(m_axil_wvalid[3]),
+    .s_axil_wready(m_axil_wready[3]),
+    .s_axil_bresp(m_axil_bresp[3*2 +: 2]),
+    .s_axil_bvalid(m_axil_bvalid[3]),
+    .s_axil_bready(m_axil_bready[3]),
+    .s_axil_araddr(m_axil_araddr[3*ADDR_WIDTH +: 12]),
+    .s_axil_arprot(m_axil_arprot[3*3 +: 3]),
+    .s_axil_arvalid(m_axil_arvalid[3]),
+    .s_axil_arready(m_axil_arready[3]),
+    .s_axil_rdata(m_axil_rdata[3*DATA_WIDTH +: DATA_WIDTH]),
+    .s_axil_rresp(m_axil_rresp[3*2 +: 2]),
+    .s_axil_rvalid(m_axil_rvalid[3]),
+    .s_axil_rready(m_axil_rready[3])
 );
 
 endmodule
