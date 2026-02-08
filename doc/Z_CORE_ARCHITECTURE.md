@@ -236,7 +236,7 @@ Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
 **Configuration:**
 - 1 Slave Interface (from Control Unit)
-- 3 Master Interfaces (to Memory, UART, GPIO)
+- 3 Master Interfaces (to Memory, UART, GPIO, Timer)
 
 ### 2.3 UART (`axil_uart`)
 - Base Address: `0x0400_0000`
@@ -245,6 +245,11 @@ Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
 ### 2.4 GPIO (`axil_gpio`)
 - Base Address: `0x0400_1000`
+- Size: 4KB
+- Uses direct AXI-Lite Slave interface logic.
+
+### 2.5 Timer (`axil_timer`)
+- Base Address: `0x0400_2000`
 - Size: 4KB
 - Uses direct AXI-Lite Slave interface logic.
 
@@ -294,4 +299,5 @@ The processor uses a unified address space for instructions and data:
 | `0x0000_0000` - `0x03FF_FFFF` | Memory (RAM)  | Program & Data (64MB) |
 | `0x0400_0000` - `0x0400_0FFF` | UART          | Serial Communication  |
 | `0x0400_1000` - `0x0400_1FFF` | GPIO          | General Purpose I/O   |
+| `0x0400_2000` - `0x0400_2FFF` | Timer         | 64-bit Timer/Counter    |
 
