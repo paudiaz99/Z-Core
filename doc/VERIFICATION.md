@@ -391,6 +391,28 @@ vvp sim/z_core_control_u_tb.vvp
 gtkwave sim/z_core_control_u_tb.vcd
 ```
 
+### Trap regression (exceptions and interrupts)
+
+A dedicated trap-focused testbench (`z_core_trap_tb.sv`) exercises exceptions (ECALL, EBREAK, illegal instruction) and interrupts (MSI, MTI, MEI), plus masking, priority, and back-to-back stress. Use it for fast CI on trap-related changes.
+
+| Recipe | Command | Use case |
+|--------|---------|----------|
+| **Quick** (trap only) | `make run TB_FILE=z_core_trap_tb.sv` | CI on CSR/trap RTL; ~25 checks, ~45k cycles |
+| **Full** (control + trap) | Run control TB then trap TB (see below) | Full regression including ISA + traps |
+
+From the `tb/` directory:
+
+```bash
+# Quick: trap regression only
+make run TB_FILE=z_core_trap_tb.sv
+
+# Full: main control TB then trap TB
+make run TB_FILE=z_core_control_u_tb.sv
+make run TB_FILE=z_core_trap_tb.sv
+```
+
+Use `SIM=iverilog` or `SIM=questa` if needed (e.g. `make run TB_FILE=z_core_trap_tb.sv SIM=iverilog`). See `doc/EXCEPTIONS_AND_INTERRUPTS.md` for trap coverage and design decisions.
+
 ### Expected Output
 
 ```

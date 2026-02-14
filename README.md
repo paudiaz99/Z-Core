@@ -271,6 +271,7 @@ Detailed documentation is available in the `doc/` directory:
 - **[GPIO](doc/GPIO.md)** - Bidirectional GPIO module
 - **[UART](doc/UART.md)** - Serial UART module
 - **[Timer](doc/TIMER.md)** - Serial Timer module
+- **[Exceptions & Interrupts](doc/EXCEPTIONS_AND_INTERRUPTS.md)** - M-mode trap handling details
 - **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
 
 ## Roadmap
@@ -284,10 +285,11 @@ Detailed documentation is available in the `doc/` directory:
 - [x] M extension (multiply/divide)
 - [x] Instruction cache (simple direct-mapped, 1-word lines)
 - [x] **Timer**
-- [ ] Interrupt support
+- [x] **Interrupt support**
+- [x] **CSR Unit & Zicsr extension (CSR instructions)**
+- [x] **Exception / Trap Handling (Illegal Inst, ECALL, EBREAK)**
 - [ ] VGA Controller
-- [ ] CSR Unit & Zicsr extension (CSR instructions)
-- [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
+- [ ] RISC-V A extension (atomic instructions)
 - [ ] RISC-V C extension (compressed instructions)
 - [ ] Branch prediction
 - [ ] Fix all lint warnings
