@@ -53,7 +53,9 @@ module axil_timer #(
     output wire                   s_axil_rvalid,
     input  wire                   s_axil_rready,
 
-    input wire ext_event_i
+    input wire ext_event_i,
+
+    output wire timer_irq_o
 
 );
 
@@ -62,9 +64,11 @@ module axil_timer #(
     // Memory Mapped Registers
     // =========================================================================
     
-    wire [DATA_WIDTH-1:0] timer_lo;   // 0x0 -> Timer Low (Register inside the timer)
-    wire [DATA_WIDTH-1:0] timer_hi;   // 0x4 -> Timer High (Register inside the timer)
-    reg [DATA_WIDTH-1:0] timer_ctrl;  // 0x8 -> Timer Control
+    wire [DATA_WIDTH-1:0] timer_lo;       // 0x00 -> Timer Low  (counter inside the timer)
+    wire [DATA_WIDTH-1:0] timer_hi;       // 0x04 -> Timer High (counter inside the timer)
+    reg  [DATA_WIDTH-1:0] timer_ctrl;     // 0x08 -> Timer Control
+    reg  [DATA_WIDTH-1:0] timecmp_lo_r;   // 0x0C -> Compare Low  (new)
+    reg  [DATA_WIDTH-1:0] timecmp_hi_r;   // 0x10 -> Compare High (new)
 
     // =========================================================================
     // Internal Wires and Registers
@@ -127,6 +131,8 @@ module axil_timer #(
             axi_wdata          <= {DATA_WIDTH{1'b0}};
             axi_wstrb          <= {STRB_WIDTH{1'b0}};
             timer_ctrl         <= {DATA_WIDTH{1'b0}};
+            timecmp_lo_r       <= {DATA_WIDTH{1'b1}}; // Max value so IRQ is not immediately asserted
+            timecmp_hi_r       <= {DATA_WIDTH{1'b1}};
         end else begin
             // Address Handshake
             if (~s_axil_awready_reg && s_axil_awvalid && ~axi_awready_flag && ~s_axil_bvalid_reg) begin
@@ -153,21 +159,23 @@ module axil_timer #(
                 axi_awready_flag  <= 1'b0;
                 axi_wready_flag   <= 1'b0;
 
-                // Decode Address
-                // 0x00: Timer Low, 0x04: Timer High
-                // 0x08: Timer Control
-                
-                case (axi_awaddr[3:2])
-                    2'b00: begin // 0x00: timer_lo[31:0]
+                case (axi_awaddr[4:2])
+                    3'b000: begin // 0x00: timer_lo[31:0]
                         timer_lo_load_val <= axi_wdata;
                         load_lo <= 1'b1;
                     end
-                    2'b01: begin // 0x04: timer_hi[63:32]
+                    3'b001: begin // 0x04: timer_hi[63:32]
                         timer_hi_load_val <= axi_wdata;
                         load_hi <= 1'b1;
                     end
-                    2'b10: begin // 0x08: timer_ctrl[31:0]
+                    3'b010: begin // 0x08: timer_ctrl[31:0]
                         timer_ctrl <= axi_wdata;
+                    end
+                    3'b011: begin // 0x0C: timecmp_lo[31:0]
+                        timecmp_lo_r <= axi_wdata;
+                    end
+                    3'b100: begin // 0x10: timecmp_hi[63:32]
+                        timecmp_hi_r <= axi_wdata;
                     end
                 endcase
             end else begin
@@ -194,17 +202,12 @@ module axil_timer #(
             if (~s_axil_arready_reg && s_axil_arvalid && ~s_axil_rvalid_reg) begin
                 s_axil_arready_reg <= 1'b1;
                 
-                // Read Logic
-                case (s_axil_araddr[3:2])
-                    2'b00: begin // 0x00: Read DATA[31:0] (Sampled from IO Pins)
-                        s_axil_rdata_reg <= timer_lo;
-                    end
-                    2'b01: begin // 0x04: Read DATA[63:32]
-                        s_axil_rdata_reg <= timer_hi;
-                    end
-                    2'b10: begin // 0x08: Read DIR[31:0]
-                        s_axil_rdata_reg <= timer_ctrl;
-                    end
+                case (s_axil_araddr[4:2])
+                    3'b000: s_axil_rdata_reg <= timer_lo;       // 0x00
+                    3'b001: s_axil_rdata_reg <= timer_hi;       // 0x04
+                    3'b010: s_axil_rdata_reg <= timer_ctrl;     // 0x08
+                    3'b011: s_axil_rdata_reg <= timecmp_lo_r;   // 0x0C
+                    3'b100: s_axil_rdata_reg <= timecmp_hi_r;   // 0x10
                     default: s_axil_rdata_reg <= {DATA_WIDTH{1'b0}};
                 endcase
             end else begin
@@ -225,8 +228,9 @@ module axil_timer #(
     // 0 -> Enable/Disable Timer
     // 1 -> Count Up / Count Down
     // 2 -> Timer / Counter Mode (0: Timer, 1: Counter)
-    // 3 -> Interrupt Enable (THIS IS NOT IMPLEMENTED YET)
-    // 4 -> Interrupt Flag (THIS IS NOT IMPLEMENTED YET)
+    // 3 -> Interrupt Enable (gates timer_irq_o)
+
+    assign timer_irq_o = timer_ctrl[3] & ({timer_hi, timer_lo} >= {timecmp_hi_r, timecmp_lo_r});
 
     // External Signal Edge Detection
     reg ext_event_r;
