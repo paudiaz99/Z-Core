@@ -146,7 +146,6 @@ reg fetch_wait;
 reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
 reg mem_op_pending;
 reg squash_now;  // Set when JAL/JALR just entered id_ex, to squash instruction after
-reg flush_r;     // Registered flush - set for one cycle after branch/jump detected
 
 
 // ##################################################
@@ -170,6 +169,8 @@ reg [63:0] perf_pipeline_flush;
 reg [31:0] if_id_pc;
 reg [31:0] if_id_ir;
 reg        if_id_valid;
+reg        if_id_branch_taken_pred;
+reg [31:0] if_id_branch_target_pred;
 
 // --- Skid Buffer for Fetch ---
 reg [31:0] fetch_buffer_ir;
@@ -191,6 +192,8 @@ reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc, id_ex_is_d
 reg        id_ex_is_i_alu;
 reg        id_ex_reg_write;
 reg        id_ex_valid;
+reg        id_ex_branch_taken_pred;
+reg [31:0] id_ex_branch_target_pred;
 
 // --- EX/MEM Pipeline Register ---
 reg [31:0] ex_mem_alu_result;
@@ -434,9 +437,33 @@ wire stall = load_use_hazard || ex_stall;
 wire branch_taken = id_ex_valid && id_ex_is_branch && alu_branch;
 wire jump_taken   = id_ex_valid && (id_ex_is_jal || id_ex_is_jalr);
 
+wire branch_taken_pred;
+wire id_ex_branch_taken_pred_valid = id_ex_branch_taken_pred & id_ex_valid;
+wire [31:0] branch_target_pred;
+wire is_branch = id_ex_is_branch & id_ex_valid;
+reg branch_target_misspredict;
+
+wire [31:0] branch_predictor_addr = is_branch ? id_ex_pc : PC;
+
+z_core_branch_pred branch_predictor(
+    .clk(clk),
+    .rstn(rstn),
+    .branch_taken(branch_taken),
+    .is_branch(is_branch),
+    .inst_addr(branch_predictor_addr),
+    .branch_target(branch_target),
+    .branch_taken_pred(branch_taken_pred),
+    .branch_target_pred(branch_target_pred)
+);
+
+always @(branch_target_misspredict, id_ex_branch_target_pred, branch_target) begin
+    branch_target_misspredict = (id_ex_branch_target_pred != branch_target);
+end
+
+
 // Flush = control transfer detected in EX stage
 // Need to squash the instruction that was in IF/ID when JAL entered ID/EX
-wire flush        = branch_taken || jump_taken;
+wire flush        = (branch_taken ^ id_ex_branch_taken_pred_valid) || jump_taken || (branch_taken & branch_target_misspredict);
 
 // Track if we need to squash the NEXT instruction entering id_ex
 // This is set when the CURRENT if_id contains a jump being decoded into id_ex
@@ -451,7 +478,7 @@ wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
 // ##################################################
 
 // Cache address: use fetch_pc during write, otherwise use PC or branch/jump targets
-assign instr_cache_address = instr_cache_wen ? fetch_pc : (branch_taken ? branch_target : (jump_taken ? jalr_target : PC));
+assign instr_cache_address = instr_cache_wen ? fetch_pc : ((branch_taken && flush) ? branch_target : (jump_taken ? jalr_target : PC));
 
 // New instruction arriving this cycle (from any source)
 wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
@@ -466,14 +493,16 @@ always @(posedge clk) begin
         if_id_ir <= 32'h00000013;  // NOP
         if_id_pc <= 32'b0;
         if_id_valid <= 1'b0;
+        if_id_branch_taken_pred <= 1'b0;
+        if_id_branch_target_pred <= 32'b0;
         fetch_buffer_valid <= 1'b0;
         fetch_buffer_ir <= 32'b0;
         fetch_buffer_pc <= 32'b0;
         instr_cache_wen <= 1'b0;
     end else begin        
-        // Cache write enable is a single-cycle pulse
         instr_cache_wen <= 1'b0;
-        
+        if_id_branch_taken_pred <= branch_taken_pred;
+        if_id_branch_target_pred <= branch_target_pred;
         if (flush) begin
             // Flush: invalidate IF/ID (delay slot) and redirect PC to target
             perf_pipeline_flush <= perf_pipeline_flush + 1;
@@ -481,7 +510,7 @@ always @(posedge clk) begin
             if_id_ir <= 32'h00000013;
             // Also invalidate the fetch buffer to prevent stale instructions from being loaded
             fetch_buffer_valid <= 1'b0;
-            PC <= id_ex_is_jalr ? jalr_target : branch_target;
+            PC <= id_ex_is_jalr ? jalr_target : (id_ex_branch_taken_pred ? (id_ex_pc + 4) : branch_target);
             fetch_wait <= 1'b0;
         end else begin            
             // Clear if_id_valid when consumed (unless new instruction arriving)
@@ -514,14 +543,14 @@ always @(posedge clk) begin
                 end
                 
                 // Advance PC from the address we just fetched and clear flags
-                PC <= fetch_pc + 4;
+                PC <= branch_taken_pred ? branch_target_pred : fetch_pc + 4;
                 fetch_wait <= 1'b0;
             end else if (!fetch_wait && !stall && (instr_cache_valid && instr_cache_cache_hit) && !fetch_buffer_valid) begin
                 // Cache hit: load instruction and advance PC
                 if_id_ir <= instr_cache_data_out;
-                if_id_pc <= PC;
+                if_id_pc <= instr_cache_address;
                 if_id_valid <= 1'b1;
-                PC <= PC + 4;
+                PC <= branch_taken_pred ? branch_target_pred : PC + 4;
                 perf_inst_cache_hits <= perf_inst_cache_hits + 1;
             end else if (!fetch_wait && !mem_op_pending && !mem_busy &&
                          !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
@@ -573,6 +602,8 @@ always @(posedge clk) begin
         id_ex_is_i_alu <= 1'b0;
         id_ex_is_div <= 1'b0;
         id_ex_reg_write <= 1'b0;
+        id_ex_branch_taken_pred <= 1'b0;
+        id_ex_branch_target_pred <= 32'b0;
     end else if (flush || (load_use_hazard && !ex_stall)) begin
         // Insert bubble - flush handles current cycle squash
         // For load_use_hazard: only insert bubble if EX stage can accept the load
@@ -587,6 +618,8 @@ always @(posedge clk) begin
         id_ex_is_lui <= 1'b0;
         id_ex_is_auipc <= 1'b0;
         id_ex_is_div <= 1'b0;
+        id_ex_branch_taken_pred <= 1'b0;
+        id_ex_branch_target_pred <= 32'b0;
         // Set squash_now for delayed squash on next cycle
         if (flush) squash_now <= 1'b1;
     end else if (squash_now) begin
@@ -614,6 +647,8 @@ always @(posedge clk) begin
         id_ex_is_i_alu <= dec_is_i_alu;
         id_ex_is_div <= dec_is_div;
         id_ex_reg_write <= dec_reg_write;
+        id_ex_branch_taken_pred <= if_id_branch_taken_pred;
+        id_ex_branch_target_pred <= if_id_branch_target_pred;
         id_ex_valid <= 1'b1;
         // Only set squash_now for JAL/JALR detected in if_id (unconditional jumps)
         // Branch squash is handled by flush -> squash_now path
