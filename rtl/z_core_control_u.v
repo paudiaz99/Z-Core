@@ -442,7 +442,6 @@ wire [31:0] branch_target_pred;
 wire is_branch = id_ex_is_branch & id_ex_valid;
 wire branch_target_misspredict;
 
-wire [31:0] branch_predictor_addr = (is_branch || is_jump) ? id_ex_pc : PC;
 wire [31:0] branch_predictor_target = is_branch ? branch_target : (is_jump ? jump_target : 32'b0);
 
 z_core_branch_pred branch_predictor(
@@ -450,8 +449,9 @@ z_core_branch_pred branch_predictor(
     .rstn(rstn),
     .branch_taken(branch_taken || is_jump),
     .is_branch(is_branch || is_jump),
-    .inst_addr(branch_predictor_addr),
-    .branch_target(branch_predictor_target),
+    .inst_addr_wr(id_ex_pc),
+    .branch_target_wr(branch_predictor_target),
+    .inst_addr_rd(PC),
     .branch_taken_pred(branch_taken_pred),
     .branch_target_pred(branch_target_pred)
 );
