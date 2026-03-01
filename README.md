@@ -42,7 +42,7 @@
 </div>
 
 > [!WARNING]
-> The SoC diagram does not include the Timer module.
+> The SoC diagram does not include neither the Timer and Branch Predictor modules.
 
 ## Z-Core RV32IM Architecture
 <div align="center">
@@ -283,13 +283,13 @@ Detailed documentation is available in the `doc/` directory:
 - [x] FPGA synthesis and validation **[Z-Core-FPGA repository](https://github.com/paudiaz99/Z-Core-FPGA)** 
 - [x] M extension (multiply/divide)
 - [x] Instruction cache (simple direct-mapped, 1-word lines)
-- [x] **Timer**
+- [x] Timer
+- [x] **Branch prediction**
 - [ ] Interrupt support
 - [ ] VGA Controller
 - [ ] CSR Unit & Zicsr extension (CSR instructions)
 - [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
 - [ ] RISC-V C extension (compressed instructions)
-- [ ] Branch prediction
 - [ ] Fix all lint warnings
 
 ## Contributing

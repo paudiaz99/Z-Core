@@ -31,8 +31,9 @@ module z_core_branch_pred #(
     input rstn,
     input branch_taken,
     input is_branch,
-    input [ADDR_WIDTH-1:0] inst_addr,
-    input [ADDR_WIDTH-1:0] branch_target,
+    input [ADDR_WIDTH-1:0] inst_addr_wr,
+    input [ADDR_WIDTH-1:0] branch_target_wr,
+    input [ADDR_WIDTH-1:0] inst_addr_rd,
 
     output wire branch_taken_pred,
     output wire [ADDR_WIDTH-1:0] branch_target_pred
@@ -49,12 +50,15 @@ reg [ADDR_WIDTH-1:0] branch_target_buffer [TABLE_DEPTH-1:0]; // Contains target 
 reg [BRANCH_TABLE_TAG_WIDTH-1:0] branch_table_tag [TABLE_DEPTH-1:0];
 reg [1:0] branch_history_table [TABLE_DEPTH-1:0]; // Contains predicted branch bits (current_state)
 
-wire [BRANCH_TABLE_TAG_WIDTH-1:0] tag = inst_addr[ADDR_WIDTH-1:ADDR_WIDTH-BRANCH_TABLE_TAG_WIDTH];
-wire [BRANCH_TARGET_BUFF_ADDR_WIDTH-1:0] addr = inst_addr[BRANCH_TARGET_BUFF_ADDR_WIDTH+1:2];
+wire [BRANCH_TABLE_TAG_WIDTH-1:0] tag_wr = inst_addr_wr[ADDR_WIDTH-1:ADDR_WIDTH-BRANCH_TABLE_TAG_WIDTH];
+wire [BRANCH_TARGET_BUFF_ADDR_WIDTH-1:0] addr_wr = inst_addr_wr[BRANCH_TARGET_BUFF_ADDR_WIDTH+1:2];
+
+wire [BRANCH_TABLE_TAG_WIDTH-1:0] tag_rd = inst_addr_rd[ADDR_WIDTH-1:ADDR_WIDTH-BRANCH_TABLE_TAG_WIDTH];
+wire [BRANCH_TARGET_BUFF_ADDR_WIDTH-1:0] addr_rd = inst_addr_rd[BRANCH_TARGET_BUFF_ADDR_WIDTH+1:2];
 
 
 always @* begin
-    case (branch_history_table[addr])
+    case (branch_history_table[addr_wr])
         STRONG_TAKEN:       next_state = branch_taken ? STRONG_TAKEN : WEAK_TAKEN;
         WEAK_TAKEN:         next_state = branch_taken ? STRONG_TAKEN : STRONG_NOT_TAKEN;
         WEAK_NOT_TAKEN:     next_state = branch_taken ? STRONG_TAKEN : STRONG_NOT_TAKEN;
@@ -69,13 +73,13 @@ always @(posedge clk) begin
             branch_target_buffer[j] <= {ADDR_WIDTH{1'b0}};
         end
     end else if(is_branch) begin
-        branch_target_buffer[addr] <= branch_target;
-        branch_history_table[addr] <= next_state;
-        branch_table_tag[addr] <= tag;
+        branch_target_buffer[addr_wr] <= branch_target_wr;
+        branch_history_table[addr_wr] <= next_state;
+        branch_table_tag[addr_wr] <= tag_wr;
     end
 end
 
-assign branch_taken_pred = branch_history_table[addr][1] && (tag == branch_table_tag[addr]) && ~is_branch;
-assign branch_target_pred = branch_target_buffer[addr];
+assign branch_taken_pred = branch_history_table[addr_rd][1] && (tag_rd == branch_table_tag[addr_rd]);
+assign branch_target_pred = branch_target_buffer[addr_rd];
 
 endmodule

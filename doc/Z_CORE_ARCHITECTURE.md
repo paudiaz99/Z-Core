@@ -24,6 +24,7 @@ The **Control Unit** is the top-level module of the processor core. It orchestra
 - **Forwarding Unit**: Solves Data Hazards by forwarding results from EX/MEM and MEM/WB stages to the ID/EX stage.
 - **System Signals**: Handles reset logic and halt signals (for simulation/verification).
 - **Instruction Cache**: Z-Core includes a parameterizable direct-mapped instruction cache (`rtl/z_core_instr_cache.v`) used by the fetch stage to reduce repeated AXI-Lite instruction fetches on short loops and hot code paths. At a high level it stores recently fetched 32-bit instructions improving instruction throughput.
+- **Branch Predictor**: A Two-Bit branch predictor is implemented. It tracks recent branches and jumps in order to predict their future behaviour. The predictor includes a Branch History Table (BHT) and a Branch Target Buffer (BTB), these are direct-mapped tables that store the predictor bits and recent branch/jump addresses. 
 
 The following components are **instantiated internally** within the Control Unit structure:
 
