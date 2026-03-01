@@ -189,7 +189,7 @@ make -f ../tb/Makefile run SIM=dsim debug=1
 |         ALL TESTS PASSED SUCCESSFULLY                     |
 |  Test Duration: 743825 ns                                 |
 |  Clock Cycles:  74382                                     |
-|  Instructions:  74382                                     |
+|  Instructions:  59801                                     |
 |  Writes=         81, Reads=         28                    |
 |___________________________________________________________|
 
