@@ -82,6 +82,7 @@ Z-Core/
 │   ├── z_core_mult_unit.v     # Multiplier unit top level
 │   ├── z_core_div_unit.v      # Divider unit
 │   ├── z_core_instr_cache.v   # Instruction cache
+│   ├── z_core_branch_pred.v   # Branch Predictor
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
 │   ├── axil_master.v          # AXI-Lite Master
 │   ├── axil_uart.v            # UART Module
@@ -107,7 +108,8 @@ Z-Core/
 │   ├── z_core_div_unit_tb.v   # Divider unit test
 │   ├── axil_gpio_tb.v         # GPIO testbench
 │   ├── axil_timer_tb.v        # Timer testbench
-│   ├── z_core_instr_cache_tb.v # Instruction cache testbench
+│   ├── z_core_instr_cache_tb.sv # Instruction cache testbench
+│   ├── z_core_branch_pred_tb.sv # Branch Predictor testbench
 │   └── z_core_riscof_tb.sv    # RISCOF compliance testbench
 │
 └── doc/                       # Documentation
@@ -287,6 +289,7 @@ Detailed documentation is available in the `doc/` directory:
 - [x] **Branch prediction**
 - [ ] Interrupt support
 - [ ] VGA Controller
+- [ ] Data Cache
 - [ ] CSR Unit & Zicsr extension (CSR instructions)
 - [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
 - [ ] RISC-V C extension (compressed instructions)
@@ -300,7 +303,7 @@ Contributions are welcome. Please feel free to submit a Pull Request.
 
 - Any feature in the roadmap.
 - AXI4 interface for memory, replacing the current AXI4-Lite interface.
-- Extensive verification of corner cases and error handling.
+- Extensive verification of corner cases and error handling. UVM Verification is welcomed.
 - Any cool feature you can think of!:D
 
 1. Fork the repository
