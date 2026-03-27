@@ -19,6 +19,8 @@ The `axil_timer` module provides a 64-bit programmable timer/counter accessible 
 | 0x00   | TIMER_LO    | Timer Low [31:0]         | R/W    |
 | 0x04   | TIMER_HI    | Timer High [63:32]       | R/W    |
 | 0x08   | TIMER_CTRL  | Timer Control Register   | R/W    |
+| 0x0C   | TIMECMP_LO  | Compare Low [31:0]       | R/W    |
+| 0x10   | TIMECMP_HI  | Compare High [63:32]     | R/W    |
 
 ### TIMER Registers (0x00, 0x04)
 - **Write**: Loads the timer/counter with a specific value.
@@ -32,8 +34,20 @@ The `axil_timer` module provides a 64-bit programmable timer/counter accessible 
 | 0   | ENABLE       | **1**: Enable Timer/Counter<br>**0**: Disable (Stop) |
 | 1   | DIR          | **1**: Count Up<br>**0**: Count Down |
 | 2   | MODE         | **1**: Counter Mode (External Event)<br>**0**: Timer Mode (Internal Clock) |
-| 3   | IRQ_EN       | *Reserved (Interrupt Enable - Not Implemented)* |
-| 4   | IRQ_FLAG     | *Reserved (Interrupt Flag - Not Implemented)* |
+| 3   | IRQ_EN       | **1**: Enable compare-match interrupt output<br>**0**: Interrupt gated off |
+
+### TIMECMP Registers (0x0C, 0x10)
+- **Write**: Sets the 64-bit compare value (split across low and high registers).
+- **Read**: Returns the current compare value.
+- **Default**: `0xFFFFFFFF_FFFFFFFF` on reset (no spurious interrupt on startup).
+
+### Compare-Match Interrupt
+
+When `IRQ_EN` (TIMER_CTRL bit 3) is set, the `timer_irq_o` output asserts whenever `{TIMER_HI, TIMER_LO} >= {TIMECMP_HI, TIMECMP_LO}`. This output is wired to the CPU's `mtip` (Machine Timer Interrupt Pending) input.
+
+To clear the interrupt, software should either:
+- Set TIMECMP to a value greater than the current timer value, or
+- Clear `IRQ_EN` in TIMER_CTRL.
 
 ## Modes of Operation
 
@@ -55,7 +69,8 @@ Standard AXI-Lite slave interface with:
 
 ### External Signals
 ```verilog
-input wire ext_event_i  // External event input for Counter Mode
+input  wire ext_event_i   // External event input for Counter Mode
+output wire timer_irq_o   // Compare-match interrupt output (active high)
 ```
 
 ## Usage Examples

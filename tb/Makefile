@@ -10,6 +10,7 @@ TB_FILES_ALL := axil_gpio_tb.v \
 								z_core_alu_ctrl_tb.v \
 								z_core_alu_tb.v \
 								z_core_control_u_tb.sv \
+								z_core_trap_tb.sv \
 								z_core_decoder_tb.v \
 								z_core_div_unit_tb.v \
 								z_core_reg_file_tb.v \
