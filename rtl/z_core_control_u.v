@@ -57,8 +57,10 @@ module z_core_control_u #(
     input  wire                   m_axil_rvalid,
     output wire                   m_axil_rready,
 
-    // Halt signal (ECALL/EBREAK detected - for RISCOF signature dump)
-    output wire                   halt
+    // External Interrupt Inputs
+    input  wire                   meip,    // Machine External Interrupt Pending
+    input  wire                   mtip,    // Machine Timer Interrupt Pending
+    input  wire                   msip     // Machine Software Interrupt Pending
 );
 
 // **************************************************
@@ -194,6 +196,18 @@ reg        id_ex_valid;
 reg        id_ex_branch_taken_pred;
 reg [31:0] id_ex_branch_target_pred;
 
+// --- ID/EX CSR Pipeline Fields (Zicsr) ---
+reg        id_ex_is_csr;
+reg        id_ex_is_mret;
+reg [11:0] id_ex_csr_addr;
+reg [4:0]  id_ex_csr_zimm;
+
+// --- ID/EX Exception Pipeline Fields ---
+reg        id_ex_is_ecall;
+reg        id_ex_is_ebreak;
+reg        id_ex_is_illegal;
+reg [31:0] id_ex_ir;         // Raw instruction (for mtval on illegal insn)
+
 // --- EX/MEM Pipeline Register ---
 reg [31:0] ex_mem_alu_result;
 reg [31:0] ex_mem_rs2_data;
@@ -247,6 +261,8 @@ wire [4:0]  dec_rs1, dec_rs2, dec_rd;
 wire [31:0] dec_Iimm, dec_Simm, dec_Uimm, dec_Bimm, dec_Jimm;
 wire [2:0]  dec_funct3;
 wire [6:0]  dec_funct7;
+wire [11:0] dec_csr_addr;
+wire [4:0]  dec_csr_zimm;
 
 z_core_decoder decoder (
     .inst(if_id_ir),
@@ -260,7 +276,9 @@ z_core_decoder decoder (
     .Bimm(dec_Bimm),
     .Jimm(dec_Jimm),
     .funct3(dec_funct3),
-    .funct7(dec_funct7)
+    .funct7(dec_funct7),
+    .csr_addr(dec_csr_addr),
+    .csr_zimm(dec_csr_zimm)
 );
 
 // ##################################################
@@ -288,8 +306,21 @@ wire dec_is_auipc  = (dec_op == AUIPC_INST);
 wire dec_is_r_type = (dec_op == R_INST);
 wire dec_is_i_alu  = (dec_op == I_INST);
 wire dec_is_div    = (dec_op == R_INST) & (dec_alu_op >= 5'd20) & (dec_alu_op <= 5'd23);
+
+// Zicsr / System instruction detection
+wire dec_is_csr    = (dec_op == SYSTEM_INST) && (dec_funct3 != 3'b000);
+wire dec_is_mret   = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h302);
+
+// Illegal: opcode doesn't match any known type (0x00000000 is treated as NOP)
+wire dec_opcode_valid = dec_is_load | dec_is_store | dec_is_branch |
+                        dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc |
+                        dec_is_r_type | dec_is_i_alu | dec_is_csr |
+                        dec_is_mret | dec_is_ecall | dec_is_ebreak;
+wire dec_is_illegal = if_id_valid && !dec_opcode_valid && (if_id_ir != 32'h0);
+
 wire dec_reg_write = dec_is_r_type | dec_is_i_alu | dec_is_load | 
-                     dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc;
+                     dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc |
+                     dec_is_csr;
 
 // Immediate mux
 wire [31:0] dec_imm = dec_is_i_alu | dec_is_load | dec_is_jalr ? dec_Iimm :
@@ -407,12 +438,75 @@ wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
 // Memory operation in progress - stall whole pipeline  
 wire mem_stall = mem_op_pending && !mem_ready;
 
-// System Instruction Detection (for RISCOF halt signal)
+// System Instruction Detection
 wire dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h000);
 wire dec_is_ebreak = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
 
-// Halt signal for RISCOF compliance testing (ECALL/EBREAK detection in ID stage)
-assign halt = if_id_valid && (dec_is_ecall || dec_is_ebreak);
+// ##################################################
+//     CSR FILE INSTANTIATION (Zicsr Extension)
+// ##################################################
+
+wire [31:0] csr_read_data;
+reg  [31:0] csr_write_data;
+wire        csr_wen;
+
+// CSR source: rs1 for register variants, zero-extended zimm for immediate
+wire [31:0] csr_src = id_ex_funct3[2] ? {27'b0, id_ex_csr_zimm} : fwd_rs1_data;
+
+// Write suppression per §2.8: CSRRS/CSRRC with rs1=x0 or zimm=0 → no write
+wire csr_src_is_zero = id_ex_funct3[2] ? (id_ex_csr_zimm == 5'b0) : (id_ex_rs1_addr == 5'b0);
+assign csr_wen = id_ex_valid && id_ex_is_csr && !trap_enter_r &&
+                 (id_ex_funct3[1:0] == 2'b01 || !csr_src_is_zero);
+
+always @(*) begin
+    case (id_ex_funct3[1:0])
+        2'b01:   csr_write_data = csr_src;                     // CSRRW / CSRRWI
+        2'b10:   csr_write_data = csr_read_data | csr_src;     // CSRRS / CSRRSI
+        2'b11:   csr_write_data = csr_read_data & ~csr_src;    // CSRRC / CSRRCI
+        default: csr_write_data = csr_src;                     // Fallback
+    endcase
+end
+
+reg  trap_enter_r;
+reg  [31:0] trap_mepc_r;
+reg  [31:0] trap_mcause_r;
+reg  [31:0] trap_mtval_r;
+wire mret_in_ex = id_ex_valid && id_ex_is_mret;
+
+wire        csr_mstatus_mie;
+wire [31:0] csr_mtvec;
+wire [31:0] csr_mepc;
+wire        csr_irq_pending;
+wire        csr_mie_meie;
+wire        csr_mie_mtie;
+wire        csr_mie_msie;
+
+z_core_csr_file #(
+    .DATA_WIDTH(DATA_WIDTH)
+) u_csr_file (
+    .clk(clk),
+    .rstn(rstn),
+    .csr_addr(id_ex_csr_addr),
+    .csr_write_data(csr_write_data),
+    .csr_wen(csr_wen),
+    .csr_read_data(csr_read_data),
+    .trap_enter(trap_enter_r),
+    .trap_mepc(trap_mepc_r),
+    .trap_mcause(trap_mcause_r),
+    .trap_mtval(trap_mtval_r),
+    .mret_exec(mret_in_ex),
+    .meip(meip),
+    .mtip(mtip),
+    .msip(msip),
+    .instret_pulse(mem_wb_valid),
+    .mstatus_mie(csr_mstatus_mie),
+    .mtvec_out(csr_mtvec),
+    .mepc_out(csr_mepc),
+    .irq_pending(csr_irq_pending),
+    .mie_meie_out(csr_mie_meie),
+    .mie_mtie_out(csr_mie_mtie),
+    .mie_msie_out(csr_mie_msie)
+);
 
 
 // Need to stall EX stage if:
@@ -459,10 +553,10 @@ z_core_branch_pred branch_predictor(
 assign branch_target_misspredict = is_branch ? (id_ex_branch_target_pred != branch_target) : (is_jump ? (id_ex_branch_target_pred != jump_target) : 1'b0);
 
 
-// Flush = control transfer detected in EX stage
 wire jump_misspredict = (id_ex_branch_taken_pred_valid ^ is_jump);
 wire branch_misspredict = (branch_taken ^ id_ex_branch_taken_pred_valid);
-wire flush        = (branch_taken & branch_target_misspredict) || (is_jump ? (jump_misspredict || branch_target_misspredict) : branch_misspredict);
+wire prediction_flush = (branch_taken & branch_target_misspredict) || (is_jump ? (jump_misspredict || branch_target_misspredict) : branch_misspredict);
+wire flush = prediction_flush || trap_enter_r || mret_in_ex;
 
 // Track if we need to squash the NEXT instruction entering id_ex
 // This is set when the CURRENT if_id contains a jump being decoded into id_ex
@@ -477,8 +571,13 @@ wire [31:0] jump_target   = id_ex_is_jalr ? jalr_target : branch_target;
 //              PIPELINE STAGE: FETCH
 // ##################################################
 
-// Cache address: use fetch_pc during write, otherwise use PC or branch/jump targets
-assign instr_cache_address = instr_cache_wen ? fetch_pc : ((branch_taken && flush) ? branch_target : ((is_jump && flush) ? jump_target : PC));
+// Cache address priority: write > trap > MRET > misprediction > normal PC
+assign instr_cache_address = instr_cache_wen          ? fetch_pc :
+                             trap_enter_r              ? csr_mtvec :
+                             mret_in_ex                ? csr_mepc :
+                             (branch_taken && flush)   ? branch_target :
+                             (is_jump && flush)        ? jump_target :
+                             PC;
 
 // New instruction arriving this cycle (from any source)
 wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
@@ -499,7 +598,7 @@ always @(posedge clk) begin
         fetch_buffer_ir <= 32'b0;
         fetch_buffer_pc <= 32'b0;
         instr_cache_wen <= 1'b0;
-    end else begin        
+    end else begin
         instr_cache_wen <= 1'b0;
         if (flush) begin
             // Flush: invalidate IF/ID (delay slot) and redirect PC to target
@@ -508,7 +607,12 @@ always @(posedge clk) begin
             if_id_ir <= 32'h00000013;
             // Also invalidate the fetch buffer to prevent stale instructions from being loaded
             fetch_buffer_valid <= 1'b0;
-            PC <= is_jump ? jump_target : (id_ex_branch_taken_pred ? (id_ex_pc + 4) : branch_target);
+            // PC redirect priority: trap > MRET > jump/branch misprediction
+            PC <= trap_enter_r           ? csr_mtvec :
+                  mret_in_ex             ? csr_mepc :
+                  is_jump                ? jump_target :
+                  id_ex_branch_taken_pred ? (id_ex_pc + 4) :
+                  branch_target;
             fetch_wait <= 1'b0;
         end else begin            
             // Clear if_id_valid when consumed (unless new instruction arriving)
@@ -607,6 +711,14 @@ always @(posedge clk) begin
         id_ex_reg_write <= 1'b0;
         id_ex_branch_taken_pred <= 1'b0;
         id_ex_branch_target_pred <= 32'b0;
+        id_ex_is_csr <= 1'b0;
+        id_ex_is_mret <= 1'b0;
+        id_ex_csr_addr <= 12'b0;
+        id_ex_csr_zimm <= 5'b0;
+        id_ex_is_ecall <= 1'b0;
+        id_ex_is_ebreak <= 1'b0;
+        id_ex_is_illegal <= 1'b0;
+        id_ex_ir <= 32'b0;
     end else if (flush || (load_use_hazard && !ex_stall)) begin
         // Insert bubble - flush handles current cycle squash
         // For load_use_hazard: only insert bubble if EX stage can accept the load
@@ -622,6 +734,11 @@ always @(posedge clk) begin
         id_ex_is_div <= 1'b0;
         id_ex_branch_taken_pred <= 1'b0;
         id_ex_branch_target_pred <= 32'b0;
+        id_ex_is_csr <= 1'b0;
+        id_ex_is_mret <= 1'b0;
+        id_ex_is_ecall <= 1'b0;
+        id_ex_is_ebreak <= 1'b0;
+        id_ex_is_illegal <= 1'b0;
     end else if (!stall && if_id_valid) begin
         id_ex_pc <= if_id_pc;
         id_ex_rs1_data <= dec_fwd_rs1;
@@ -641,6 +758,14 @@ always @(posedge clk) begin
         id_ex_is_auipc <= dec_is_auipc;
         id_ex_is_i_alu <= dec_is_i_alu;
         id_ex_is_div <= dec_is_div;
+        id_ex_is_csr <= dec_is_csr;
+        id_ex_is_mret <= dec_is_mret;
+        id_ex_csr_addr <= dec_csr_addr;
+        id_ex_csr_zimm <= dec_csr_zimm;
+        id_ex_is_ecall <= dec_is_ecall;
+        id_ex_is_ebreak <= dec_is_ebreak;
+        id_ex_is_illegal <= dec_is_illegal;
+        id_ex_ir <= if_id_ir;
         id_ex_reg_write <= dec_reg_write;
         id_ex_branch_taken_pred <= if_id_branch_taken_pred;
         id_ex_branch_target_pred <= if_id_branch_target_pred;
@@ -654,7 +779,8 @@ end
 //              PIPELINE STAGE: EXECUTE
 // ##################################################
 
-wire [31:0] ex_result = id_ex_is_lui   ? id_ex_imm :
+wire [31:0] ex_result = id_ex_is_csr   ? csr_read_data :    // CSR read (old value -> rd)
+                        id_ex_is_lui   ? id_ex_imm :
                         id_ex_is_auipc ? (id_ex_pc + id_ex_imm) :
                         (id_ex_is_jal || id_ex_is_jalr) ? (id_ex_pc + 4) :
                         id_ex_is_div ? div_final_result :
@@ -677,8 +803,10 @@ always @(posedge clk) begin
         ex_mem_funct3 <= id_ex_funct3;
         ex_mem_is_load <= id_ex_is_load;
         ex_mem_is_store <= id_ex_is_store;
-        ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store;
-        ex_mem_valid <= id_ex_valid;
+        ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store && !id_ex_is_mret
+                           && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r;
+        ex_mem_valid <= id_ex_valid && !id_ex_is_branch && !id_ex_is_mret
+                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r;
     end
 end
 
@@ -782,6 +910,66 @@ always @(posedge clk) begin
         mem_wb_valid <= 1'b0;
         mem_wb_reg_write <= 1'b0;
         mem_wb_rd <= 5'b0;
+    end
+end
+
+// ##################################################
+//        INTERRUPT DETECTION & TRAP ENTRY
+// ##################################################
+//
+// Interrupt priority (§3.1.9): MEI (11) > MSI (3) > MTI (7)
+// Taken only when pipeline is not stalled and no flush in progress.
+
+reg [31:0] irq_cause;
+always @(*) begin
+    if (meip && csr_mie_meie)
+        irq_cause = {1'b1, 31'd11};  // Machine External Interrupt
+    else if (msip && csr_mie_msie)
+        irq_cause = {1'b1, 31'd3};   // Machine Software Interrupt
+    else
+        irq_cause = {1'b1, 31'd7};   // Machine Timer Interrupt
+end
+
+// mepc for interrupts: earliest valid instruction in the pipeline
+wire [31:0] trap_mepc_next = if_id_valid ? if_id_pc : PC;
+
+always @(posedge clk) begin
+    if (~rstn) begin
+        trap_enter_r  <= 1'b0;
+        trap_mepc_r   <= 32'b0;
+        trap_mcause_r <= 32'b0;
+        trap_mtval_r  <= 32'b0;
+    end else begin
+        trap_enter_r <= 1'b0;
+
+        // Synchronous exceptions (highest priority)
+        if (id_ex_valid && !trap_enter_r && !stall) begin
+            if (id_ex_is_illegal) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd2};   // Illegal instruction
+                trap_mtval_r  <= id_ex_ir;
+            end else if (id_ex_is_ecall) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd11};  // Environment call from M-mode
+                trap_mtval_r  <= 32'b0;
+            end else if (id_ex_is_ebreak) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd3};   // Breakpoint
+                trap_mtval_r  <= 32'b0;
+            end
+        end
+
+        // Asynchronous interrupts (lower priority than exceptions)
+        if (csr_irq_pending && !flush && !stall && !trap_enter_r &&
+            !(id_ex_valid && (id_ex_is_illegal || id_ex_is_ecall || id_ex_is_ebreak))) begin
+            trap_enter_r  <= 1'b1;
+            trap_mepc_r   <= trap_mepc_next;
+            trap_mcause_r <= irq_cause;
+            trap_mtval_r  <= 32'b0;
+        end
     end
 end
 
