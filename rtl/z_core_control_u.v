@@ -22,10 +22,10 @@ SOFTWARE.
 
 */
 
-// **************************************************
+// ****************************************************
 //                 Z-Core Control Unit
-//        5-Stage Pipelined RISC-V RV32I Processor
-// **************************************************
+//     5-Stage Pipelined RISC-V RV32IMZicsr Processor
+// ****************************************************
 
 module z_core_control_u #(
     parameter DATA_WIDTH = 32,
@@ -244,7 +244,8 @@ z_core_instr_cache#(
     .clk(clk),
     .rstn(rstn),
     .wen(instr_cache_wen), 
-    .address(instr_cache_address),
+    .addr_rd(instr_cache_address),
+    .addr_wr(fetch_pc),
     .data_in(instr_cache_data_in),
     .data_out(instr_cache_data_out),
     .valid(instr_cache_valid),
@@ -312,10 +313,11 @@ wire dec_is_csr    = (dec_op == SYSTEM_INST) && (dec_funct3 != 3'b000);
 wire dec_is_mret   = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h302);
 
 // Illegal: opcode doesn't match any known type (0x00000000 is treated as NOP)
+wire dec_is_fence  = (dec_op == FENCE_INST);
 wire dec_opcode_valid = dec_is_load | dec_is_store | dec_is_branch |
                         dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc |
                         dec_is_r_type | dec_is_i_alu | dec_is_csr |
-                        dec_is_mret | dec_is_ecall | dec_is_ebreak;
+                        dec_is_mret | dec_is_ecall | dec_is_ebreak | dec_is_fence;
 wire dec_is_illegal = if_id_valid && !dec_opcode_valid && (if_id_ir != 32'h0);
 
 wire dec_reg_write = dec_is_r_type | dec_is_i_alu | dec_is_load | 
@@ -443,6 +445,24 @@ wire dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id
 wire dec_is_ebreak = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
 
 // ##################################################
+//       MISALIGNMENT EXCEPTION DETECTION
+// ##################################################
+
+// Misaligned instruction fetch (cause 0): branch/jump to non-4B-aligned target (no C extension)
+wire misalign_branch = id_ex_valid && id_ex_is_branch && alu_branch && (branch_target[1:0] != 2'b00);
+wire misalign_jump   = id_ex_valid && (id_ex_is_jal || id_ex_is_jalr) && (jump_target[1:0] != 2'b00);
+
+// Misaligned load (cause 4): LH/LHU at odd addr, LW at non-4B-aligned addr
+wire misalign_load = id_ex_valid && id_ex_is_load &&
+    ((id_ex_funct3[1:0] == 2'b01 && alu_out[0]  != 1'b0) ||      // LH/LHU
+     (id_ex_funct3[1:0] == 2'b10 && alu_out[1:0] != 2'b00));     // LW
+
+// Misaligned store (cause 6): SH at odd addr, SW at non-4B-aligned addr
+wire misalign_store = id_ex_valid && id_ex_is_store &&
+    ((id_ex_funct3[1:0] == 2'b01 && alu_out[0]  != 1'b0) ||      // SH
+     (id_ex_funct3[1:0] == 2'b10 && alu_out[1:0] != 2'b00));     // SW
+
+// ##################################################
 //     CSR FILE INSTANTIATION (Zicsr Extension)
 // ##################################################
 
@@ -455,7 +475,7 @@ wire [31:0] csr_src = id_ex_funct3[2] ? {27'b0, id_ex_csr_zimm} : fwd_rs1_data;
 
 // Write suppression per §2.8: CSRRS/CSRRC with rs1=x0 or zimm=0 → no write
 wire csr_src_is_zero = id_ex_funct3[2] ? (id_ex_csr_zimm == 5'b0) : (id_ex_rs1_addr == 5'b0);
-assign csr_wen = id_ex_valid && id_ex_is_csr && !trap_enter_r &&
+assign csr_wen = id_ex_valid && id_ex_is_csr && !trap_enter_r && !ex_stall &&
                  (id_ex_funct3[1:0] == 2'b01 || !csr_src_is_zero);
 
 always @(*) begin
@@ -550,6 +570,8 @@ z_core_branch_pred branch_predictor(
     .branch_target_pred(branch_target_pred)
 );
 
+// synthesis translate_on
+
 assign branch_target_misspredict = is_branch ? (id_ex_branch_target_pred != branch_target) : (is_jump ? (id_ex_branch_target_pred != jump_target) : 1'b0);
 
 
@@ -571,12 +593,12 @@ wire [31:0] jump_target   = id_ex_is_jalr ? jalr_target : branch_target;
 //              PIPELINE STAGE: FETCH
 // ##################################################
 
-// Cache address priority: write > trap > MRET > misprediction > normal PC
-assign instr_cache_address = instr_cache_wen          ? fetch_pc :
-                             trap_enter_r              ? csr_mtvec :
-                             mret_in_ex                ? csr_mepc :
-                             (branch_taken && flush)   ? branch_target :
-                             (is_jump && flush)        ? jump_target :
+// Cache address priority (Read Port): trap > MRET > redirection > normal PC
+assign instr_cache_address = trap_enter_r               ? csr_mtvec :
+                             mret_in_ex                 ? csr_mepc :
+                             (is_jump && flush)         ? jump_target :
+                             (id_ex_branch_taken_pred && flush) ? (id_ex_pc + 4) :
+                             (branch_taken && flush)    ? branch_target :
                              PC;
 
 // New instruction arriving this cycle (from any source)
@@ -719,9 +741,13 @@ always @(posedge clk) begin
         id_ex_is_ebreak <= 1'b0;
         id_ex_is_illegal <= 1'b0;
         id_ex_ir <= 32'b0;
-    end else if (flush || (load_use_hazard && !ex_stall)) begin
-        // Insert bubble - flush handles current cycle squash
-        // For load_use_hazard: only insert bubble if EX stage can accept the load
+    end else if (trap_enter_r || mret_in_ex || ((prediction_flush || load_use_hazard) && !ex_stall)) begin
+        // Insert bubble on flush or load-use hazard.
+        // prediction_flush is gated by !ex_stall: if the EX stage is stalled,
+        // the jump/branch result hasn't been latched into EX/MEM yet, so we
+        // must keep id_ex_valid until the stall clears to avoid losing rd writes.
+        // trap_enter_r and mret_in_ex always clear id_ex (trap gates ex_mem_valid
+        // independently via !trap_enter_r).
         id_ex_valid <= 1'b0;
         id_ex_reg_write <= 1'b0;
         id_ex_is_load <= 1'b0;
@@ -804,9 +830,11 @@ always @(posedge clk) begin
         ex_mem_is_load <= id_ex_is_load;
         ex_mem_is_store <= id_ex_is_store;
         ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store && !id_ex_is_mret
-                           && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r;
+                           && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r
+                           && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump;
         ex_mem_valid <= id_ex_valid && !id_ex_is_branch && !id_ex_is_mret
-                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r;
+                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r
+                        && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump;
     end
 end
 
@@ -944,7 +972,22 @@ always @(posedge clk) begin
 
         // Synchronous exceptions (highest priority)
         if (id_ex_valid && !trap_enter_r && !stall) begin
-            if (id_ex_is_illegal) begin
+            if (misalign_branch || misalign_jump) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd0};   // Instruction address misaligned
+                trap_mtval_r  <= misalign_branch ? branch_target : jump_target;
+            end else if (misalign_load) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd4};   // Load address misaligned
+                trap_mtval_r  <= alu_out;
+            end else if (misalign_store) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd6};   // Store/AMO address misaligned
+                trap_mtval_r  <= alu_out;
+            end else if (id_ex_is_illegal) begin
                 trap_enter_r  <= 1'b1;
                 trap_mepc_r   <= id_ex_pc;
                 trap_mcause_r <= {1'b0, 31'd2};   // Illegal instruction
@@ -958,13 +1001,14 @@ always @(posedge clk) begin
                 trap_enter_r  <= 1'b1;
                 trap_mepc_r   <= id_ex_pc;
                 trap_mcause_r <= {1'b0, 31'd3};   // Breakpoint
-                trap_mtval_r  <= 32'b0;
+                trap_mtval_r  <= id_ex_pc;         // Spec: mtval = PC of ebreak
             end
         end
 
         // Asynchronous interrupts (lower priority than exceptions)
         if (csr_irq_pending && !flush && !stall && !trap_enter_r &&
-            !(id_ex_valid && (id_ex_is_illegal || id_ex_is_ecall || id_ex_is_ebreak))) begin
+            !(id_ex_valid && (id_ex_is_illegal || id_ex_is_ecall || id_ex_is_ebreak ||
+                             misalign_branch || misalign_jump || misalign_load || misalign_store))) begin
             trap_enter_r  <= 1'b1;
             trap_mepc_r   <= trap_mepc_next;
             trap_mcause_r <= irq_cause;

@@ -44,6 +44,7 @@ SOFTWARE.
 `include "rtl/z_core_mult_unit.v"
 `include "rtl/priority_encoder.v"
 `include "rtl/z_core_mult_synth.v"
+`include "rtl/z_core_csr_file.v"
 
 module z_core_riscof_tb;
 
@@ -133,8 +134,8 @@ module z_core_riscof_tb;
 
 
 
-    // CPU Halt signal
-    wire cpu_halt;
+    // tohost address — passed via plusarg, set to 1 by RVMODEL_HALT
+    integer tohost_addr;
 
     // Instantiate Interconnect
     axil_interconnect #(
@@ -217,7 +218,9 @@ module z_core_riscof_tb;
         .m_axil_rresp(s_axil_rresp),
         .m_axil_rvalid(s_axil_rvalid),
         .m_axil_rready(s_axil_rready),
-        .halt(cpu_halt)
+        .meip(1'b0),
+        .mtip(1'b0),
+        .msip(1'b0)
     );
 
     // Instantiate AXI-Lite RAM (2MB for large RISCOF tests)
@@ -310,12 +313,8 @@ module z_core_riscof_tb;
         .gpio(gpio_wiring)
     );
 
-    initial begin
-        #1;
-        $display("DEBUG: ADDR_WIDTH=%d", ADDR_WIDTH);
-        $display("DEBUG: m_axil_awaddr width=%d", $bits(m_axil_awaddr));
-        $display("DEBUG: u_interconnect.m_axil_awaddr width=%d", $bits(u_interconnect.m_axil_awaddr));
-    end
+
+
 
     // Clock generation (100MHz)
     always #5 clk = ~clk;
@@ -339,11 +338,16 @@ module z_core_riscof_tb;
             $display("ERROR: No sig_end specified");
             $finish;
         end
+        if (!$value$plusargs("tohost_addr=%d", tohost_addr)) begin
+            $display("ERROR: No tohost_addr specified");
+            $finish;
+        end
 
         $display("RISCOF Test Starting");
         $display("  Hex file: %s", hex_file);
         $display("  Sig file: %s", sig_file);
         $display("  Sig range: 0x%08x - 0x%08x", sig_begin, sig_end);
+        $display("  Tohost addr: 0x%08x (word idx: %0d)", tohost_addr, tohost_addr >> 2);
 
         // Load program
         $readmemh(hex_file, u_axil_ram.mem);
@@ -353,10 +357,12 @@ module z_core_riscof_tb;
         repeat(10) @(posedge clk);
         rstn = 1;
 
-        // Wait for halt or timeout
-        while (!cpu_halt && cycle_count < timeout_cycles) begin
+        // Wait for tohost != 0 (RVMODEL_HALT writes 1 to tohost) or timeout
+        while (u_axil_ram.mem[tohost_addr >> 2] === 32'h0 && cycle_count < timeout_cycles) begin
             @(posedge clk);
             cycle_count = cycle_count + 1;
+            if (cycle_count % 100000 == 0)
+                $display("[%0d] PC=0x%08x", cycle_count, uut.PC);
         end
 
         if (cycle_count >= timeout_cycles) begin
