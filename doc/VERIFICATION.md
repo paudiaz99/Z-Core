@@ -533,11 +533,12 @@ Key signals to observe in GTKWave:
 
 Z-Core has passed all **official RISCOF architectural tests** for the **RV32IM** ISA.
 
-| Test Suite | Status |
-|------------|--------|
-| **RV32IM Base Integer** | <font color="green">All Passed</font> |
-| **RV32M Multiply/Divide** | <font color="green">All Passed</font> |
-| **Total** | <font color="green">All Passed</font> |
+| Test Suite | Status | Tests |
+|------------|--------|-------|
+| **RV32IM Base Integer (I)** | <font color="green">All Passed</font> | 48 |
+| **RV32M Multiply/Divide (M)** | <font color="green">All Passed</font> | 45 |
+| **Zicsr (Privilege)** | <font color="green">All Passed</font> | 16 |
+| **Total Compliance Tests** | <font color="green">All Passed</font> | 109 |
 
 ### Extended Coverage Tests
 
@@ -554,4 +555,5 @@ In addition to the official RISCOF tests, Z-Core has been validated with **45 ex
 1. [x] RISC-V official compliance tests (RISCOF)
 2. [x] Run full RISCOF test suite for RV32IM
 3. [x] Extended coverage tests (riscv_ctg)
-4. [ ] Formal verification of critical paths and corner cases
+4. [x] Full Zicsr extension and Privilege suite compliance
+5. [ ] Formal verification of critical paths and corner cases

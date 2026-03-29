@@ -11,12 +11,12 @@
 
 <div align="center">
 
-**A lightweight RISC-V RV32IM+Zicsr processor**
+**A lightweight RISC-V RV32IMZicsr processor**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verilog](https://img.shields.io/badge/HDL-Verilog-blue.svg)](https://en.wikipedia.org/wiki/Verilog)
-![RISC-V](https://img.shields.io/badge/RISC--V-RV32IM-green?logo=riscv)
-[![Compliance](https://img.shields.io/badge/RISCOF-RV32IM%20Passed-brightgreen.svg)](https://github.com/riscv-software-src/riscof)
+![RISC-V](https://img.shields.io/badge/RISC--V-RV32IMZicsr-green?logo=riscv)
+[![Compliance](https://img.shields.io/badge/RISCOF-RV32IMZicsr%20Passed-brightgreen.svg)](https://github.com/riscv-software-src/riscof)
 
 </div>
 

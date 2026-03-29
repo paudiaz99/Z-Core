@@ -1802,10 +1802,10 @@ module z_core_control_u_tb;
         check_mem(32'h204, 32'h14, "ECALL mepc+4 (0x10 + 4 = 0x14)");
         check_mem(32'h208, 32'h0,   "ECALL mtval (0)");
 
-        // Exception 2: EBREAK — mcause=3, mepc=0x18, mtval=0
+        // Exception 2: EBREAK — mcause=3, mepc=0x18, mtval=0x18
         check_mem(32'h20C, 32'd3,   "EBREAK mcause (3 = breakpoint)");
         check_mem(32'h210, 32'h1C, "EBREAK mepc+4 (0x18 + 4 = 0x1C)");
-        check_mem(32'h214, 32'h0,   "EBREAK mtval (0)");
+        check_mem(32'h214, 32'h18, "EBREAK mtval (0x18)");
 
         // Exception 3: Illegal instruction — mcause=2, mepc=0x20, mtval=0xFFFFFFFF
         check_mem(32'h218, 32'd2,          "Illegal insn mcause (2 = illegal instruction)");
@@ -1866,7 +1866,7 @@ module z_core_control_u_tb;
         check_mem(32'h208, 32'h0,         "ECALL mtval (0)");
         check_mem(32'h20C, 32'd3,         "EBREAK mcause (3)");
         check_mem(32'h210, 32'h4C,        "EBREAK mepc+4 (0x48+4=0x4C)");
-        check_mem(32'h214, 32'h0,         "EBREAK mtval (0)");
+        check_mem(32'h214, 32'h48,        "EBREAK mtval (0x48)");
         check_mem(32'h218, 32'd2,         "Illegal insn mcause (2)");
         check_mem(32'h21C, 32'h6C,        "Illegal insn mepc+4 (0x68+4=0x6C)");
         check_mem(32'h220, 32'hFFFFFFFF,  "Illegal insn mtval (0xFFFFFFFF)");
