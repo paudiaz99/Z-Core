@@ -71,6 +71,7 @@ always @(posedge clk) begin
         for (j=0; j < TABLE_DEPTH; j=j+1) begin
             branch_history_table[j] <= 2'b01; // Start at Weak Not Taken
             branch_target_buffer[j] <= {ADDR_WIDTH{1'b0}};
+            branch_table_tag[j]     <= {BRANCH_TABLE_TAG_WIDTH{1'b0}};
         end
     end else if(is_branch) begin
         branch_target_buffer[addr_wr] <= branch_target_wr;
