@@ -318,6 +318,81 @@ Tests three forwarding scenarios:
 ## Test 28: Correctness of External Counter Timer Mode
 **Purpose:** Verify the correctness of the external counter timer mode.
 
+## Test 29: CSR Read/Write Operations (Zicsr)
+**Purpose:** Verify all six CSR instructions with the `mscratch` register.
+
+| Instruction | Test Case | Expected |
+|-------------|-----------|----------|
+| CSRRW | Write 0, read back | old value = 0 (reset) |
+| CSRRW | Write 0x42 | old value = 0, mscratch = 0x42 |
+| CSRRS | Read (rs1=x0, no set) | 0x42 |
+| CSRRS | Set bits 0xF | old = 0x42, new = 0x4F |
+| CSRRC | Clear bits 0xF | old = 0x4F, new = 0x40 |
+| CSRRWI | Write zimm=0x1F | old = 0x40, new = 0x1F |
+| CSRRSI | Set zimm=0 (no write) | 0x1F |
+| CSRRCI | Clear bit 4 | old = 0x1F, new = 0x0F |
+
+## Test 30: Synchronous Exceptions
+**Purpose:** Verify ECALL, EBREAK, and illegal instruction exception handling.
+
+| Exception | mcause | mepc | mtval |
+|-----------|--------|------|-------|
+| ECALL | 11 | PC of ECALL | 0 |
+| EBREAK | 3 | PC of EBREAK | 0 |
+| Illegal (0xFFFFFFFF) | 2 | PC of insn | 0xFFFFFFFF |
+
+Trap handler reads mcause/mepc/mtval, bumps mepc+4, stores results, and returns via MRET.
+
+## Test 31: Timer Compare-Match Interrupt
+**Purpose:** Verify timer interrupt with MRET return.
+
+1. Configure timer with timecmp = 20, enable timer + IRQ.
+2. Spin-loop waiting for handler to set flag.
+3. Handler reads mcause, clears timer, sets flag, MRET.
+4. Verify mcause = 0x80000007 (Machine Timer Interrupt).
+
+## Test 32: Timer IRQ During Branch-Predicted Loop
+**Purpose:** Verify interrupt handling during actively predicted branch loop.
+
+A tight branch loop (50 iterations summing x10) runs while a timer is configured to fire mid-loop. The branch predictor trains on the loop, so when the timer fires, the interrupt must be deferred correctly during any in-progress misprediction flush cycles. After the handler clears the timer and returns via MRET, the loop must complete with the correct sum.
+
+| Check | Expected |
+|-------|----------|
+| x10 (sum) | 50 |
+| x11 (counter) | 50 |
+| x20 (IRQ flag) | 1 |
+| mem[256] | 50 |
+| mem[260] | 1 |
+
+## Test 33: Exception at Mispredicted Branch Target
+**Purpose:** Verify trap priority when an exception occurs at a mispredicted branch target.
+
+Three forward branches (cold predictor, likely mispredicted-not-taken) each jump to an exception-causing instruction: ECALL, EBREAK, and illegal instruction respectively. Validates that:
+- Synchronous exceptions take priority over misprediction flushes.
+- mepc correctly points to the faulting instruction.
+- MRET returns execution to the instruction after the exception.
+
+| Exception | mcause | mepc (stored as mepc+4) |
+|-----------|--------|------------------------|
+| ECALL at 0x28 | 11 | 0x2C |
+| EBREAK at 0x48 | 3 | 0x4C |
+| Illegal at 0x68 | 2 | 0x6C |
+
+## Test 34: MRET Into Branch With Predictor State
+**Purpose:** Verify MRET flush interaction with branch prediction.
+
+A loop body contains an ECALL. The handler skips past the ECALL by writing mepc+4, which lands on the loop-back branch (BLT). This tests:
+- MRET flush (`mret_in_ex` in `flush`) does not conflict with subsequent branch prediction.
+- The branch predictor's trained/stale state from before the exception does not cause incorrect behavior.
+- The loop completes correctly after 5 iterations (5 ECALLs handled).
+
+| Check | Expected |
+|-------|----------|
+| x10 (counter) | 5 |
+| x20 (exception count) | 5 |
+| mem[256] | 5 |
+| mem[260] | 5 |
+
 ## Instruction Coverage
 
 ### RV32IM Base Integer Instructions
@@ -335,6 +410,8 @@ Tests three forwarding scenarios:
 | Store | SW, SB, SH | Yes | 100% |
 | M Extension | MUL, MULH, MULHSU, MULHU | Yes | 100% |
 | M Extension | DIV, DIVU, REM, REMU | Yes | 100% |
+| Zicsr | CSRRW, CSRRS, CSRRC, CSRRWI, CSRRSI, CSRRCI | Yes | 100% |
+| System | ECALL, EBREAK, MRET | Yes | 100% |
 
 ## Test Flow Diagram
 
@@ -391,6 +468,28 @@ vvp sim/z_core_control_u_tb.vvp
 gtkwave sim/z_core_control_u_tb.vcd
 ```
 
+### Trap regression (exceptions and interrupts)
+
+A dedicated trap-focused testbench (`z_core_trap_tb.sv`) exercises exceptions (ECALL, EBREAK, illegal instruction) and interrupts (MSI, MTI, MEI), plus masking, priority, and back-to-back stress. Use it for fast CI on trap-related changes.
+
+| Recipe | Command | Use case |
+|--------|---------|----------|
+| **Quick** (trap only) | `make run TB_FILE=z_core_trap_tb.sv` | CI on CSR/trap RTL; ~25 checks, ~45k cycles |
+| **Full** (control + trap) | Run control TB then trap TB (see below) | Full regression including ISA + traps |
+
+From the `tb/` directory:
+
+```bash
+# Quick: trap regression only
+make run TB_FILE=z_core_trap_tb.sv
+
+# Full: main control TB then trap TB
+make run TB_FILE=z_core_control_u_tb.sv
+make run TB_FILE=z_core_trap_tb.sv
+```
+
+Use `SIM=iverilog` or `SIM=questa` if needed (e.g. `make run TB_FILE=z_core_trap_tb.sv SIM=iverilog`). See `doc/EXCEPTIONS_AND_INTERRUPTS.md` for trap coverage and design decisions.
+
 ### Expected Output
 
 ```
@@ -434,11 +533,12 @@ Key signals to observe in GTKWave:
 
 Z-Core has passed all **official RISCOF architectural tests** for the **RV32IM** ISA.
 
-| Test Suite | Status |
-|------------|--------|
-| **RV32IM Base Integer** | <font color="green">All Passed</font> |
-| **RV32M Multiply/Divide** | <font color="green">All Passed</font> |
-| **Total** | <font color="green">All Passed</font> |
+| Test Suite | Status | Tests |
+|------------|--------|-------|
+| **RV32IM Base Integer (I)** | <font color="green">All Passed</font> | 48 |
+| **RV32M Multiply/Divide (M)** | <font color="green">All Passed</font> | 45 |
+| **Zicsr (Privilege)** | <font color="green">All Passed</font> | 16 |
+| **Total Compliance Tests** | <font color="green">All Passed</font> | 109 |
 
 ### Extended Coverage Tests
 
@@ -455,4 +555,5 @@ In addition to the official RISCOF tests, Z-Core has been validated with **45 ex
 1. [x] RISC-V official compliance tests (RISCOF)
 2. [x] Run full RISCOF test suite for RV32IM
 3. [x] Extended coverage tests (riscv_ctg)
-4. [ ] Formal verification of critical paths and corner cases
+4. [x] Full Zicsr extension and Privilege suite compliance
+5. [ ] Formal verification of critical paths and corner cases

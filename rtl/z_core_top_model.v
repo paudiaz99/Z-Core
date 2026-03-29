@@ -217,7 +217,12 @@ z_core_control_u #(
     .m_axil_rdata(s_axil_rdata),
     .m_axil_rresp(s_axil_rresp),
     .m_axil_rvalid(s_axil_rvalid),
-    .m_axil_rready(s_axil_rready)
+    .m_axil_rready(s_axil_rready),
+
+    // Interrupt Inputs (directly wired)
+    .meip(1'b0),    // Machine External Interrupt - connect to external interrupt controller
+    .mtip(timer_irq), // Machine Timer Interrupt - Connected to timer peripheral
+    .msip(1'b0)     // Machine Software Interrupt - connect to software interrupt source
 );
 
 
@@ -364,7 +369,12 @@ axil_timer #(
     .s_axil_rdata(m_axil_rdata[3*DATA_WIDTH +: DATA_WIDTH]),
     .s_axil_rresp(m_axil_rresp[3*2 +: 2]),
     .s_axil_rvalid(m_axil_rvalid[3]),
-    .s_axil_rready(m_axil_rready[3])
+    .s_axil_rready(m_axil_rready[3]),
+
+    // Timer compare-match interrupt -> wired to core mtip
+    .timer_irq_o(timer_irq)
 );
+
+wire timer_irq;
 
 endmodule

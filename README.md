@@ -11,12 +11,12 @@
 
 <div align="center">
 
-**A lightweight RISC-V RV32IM processor**
+**A lightweight RISC-V RV32IMZicsr processor**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verilog](https://img.shields.io/badge/HDL-Verilog-blue.svg)](https://en.wikipedia.org/wiki/Verilog)
-![RISC-V](https://img.shields.io/badge/RISC--V-RV32IM-green?logo=riscv)
-[![Compliance](https://img.shields.io/badge/RISCOF-RV32IM%20Passed-brightgreen.svg)](https://github.com/riscv-software-src/riscof)
+![RISC-V](https://img.shields.io/badge/RISC--V-RV32IMZicsr-green?logo=riscv)
+[![Compliance](https://img.shields.io/badge/RISCOF-RV32IMZicsr%20Passed-brightgreen.svg)](https://github.com/riscv-software-src/riscof)
 
 </div>
 
@@ -25,7 +25,8 @@
 ## Features
 
 - **5-Stage Pipeline** - Classic RISC-V 5-stage pipeline implementation
-- **RV32IM Implementation** - Base integer ISA + Multiplication/Division
+- **RV32IM+Zicsr Implementation** - Base integer ISA + Multiplication/Division + CSR access
+- **M-Mode Trap Handling** - Exceptions (ECALL, EBREAK, Illegal) and Interrupts (Timer, External, Software)
 
 - **AXI4-Lite Interface** - Industry-standard memory bus protocol
 - **Modular Design** - Clean separation of concerns with individual modules
@@ -65,6 +66,8 @@
 | **Branch** | `BEQ`, `BNE`, `BLT`, `BGE`, `BLTU`, `BGEU` | Conditional branching |
 | **Jump** | `JAL`, `JALR` | Jump and link |
 | **Upper** | `LUI`, `AUIPC` | Upper immediate |
+| **Zicsr** | `CSRRW`, `CSRRS`, `CSRRC`, `CSRRWI`, `CSRRSI`, `CSRRCI` | CSR read-modify-write |
+| **System** | `MRET`, `ECALL`, `EBREAK` | Trap return, environment call, breakpoint |
 
 ## Project Structure
 
@@ -83,6 +86,7 @@ Z-Core/
 │   ├── z_core_div_unit.v      # Divider unit
 │   ├── z_core_instr_cache.v   # Instruction cache
 │   ├── z_core_branch_pred.v   # Branch Predictor
+│   ├── z_core_csr_file.v      # CSR Register File (Zicsr)
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
 │   ├── axil_master.v          # AXI-Lite Master
 │   ├── axil_uart.v            # UART Module
@@ -107,7 +111,7 @@ Z-Core/
 │   ├── z_core_mult_unit_tb.v  # Multiplier unit test
 │   ├── z_core_div_unit_tb.v   # Divider unit test
 │   ├── axil_gpio_tb.v         # GPIO testbench
-│   ├── axil_timer_tb.v        # Timer testbench
+│   ├── axil_timer_tb.sv       # Timer testbench
 │   ├── z_core_instr_cache_tb.sv # Instruction cache testbench
 │   ├── z_core_branch_pred_tb.sv # Branch Predictor testbench
 │   └── z_core_riscof_tb.sv    # RISCOF compliance testbench
@@ -119,7 +123,8 @@ Z-Core/
     ├── TIMER.md               # Timer module documentation
     ├── Z_CORE_ARCHITECTURE.md # Architecture overview
     ├── PIPELINE.md            # Pipeline implementation details
-    └── VERIFICATION.md        # Verification details
+    ├── VERIFICATION.md        # Verification details
+    └── EXCEPTIONS_AND_INTERRUPTS.md # Exception & interrupt handling
 ```
 
 ## Quick Start
@@ -232,6 +237,12 @@ The processor has been verified with a comprehensive system-level testbench (`tb
 | I-Cache Stress | Locality loops + direct-mapped conflict-miss thrash |
 | Timer | Timer overflow and underflow |
 | External Counter Timer | External counter timer mode |
+| CSR Read/Write (Zicsr) | CSRRW, CSRRS, CSRRC, CSRRWI, CSRRSI, CSRRCI |
+| Exceptions | ECALL, EBREAK, Illegal instruction traps |
+| Timer Interrupt | Timer compare-match interrupt with MRET return |
+| IRQ + Branch Pred Loop | Timer IRQ during actively predicted branch loop |
+| Exception at Branch Target | Synchronous exception at mispredicted branch target |
+| MRET Into Branch | MRET return into branch with predictor state |
 | **RISCOF Compliance** | **Official RISC-V RV32IM Architectural Tests** |
 
 
@@ -273,6 +284,7 @@ Detailed documentation is available in the `doc/` directory:
 - **[GPIO](doc/GPIO.md)** - Bidirectional GPIO module
 - **[UART](doc/UART.md)** - Serial UART module
 - **[Timer](doc/TIMER.md)** - Serial Timer module
+- **[Exceptions & Interrupts](doc/EXCEPTIONS_AND_INTERRUPTS.md)** - M-mode trap handling details
 - **[Verification](doc/VERIFICATION.md)** - Test coverage and verification methodology
 
 ## Roadmap
@@ -285,13 +297,14 @@ Detailed documentation is available in the `doc/` directory:
 - [x] FPGA synthesis and validation **[Z-Core-FPGA repository](https://github.com/paudiaz99/Z-Core-FPGA)** 
 - [x] M extension (multiply/divide)
 - [x] Instruction cache (simple direct-mapped, 1-word lines)
-- [x] Timer
+- [x] **Timer**
 - [x] **Branch prediction**
-- [ ] Interrupt support
+- [x] **Interrupt support**
+- [x] **CSR Unit & Zicsr extension (CSR instructions)**
+- [x] **Exception / Trap Handling (Illegal Inst, ECALL, EBREAK)**
 - [ ] VGA Controller
 - [ ] Data Cache
-- [ ] CSR Unit & Zicsr extension (CSR instructions)
-- [ ] Exception / Trap Handling (e.g., Address Misalignment, mtvec)
+- [ ] RISC-V A extension (atomic instructions)
 - [ ] RISC-V C extension (compressed instructions)
 - [ ] Fix all lint warnings
 

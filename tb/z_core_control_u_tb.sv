@@ -209,7 +209,7 @@ module z_core_control_u_tb;
     end
 
     // Instantiate Control Unit (AXI-Lite Master)
-    wire cpu_halt;  // Halt signal from CPU (ECALL/EBREAK detected)
+
     
     z_core_control_u #(
         .DATA_WIDTH(DATA_WIDTH),
@@ -240,9 +240,11 @@ module z_core_control_u_tb;
         .m_axil_rresp(s_axil_rresp),
         .m_axil_rvalid(s_axil_rvalid),
         .m_axil_rready(s_axil_rready),
-        
-        // Halt signal for RISCOF
-        .halt(cpu_halt)
+
+        // Interrupt Inputs
+        .meip(1'b0),
+        .mtip(timer_irq_wire),  // Driven by axil_timer compare-match output
+        .msip(1'b0)
     );
 
     // Instantiate AXI-Lite RAM (Slave 0)
@@ -382,11 +384,15 @@ module z_core_control_u_tb;
         .s_axil_rresp(m_axil_rresp[3*2 +: 2]),
         .s_axil_rvalid(m_axil_rvalid[3]),
         .s_axil_rready(m_axil_rready[3]),
-        .ext_event_i(timer_ext_event)
+        .ext_event_i(timer_ext_event),
+        .timer_irq_o(timer_irq_wire)
     );
 
     // Timer External Event Signal for Counter Mode (driven by testbench)
     reg timer_ext_event = 0;
+
+    // Timer compare-match IRQ output -> wired to control unit mtip
+    wire timer_irq_wire;
 
     // Clock generation (100MHz)
     always #5 clk = ~clk;
@@ -878,6 +884,8 @@ module z_core_control_u_tb;
             // NOPs
             u_axil_ram.mem[7] = 32'h00000013;
             u_axil_ram.mem[8] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[9] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -1725,6 +1733,158 @@ module z_core_control_u_tb;
         // (No explicit check, but total count should confirm this)
         
         verify_counters(4, 1, "Test 28");
+
+        // ==========================================
+        // Test 29: CSR Read/Write Operations (Zicsr)
+        // ==========================================
+        load_test29_csr_readwrite();
+        reset_cpu();
+        #8000;  // Wait for program to complete
+
+        $display("\n=== Test 29 Results: CSR Read/Write (Zicsr) ===");
+
+        // Verify register values from CSR operations
+        // CSRRW x2, mscratch, x0 → x2 = old mscratch = 0 (after reset)
+        check_reg(5'd2, 32'h0, "CSRRW read old mscratch (reset=0)");
+        // CSRRW x4, mscratch, x3 → x4 = old mscratch = 0, mscratch = 0x42
+        check_reg(5'd4, 32'h0, "CSRRW read old mscratch before write 0x42");
+        // CSRRS x5, mscratch, x0 → x5 = mscratch = 0x42 (no set, rs1=x0)
+        check_reg(5'd5, 32'h42, "CSRRS read mscratch (no write, rs1=x0)");
+        // CSRRS x7, mscratch, x6 → x7 = old mscratch = 0x42, then SET 0xF → 0x4F
+        check_reg(5'd7, 32'h42, "CSRRS read old mscratch before SET 0xF");
+        // CSRRS x8, mscratch, x0 → x8 = mscratch = 0x4F
+        check_reg(5'd8, 32'h4F, "CSRRS read mscratch after SET (0x4F)");
+        // CSRRC x9, mscratch, x6 → x9 = old mscratch = 0x4F, then CLEAR 0xF → 0x40
+        check_reg(5'd9, 32'h4F, "CSRRC read old mscratch before CLR 0xF");
+        // CSRRS x10, mscratch, x0 → x10 = mscratch = 0x40
+        check_reg(5'd10, 32'h40, "CSRRS read mscratch after CLR (0x40)");
+        // CSRRWI x11, mscratch, 0x1F → x11 = old mscratch = 0x40, mscratch = 0x1F
+        check_reg(5'd11, 32'h40, "CSRRWI read old mscratch before write zimm");
+        // CSRRS x12, mscratch, x0 → x12 = mscratch = 0x1F
+        check_reg(5'd12, 32'h1F, "CSRRS read mscratch after CSRRWI (0x1F)");
+        // CSRRSI x13, mscratch, 0 → x13 = mscratch = 0x1F (no set, zimm=0)
+        check_reg(5'd13, 32'h1F, "CSRRSI read mscratch (no set, zimm=0)");
+        // CSRRCI x14, mscratch, 0x10 → x14 = old mscratch = 0x1F, clear bit4 → 0x0F
+        check_reg(5'd14, 32'h1F, "CSRRCI read old mscratch before clr bit4");
+        // CSRRS x15, mscratch, x0 → x15 = mscratch = 0x0F
+        check_reg(5'd15, 32'h0F, "CSRRS read mscratch after CSRRCI (0x0F)");
+
+        // Also verify memory stores match
+        check_mem(32'h100, 32'h0,  "SW mscratch initial (0)");
+        check_mem(32'h104, 32'h0,  "SW old before CSRRW 0x42 (0)");
+        check_mem(32'h108, 32'h42, "SW mscratch after CSRRW (0x42)");
+        check_mem(32'h10C, 32'h42, "SW old before CSRRS SET (0x42)");
+        check_mem(32'h110, 32'h4F, "SW mscratch after SET (0x4F)");
+        check_mem(32'h114, 32'h4F, "SW old before CSRRC CLR (0x4F)");
+        check_mem(32'h118, 32'h40, "SW mscratch after CLR (0x40)");
+        check_mem(32'h11C, 32'h40, "SW old before CSRRWI (0x40)");
+        check_mem(32'h120, 32'h1F, "SW mscratch after CSRRWI (0x1F)");
+        check_mem(32'h124, 32'h1F, "SW mscratch CSRRSI read (0x1F)");
+        check_mem(32'h128, 32'h1F, "SW old before CSRRCI (0x1F)");
+        check_mem(32'h12C, 32'h0F, "SW mscratch after CSRRCI (0x0F)");
+
+        verify_counters(12, 0, "Test 29");
+
+        // ==========================================
+        // Test 30: Exception Handling
+        // ==========================================
+        load_test30_exceptions();
+        reset_cpu();
+        #15000;  // Allow time for 3 exceptions + MRET returns
+
+        $display("\n=== Test 30 Results: Exception Handling ===");
+        
+        // x20 should be 3 (incremented after each successful MRET return)
+        check_reg(20, 3, "MRET return counter (3 exceptions handled)");
+
+        // Exception 1: ECALL — mcause=11, mepc=0x10, mtval=0
+        check_mem(32'h200, 32'd11,  "ECALL mcause (11 = env call from M-mode)");
+        check_mem(32'h204, 32'h14, "ECALL mepc+4 (0x10 + 4 = 0x14)");
+        check_mem(32'h208, 32'h0,   "ECALL mtval (0)");
+
+        // Exception 2: EBREAK — mcause=3, mepc=0x18, mtval=0x18
+        check_mem(32'h20C, 32'd3,   "EBREAK mcause (3 = breakpoint)");
+        check_mem(32'h210, 32'h1C, "EBREAK mepc+4 (0x18 + 4 = 0x1C)");
+        check_mem(32'h214, 32'h18, "EBREAK mtval (0x18)");
+
+        // Exception 3: Illegal instruction — mcause=2, mepc=0x20, mtval=0xFFFFFFFF
+        check_mem(32'h218, 32'd2,          "Illegal insn mcause (2 = illegal instruction)");
+        check_mem(32'h21C, 32'h24,        "Illegal insn mepc+4 (0x20 + 4 = 0x24)");
+        check_mem(32'h220, 32'hFFFFFFFF,   "Illegal insn mtval (faulting instruction)");
+
+        // Trap handler does 3 stores per exception × 3 exceptions = 9 stores
+        // No loads in the program
+        verify_counters(9, 0, "Test 30");
+
+        // ==========================================
+        // Test 31: Timer Compare-Match Interrupt
+        // ==========================================
+        load_test31_timer_interrupt();
+        reset_cpu();
+        #30000; // Wait for timer to count to 20, trap, handler, MRET, store
+
+        $display("\n=== Test 31 Results: Timer Compare-Match Interrupt ===");
+        // x20 = 1 (handler set it)
+        check_reg(20, 1, "Timer IRQ handler executed (x20=1)");
+        // mem[256] = 1 (main program stored x20 after handler returned)
+        check_mem(32'h100, 32'd1, "Timer IRQ: trap count stored to memory");
+        // mem[260] = 0x80000007 (mcause for Machine Timer Interrupt)
+        check_mem(32'h104, 32'h80000007, "Timer IRQ: mcause = MTI (0x80000007)");
+        // Main setup: SW timer_lo + SW timer_hi + SW timecmp_lo + SW timecmp_hi + SW timer_ctrl = 5
+        // Handler:   SW mcause + SW timecmp_lo + SW timecmp_hi + SW timer_ctrl(0) = 4
+        // Post-MRET: SW x20 to mem = 1
+        // Total: 10 writes, 0 reads
+        verify_counters(10, 0, "Test 31");
+
+        // ==========================================
+        // Test 32: Timer IRQ During Branch-Predicted Loop
+        // ==========================================
+        load_test32_irq_during_branch_loop();
+        reset_cpu();
+        #30000;
+
+        $display("\n=== Test 32 Results: Timer IRQ During Branch-Predicted Loop ===");
+        check_reg(10, 50, "Accumulator (50 iterations)");
+        check_reg(11, 50, "Counter (50 iterations)");
+        check_reg(20, 1, "Timer IRQ handler executed (x20=1)");
+        check_mem(32'h100, 32'd50, "SW mem[256] = 50 (accumulator)");
+        check_mem(32'h104, 32'd50, "SW mem[260] = 50 (counter)");
+        check_mem(32'h108, 32'd1, "SW mem[264] = 1 (IRQ flag)");
+        verify_counters(11, 0, "Test 32");
+
+        // ==========================================
+        // Test 33: Exception at Mispredicted Branch Target
+        // ==========================================
+        load_test33_exception_at_branch_target();
+        reset_cpu();
+        #15000;
+
+        $display("\n=== Test 33 Results: Exception at Mispredicted Branch Target ===");
+        check_reg(20, 3, "MRET return counter (3 exceptions handled)");
+        check_mem(32'h200, 32'd11,        "ECALL mcause (11)");
+        check_mem(32'h204, 32'h2C,        "ECALL mepc+4 (0x28+4=0x2C)");
+        check_mem(32'h208, 32'h0,         "ECALL mtval (0)");
+        check_mem(32'h20C, 32'd3,         "EBREAK mcause (3)");
+        check_mem(32'h210, 32'h4C,        "EBREAK mepc+4 (0x48+4=0x4C)");
+        check_mem(32'h214, 32'h48,        "EBREAK mtval (0x48)");
+        check_mem(32'h218, 32'd2,         "Illegal insn mcause (2)");
+        check_mem(32'h21C, 32'h6C,        "Illegal insn mepc+4 (0x68+4=0x6C)");
+        check_mem(32'h220, 32'hFFFFFFFF,  "Illegal insn mtval (0xFFFFFFFF)");
+        verify_counters(9, 0, "Test 33");
+
+        // ==========================================
+        // Test 34: MRET Into Branch With Predictor State
+        // ==========================================
+        load_test34_mret_into_branch();
+        reset_cpu();
+        #20000;
+
+        $display("\n=== Test 34 Results: MRET Into Branch With Predictor State ===");
+        check_reg(10, 5, "Loop counter (5 iterations with ECALL each)");
+        check_reg(20, 5, "Exception count (5 ECALLs handled)");
+        check_mem(32'h100, 32'd5, "SW mem[256] = 5 (counter)");
+        check_mem(32'h104, 32'd5, "SW mem[260] = 5 (exception count)");
+        verify_counters(2, 0, "Test 34");
 
         // ==========================================
         // Final Summary
@@ -2845,6 +3005,8 @@ module z_core_control_u_tb;
             // NOPs to finish cleanly
             u_axil_ram.mem[23] = 32'h00000013;
             u_axil_ram.mem[24] = 32'h00000013;
+            // Infinite loop to stop execution
+            u_axil_ram.mem[25] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
@@ -3310,5 +3472,513 @@ module z_core_control_u_tb;
         end
     end
     */
+
+    // ==========================================
+    //   Test 29: CSR Read/Write Operations
+    // ==========================================
+    task load_test29_csr_readwrite;
+        integer i;
+        begin
+            $display("\n--- Loading Test 29: CSR Read/Write Operations (Zicsr) ---");
+            // Clear memory
+            for (i = 0; i < 80; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+
+            // 0x00: CSRRW x2, mscratch, x0 - write 0, read old (should be 0 after reset)
+            u_axil_ram.mem[0] = 32'h34001173;
+            // 0x04: ADDI x3, x0, 0x42
+            u_axil_ram.mem[1] = 32'h04200193;
+            // 0x08: CSRRW x4, mscratch, x3 - write 0x42, x4 = old mscratch (0)
+            u_axil_ram.mem[2] = 32'h34019273;
+            // 0x0C: CSRRS x5, mscratch, x0 - read mscratch (0x42), no write (rs1=x0)
+            u_axil_ram.mem[3] = 32'h340022F3;
+            // 0x10: ADDI x6, x0, 0xF
+            u_axil_ram.mem[4] = 32'h00F00313;
+            // 0x14: CSRRS x7, mscratch, x6 - read (0x42), SET bits 0xF -> 0x4F
+            u_axil_ram.mem[5] = 32'h340323F3;
+            // 0x18: CSRRS x8, mscratch, x0 - read mscratch -> 0x4F
+            u_axil_ram.mem[6] = 32'h34002473;
+            // 0x1C: CSRRC x9, mscratch, x6 - read (0x4F), CLEAR bits 0xF -> 0x40
+            u_axil_ram.mem[7] = 32'h340334F3;
+            // 0x20: CSRRS x10, mscratch, x0 - read mscratch -> 0x40
+            u_axil_ram.mem[8] = 32'h34002573;
+            // 0x24: CSRRWI x11, mscratch, 0x1F - write zimm=31, x11 = old (0x40)
+            u_axil_ram.mem[9] = 32'h340FD5F3;
+            // 0x28: CSRRS x12, mscratch, x0 - read mscratch -> 0x1F
+            u_axil_ram.mem[10] = 32'h34002673;
+            // 0x2C: CSRRSI x13, mscratch, 0 - read mscratch (0x1F), no set (zimm=0)
+            u_axil_ram.mem[11] = 32'h340066F3;
+            // 0x30: CSRRCI x14, mscratch, 0x10 - read (0x1F), clear bit 4 -> 0x0F
+            u_axil_ram.mem[12] = 32'h34087773;
+            // 0x34: CSRRS x15, mscratch, x0 - read mscratch -> 0x0F
+            u_axil_ram.mem[13] = 32'h340027F3;
+            // 0x38-0x64: Store results to memory
+            u_axil_ram.mem[14] = 32'h10202023; // SW x2, 256(x0)
+            u_axil_ram.mem[15] = 32'h10402223; // SW x4, 260(x0)
+            u_axil_ram.mem[16] = 32'h10502423; // SW x5, 264(x0)
+            u_axil_ram.mem[17] = 32'h10702623; // SW x7, 268(x0)
+            u_axil_ram.mem[18] = 32'h10802823; // SW x8, 272(x0)
+            u_axil_ram.mem[19] = 32'h10902A23; // SW x9, 276(x0)
+            u_axil_ram.mem[20] = 32'h10A02C23; // SW x10, 280(x0)
+            u_axil_ram.mem[21] = 32'h10B02E23; // SW x11, 284(x0)
+            u_axil_ram.mem[22] = 32'h12C02023; // SW x12, 288(x0)
+            u_axil_ram.mem[23] = 32'h12D02223; // SW x13, 292(x0)
+            u_axil_ram.mem[24] = 32'h12E02423; // SW x14, 296(x0)
+            u_axil_ram.mem[25] = 32'h12F02623; // SW x15, 300(x0)
+            // 0x68: JAL x0, 0 (infinite loop)
+            u_axil_ram.mem[26] = 32'h0000006F;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 30: Exception Handling
+    //   Tests ECALL, EBREAK, and illegal insn
+    //   with trap handler at 0x80, MRET return
+    // ==========================================
+    task load_test30_exceptions;
+        integer i;
+        begin
+            $display("\n--- Loading Test 30: Exception Handling ---");
+            // Clear memory
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+
+            // ========== Main program (0x00 - 0x2C) ==========
+            
+            // 0x00: ADDI x31, x0, 0x200      - x31 = 0x200 (data pointer for storing results)
+            // imm=0x200 rs1=00000 funct3=000 rd=11111 op=0010011
+            u_axil_ram.mem[0] = 32'h20000f93;
+
+            // 0x04: ADDI x1, x0, 0x80         - x1 = 0x80 (trap handler address)
+            // imm=0x080 rs1=00000 funct3=000 rd=00001 op=0010011
+            u_axil_ram.mem[1] = 32'h08000093;
+
+            // 0x08: CSRRW x0, mtvec, x1       - mtvec = 0x80
+            // CSR=0x305 rs1=00001 funct3=001 rd=00000 op=1110011
+            u_axil_ram.mem[2] = 32'h30509073;
+
+            // 0x0C: ADDI x20, x0, 0           - x20 = 0 (test counter, incremented after each MRET)
+            u_axil_ram.mem[3] = 32'h00000a13;
+
+            // --- Exception 1: ECALL (mcause = 11) ---
+            // 0x10: ECALL
+            u_axil_ram.mem[4] = 32'h00000073;
+            // 0x14: ADDI x20, x20, 1          - x20++ (returned from ECALL handler)
+            u_axil_ram.mem[5] = 32'h001a0a13;
+
+            // --- Exception 2: EBREAK (mcause = 3) ---
+            // 0x18: EBREAK
+            u_axil_ram.mem[6] = 32'h00100073;
+            // 0x1C: ADDI x20, x20, 1          - x20++ (returned from EBREAK handler)
+            u_axil_ram.mem[7] = 32'h001a0a13;
+
+            // --- Exception 3: Illegal instruction (mcause = 2) ---
+            // 0x20: Illegal instruction (opcode 0b1111111 is not valid)
+            u_axil_ram.mem[8] = 32'hFFFFFFFF;
+            // 0x24: ADDI x20, x20, 1          - x20++ (returned from illegal insn handler)
+            u_axil_ram.mem[9] = 32'h001a0a13;
+
+            // 0x28: JAL x0, 0                 - Infinite loop (done)
+            u_axil_ram.mem[10] = 32'h0000006f;
+
+            // ========== Trap handler at 0x80 (mem[32]) ==========
+            // This handler:
+            //   1. Reads mcause, mepc, mtval
+            //   2. Advances mepc by 4 (skip faulting instruction)
+            //   3. Stores mcause, original mepc, mtval to [x31], [x31+4], [x31+8]
+            //   4. Advances data pointer x31 by 12
+            //   5. Does MRET
+
+            // 0x80: CSRRS x28, mcause, x0     - x28 = mcause
+            // CSR=0x342 rs1=00000 funct3=010 rd=11100 op=1110011
+            u_axil_ram.mem[32] = 32'h34202e73;
+
+            // 0x84: CSRRS x29, mepc, x0       - x29 = mepc
+            // CSR=0x341 rs1=00000 funct3=010 rd=11101 op=1110011
+            u_axil_ram.mem[33] = 32'h34102ef3;
+
+            // 0x88: CSRRS x30, mtval, x0      - x30 = mtval
+            // CSR=0x343 rs1=00000 funct3=010 rd=11110 op=1110011
+            u_axil_ram.mem[34] = 32'h34302f73;
+
+            // 0x8C: ADDI x29, x29, 4          - mepc += 4 (advance past faulting insn)
+            u_axil_ram.mem[35] = 32'h004e8e93;
+
+            // 0x90: CSRRW x0, mepc, x29       - write updated mepc back
+            // CSR=0x341 rs1=11101 funct3=001 rd=00000 op=1110011
+            u_axil_ram.mem[36] = 32'h341e9073;
+
+            // 0x94: SW x28, 0(x31)            - store mcause
+            // imm[11:5]=0000000 rs2=11100 rs1=11111 funct3=010 imm[4:0]=00000 op=0100011
+            u_axil_ram.mem[37] = 32'h01cfa023;
+
+            // 0x98: SW x29, 4(x31)            - store mepc+4 (points to next instruction)
+            u_axil_ram.mem[38] = 32'h01dfa223;
+
+            // 0x9C: SW x30, 8(x31)            - store mtval
+            u_axil_ram.mem[39] = 32'h01efa423;
+
+            // 0xA0: ADDI x31, x31, 12         - advance data pointer
+            u_axil_ram.mem[40] = 32'h00cf8f93;
+
+            // 0xA4: MRET                      - return to mepc
+            u_axil_ram.mem[41] = 32'h30200073;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 31: Timer Compare-Match Interrupt
+    //   Configures timer to trigger interrupt
+    //   when mtime >= mtimecmp. Verifies trap
+    //   entry with mcause = 0x80000007 (MTI).
+    // ==========================================
+    task load_test31_timer_interrupt;
+        integer i;
+        begin
+            $display("\n--- Loading Test 31: Timer Compare-Match Interrupt ---");
+            // Clear first 128 words
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+
+            // Timer base: 0x0400_2000
+            //   +0x00 = timer_lo, +0x04 = timer_hi
+            //   +0x08 = timer_ctrl, +0x0C = timecmp_lo, +0x10 = timecmp_hi
+
+            // ========== Main program (0x00 - 0x44) ==========
+
+            // --- Setup timer base address in x5 ---
+            // 0x00: LUI x5, 0x04002          - x5 = 0x0400_2000
+            u_axil_ram.mem[0] = 32'h040022b7;
+            
+            // --- Reset timer to 0 ---
+            // 0x04: SW x0, 0(x5)             - timer_lo = 0
+            u_axil_ram.mem[1] = 32'h0002a023;
+            // 0x08: SW x0, 4(x5)             - timer_hi = 0
+            u_axil_ram.mem[2] = 32'h0002a223;
+
+            // --- Set timecmp_lo = 20 (small value so timer fires quickly) ---
+            // 0x0C: ADDI x6, x0, 20          - x6 = 20
+            u_axil_ram.mem[3] = 32'h01400313;
+            // 0x10: SW x6, 0x0C(x5)          - timecmp_lo = 20
+            u_axil_ram.mem[4] = 32'h0062a623;
+            // 0x14: SW x0, 0x10(x5)          - timecmp_hi = 0
+            u_axil_ram.mem[5] = 32'h0002a823;
+
+            // --- Setup trap handler at 0x80 ---
+            // 0x18: ADDI x1, x0, 0x80        - x1 = 0x80
+            u_axil_ram.mem[6] = 32'h08000093;
+            // 0x1C: CSRRW x0, mtvec, x1      - mtvec = 0x80
+            u_axil_ram.mem[7] = 32'h30509073;
+
+            // --- Enable mie.MTIE (bit 7) ---
+            // 0x20: ADDI x1, x0, 0x80        - x1 = 0x80
+            u_axil_ram.mem[8] = 32'h08000093;
+            // 0x24: CSRRW x0, mie, x1        - mie = 0x80 (MTIE=1)
+            u_axil_ram.mem[9] = 32'h30409073;
+
+            // --- Enable global interrupts: mstatus.MIE (bit 3) ---
+            // 0x28: CSRRSI x0, mstatus, 8    - set bit 3
+            u_axil_ram.mem[10] = 32'h30046073;
+
+            // --- Enable timer: ctrl = 0x0B (Enable + CountUp + IRQ_EN) ---
+            // 0x2C: ADDI x7, x0, 0x0B        - x7 = 11 (bits 0,1,3)
+            u_axil_ram.mem[11] = 32'h00b00393;
+            // 0x30: SW x7, 8(x5)             - timer_ctrl = 0x0B
+            u_axil_ram.mem[12] = 32'h0072a423;
+
+            // --- x20 = 0 (trap counter, set to 1 by handler) ---
+            // 0x34: ADDI x20, x0, 0
+            u_axil_ram.mem[13] = 32'h00000a13;
+
+            // --- Spin loop: wait for handler to set x20 = 1 ---
+            // 0x38: BNE x20, x0, +8          - if (x20 != 0) goto 0x40
+            u_axil_ram.mem[14] = 32'h000a1463;
+            // 0x3C: JAL x0, -4               - else loop back to 0x38
+            u_axil_ram.mem[15] = 32'hffdff06f;
+
+            // --- Landed here after handler ---
+            // 0x40: SW x20, 256(x0)          - store trap count to mem[256]
+            u_axil_ram.mem[16] = 32'h114020a3; // Corrected: SW x20, 0x101(x0) wrong — use explicit:
+            // Let me redo this correctly:
+            // SW rs2=x20, imm=256, base=x0
+            // imm[11:5]=0000100, rs2=10100, rs1=00000, funct3=010, imm[4:0]=00000, op=0100011
+            // 256 = 0x100 → imm[11:5] = 0000100_0 → wait, 256 = 12'h100
+            // imm[11:5] = 7'b0001000 = 0x08, imm[4:0] = 5'b00000
+            u_axil_ram.mem[16] = {7'b0001000, 5'd20, 5'd0, 3'b010, 5'b00000, 7'b0100011};
+
+            // 0x44: JAL x0, 0                - done: infinite loop
+            u_axil_ram.mem[17] = 32'h0000006f;
+
+            // ========== Trap handler at 0x80 (mem[32]) ==========
+            // 1. Read mcause
+            // 2. Store mcause to mem[260]
+            // 3. Clear timer IRQ by setting timecmp_lo = 0xFFFFFFFF
+            // 4. Disable timer (timer_ctrl = 0) to avoid influencing later tests
+            // 5. Set x20 = 1 (flag for main loop)
+            // 6. MRET
+
+            // 0x80: CSRRS x28, mcause, x0    - x28 = mcause
+            u_axil_ram.mem[32] = 32'h34202e73;
+
+            // 0x84: SW x28, 260(x0)          - store mcause at mem[260]
+            // 260 = 0x104 → imm[11:5]=0001000, imm[4:0]=00100
+            u_axil_ram.mem[33] = {7'b0001000, 5'd28, 5'd0, 3'b010, 5'b00100, 7'b0100011};
+
+            // 0x88: ADDI x9, x0, -1          - x9 = 0xFFFFFFFF
+            u_axil_ram.mem[34] = 32'hfff00493;
+
+            // 0x8C: LUI x5, 0x04002          - x5 = timer base (re-load, handler may not have it)
+            u_axil_ram.mem[35] = 32'h040022b7;
+
+            // 0x90: SW x9, 0x0C(x5)          - timecmp_lo = 0xFFFFFFFF (clear IRQ)
+            u_axil_ram.mem[36] = 32'h0092a623;
+            // 0x94: SW x9, 0x10(x5)          - timecmp_hi = 0xFFFFFFFF
+            u_axil_ram.mem[37] = 32'h0092a823;
+
+            // 0x98: SW x0, 8(x5)             - timer_ctrl = 0 (disable timer + IRQ gate)
+            u_axil_ram.mem[38] = 32'h0002a423;
+
+            // 0x9C: ADDI x20, x0, 1          - x20 = 1 (handled flag)
+            u_axil_ram.mem[39] = 32'h00100a13;
+
+            // 0xA0: MRET                     - return to mepc
+            u_axil_ram.mem[40] = 32'h30200073;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 32: Timer IRQ During Branch-Predicted Loop
+    //   Timer fires mid-loop while branch predictor
+    //   is actively predicting. Validates correct
+    //   mepc save, handler execution, and MRET return.
+    // ==========================================
+    task load_test32_irq_during_branch_loop;
+        integer i;
+        begin
+            $display("\n--- Loading Test 32: Timer IRQ During Branch-Predicted Loop ---");
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+
+            // 0x00: LUI x5, 0x04002 — timer base
+            u_axil_ram.mem[0] = 32'h040022b7;
+            // 0x04: SW x0, 0(x5) — timer_lo = 0
+            u_axil_ram.mem[1] = 32'h0002a023;
+            // 0x08: SW x0, 4(x5) — timer_hi = 0
+            u_axil_ram.mem[2] = 32'h0002a223;
+            // 0x0C: ADDI x6, x0, 100 — timecmp = 100 (fire well into the loop)
+            u_axil_ram.mem[3] = 32'h06400313;
+            // 0x10: SW x6, 0x0C(x5) — timecmp_lo = 100
+            u_axil_ram.mem[4] = 32'h0062a623;
+            // 0x14: SW x0, 0x10(x5) — timecmp_hi = 0
+            u_axil_ram.mem[5] = 32'h0002a823;
+            // 0x18: ADDI x1, x0, 0x80
+            u_axil_ram.mem[6] = 32'h08000093;
+            // 0x1C: CSRRW x0, mtvec, x1
+            u_axil_ram.mem[7] = 32'h30509073;
+            // 0x20: ADDI x1, x0, 0x80
+            u_axil_ram.mem[8] = 32'h08000093;
+            // 0x24: CSRRW x0, mie, x1 — MTIE=1
+            u_axil_ram.mem[9] = 32'h30409073;
+            // 0x28: CSRRSI x0, mstatus, 8 — MIE=1
+            u_axil_ram.mem[10] = 32'h30046073;
+            // Init registers BEFORE starting timer so MRET can't re-execute these
+            // 0x2C: ADDI x10, x0, 0 — accumulator = 0
+            u_axil_ram.mem[11] = 32'h00000513;
+            // 0x30: ADDI x11, x0, 0 — counter = 0
+            u_axil_ram.mem[12] = 32'h00000593;
+            // 0x34: ADDI x12, x0, 50 — limit = 50
+            u_axil_ram.mem[13] = 32'h03200613;
+            // 0x38: ADDI x20, x0, 0 — IRQ flag = 0
+            u_axil_ram.mem[14] = 32'h00000a13;
+            // 0x3C: ADDI x7, x0, 0x0B — Enable + Up + IRQ_EN
+            u_axil_ram.mem[15] = 32'h00b00393;
+            // 0x40: SW x7, 8(x5) — start timer (after all init!)
+            u_axil_ram.mem[16] = 32'h0072a423;
+
+            // Two-counter loop: tests precise interrupt between paired increments
+            // 0x44: ADDI x10, x10, 1 — accumulator++
+            u_axil_ram.mem[17] = 32'h00150513;
+            // 0x48: ADDI x11, x11, 1 — counter++
+            u_axil_ram.mem[18] = 32'h00158593;
+            // 0x4C: BLT x11, x12, -8 (back to 0x44)
+            u_axil_ram.mem[19] = 32'hfec5cce3;
+
+            // 0x50: SW x10, 256(x0)
+            u_axil_ram.mem[20] = {7'b0001000, 5'd10, 5'd0, 3'b010, 5'b00000, 7'b0100011};
+            // 0x54: SW x11, 260(x0)
+            u_axil_ram.mem[21] = {7'b0001000, 5'd11, 5'd0, 3'b010, 5'b00100, 7'b0100011};
+            // 0x58: SW x20, 264(x0)
+            u_axil_ram.mem[22] = {7'b0001000, 5'd20, 5'd0, 3'b010, 5'b01000, 7'b0100011};
+            // 0x5C: JAL x0, 0
+            u_axil_ram.mem[23] = 32'h0000006f;
+
+            // ========== Handler at 0x80 (mem[32]) ==========
+            // 0x80: CSRRS x28, mcause, x0
+            u_axil_ram.mem[32] = 32'h34202e73;
+            // 0x84: LUI x5, 0x04002 — reload timer base
+            u_axil_ram.mem[33] = 32'h040022b7;
+            // 0x88: ADDI x9, x0, -1
+            u_axil_ram.mem[34] = 32'hfff00493;
+            // 0x8C: SW x9, 0x0C(x5) — timecmp_lo = max
+            u_axil_ram.mem[35] = 32'h0092a623;
+            // 0x90: SW x9, 0x10(x5) — timecmp_hi = max
+            u_axil_ram.mem[36] = 32'h0092a823;
+            // 0x94: SW x0, 8(x5) — disable timer
+            u_axil_ram.mem[37] = 32'h0002a423;
+            // 0x98: ADDI x20, x0, 1 — set IRQ flag
+            u_axil_ram.mem[38] = 32'h00100a13;
+            // 0x9C: MRET
+            u_axil_ram.mem[39] = 32'h30200073;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 33: Exception at Mispredicted Branch Target
+    //   Forward branches (cold predictor) jump to
+    //   exception-causing instructions. Validates
+    //   trap priority over misprediction flush.
+    // ==========================================
+    task load_test33_exception_at_branch_target;
+        integer i;
+        begin
+            $display("\n--- Loading Test 33: Exception at Mispredicted Branch Target ---");
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+
+            // 0x00: ADDI x31, x0, 0x200 — data pointer
+            u_axil_ram.mem[0] = 32'h20000f93;
+            // 0x04: ADDI x1, x0, 0x80
+            u_axil_ram.mem[1] = 32'h08000093;
+            // 0x08: CSRRW x0, mtvec, x1
+            u_axil_ram.mem[2] = 32'h30509073;
+            // 0x0C: ADDI x20, x0, 0 — counter = 0
+            u_axil_ram.mem[3] = 32'h00000a13;
+
+            // --- Branch 1: BEQ to ECALL (cold predictor, likely mispredicted) ---
+            // 0x10: ADDI x2, x0, 5
+            u_axil_ram.mem[4] = 32'h00500113;
+            // 0x14: ADDI x3, x0, 5
+            u_axil_ram.mem[5] = 32'h00500193;
+            // 0x18: BEQ x2, x3, +16 → 0x28
+            u_axil_ram.mem[6] = 32'h00310863;
+            // 0x1C-0x24: NOPs (dead path, pre-filled)
+            // 0x28: ECALL
+            u_axil_ram.mem[10] = 32'h00000073;
+            // 0x2C: ADDI x20, x20, 1 — returned from handler
+            u_axil_ram.mem[11] = 32'h001a0a13;
+
+            // --- Branch 2: BEQ to EBREAK (cold predictor) ---
+            // 0x30: ADDI x2, x0, 10
+            u_axil_ram.mem[12] = 32'h00a00113;
+            // 0x34: ADDI x3, x0, 10
+            u_axil_ram.mem[13] = 32'h00a00193;
+            // 0x38: BEQ x2, x3, +16 → 0x48
+            u_axil_ram.mem[14] = 32'h00310863;
+            // 0x3C-0x44: NOPs (dead path, pre-filled)
+            // 0x48: EBREAK
+            u_axil_ram.mem[18] = 32'h00100073;
+            // 0x4C: ADDI x20, x20, 1
+            u_axil_ram.mem[19] = 32'h001a0a13;
+
+            // --- Branch 3: BEQ to illegal instruction (cold predictor) ---
+            // 0x50: ADDI x2, x0, 15
+            u_axil_ram.mem[20] = 32'h00f00113;
+            // 0x54: ADDI x3, x0, 15
+            u_axil_ram.mem[21] = 32'h00f00193;
+            // 0x58: BEQ x2, x3, +16 → 0x68
+            u_axil_ram.mem[22] = 32'h00310863;
+            // 0x5C-0x64: NOPs (dead path, pre-filled)
+            // 0x68: Illegal instruction
+            u_axil_ram.mem[26] = 32'hFFFFFFFF;
+            // 0x6C: ADDI x20, x20, 1
+            u_axil_ram.mem[27] = 32'h001a0a13;
+
+            // 0x70: JAL x0, 0
+            u_axil_ram.mem[28] = 32'h0000006f;
+
+            // ========== Handler at 0x80 (mem[32]) ==========
+            // Read mcause/mepc/mtval, bump mepc+4, store to [x31], MRET
+            // 0x80: CSRRS x28, mcause, x0
+            u_axil_ram.mem[32] = 32'h34202e73;
+            // 0x84: CSRRS x29, mepc, x0
+            u_axil_ram.mem[33] = 32'h34102ef3;
+            // 0x88: CSRRS x30, mtval, x0
+            u_axil_ram.mem[34] = 32'h34302f73;
+            // 0x8C: ADDI x29, x29, 4
+            u_axil_ram.mem[35] = 32'h004e8e93;
+            // 0x90: CSRRW x0, mepc, x29
+            u_axil_ram.mem[36] = 32'h341e9073;
+            // 0x94: SW x28, 0(x31)
+            u_axil_ram.mem[37] = 32'h01cfa023;
+            // 0x98: SW x29, 4(x31)
+            u_axil_ram.mem[38] = 32'h01dfa223;
+            // 0x9C: SW x30, 8(x31)
+            u_axil_ram.mem[39] = 32'h01efa423;
+            // 0xA0: ADDI x31, x31, 12
+            u_axil_ram.mem[40] = 32'h00cf8f93;
+            // 0xA4: MRET
+            u_axil_ram.mem[41] = 32'h30200073;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 34: MRET Into Branch With Predictor State
+    //   Loop body contains ECALL; handler returns
+    //   via MRET to the loop-back branch. Tests
+    //   MRET flush + branch prediction interaction.
+    // ==========================================
+    task load_test34_mret_into_branch;
+        integer i;
+        begin
+            $display("\n--- Loading Test 34: MRET Into Branch With Predictor State ---");
+            for (i = 0; i < 128; i = i + 1) begin
+                u_axil_ram.mem[i] = 32'h00000013; // NOP
+            end
+
+            // 0x00: ADDI x1, x0, 0x80
+            u_axil_ram.mem[0] = 32'h08000093;
+            // 0x04: CSRRW x0, mtvec, x1
+            u_axil_ram.mem[1] = 32'h30509073;
+            // 0x08: ADDI x10, x0, 0 — counter = 0
+            u_axil_ram.mem[2] = 32'h00000513;
+            // 0x0C: ADDI x11, x0, 5 — limit = 5
+            u_axil_ram.mem[3] = 32'h00500593;
+            // 0x10: ADDI x20, x0, 0 — exception count = 0
+            u_axil_ram.mem[4] = 32'h00000a13;
+
+            // Loop:
+            // 0x14: ADDI x10, x10, 1 — counter++
+            u_axil_ram.mem[5] = 32'h00150513;
+            // 0x18: ECALL — handler bumps mepc to 0x1C
+            u_axil_ram.mem[6] = 32'h00000073;
+            // 0x1C: BLT x10, x11, -8 → 0x14
+            u_axil_ram.mem[7] = 32'hfeb54ce3;
+
+            // Post-loop:
+            // 0x20: SW x10, 256(x0)
+            u_axil_ram.mem[8] = {7'b0001000, 5'd10, 5'd0, 3'b010, 5'b00000, 7'b0100011};
+            // 0x24: SW x20, 260(x0)
+            u_axil_ram.mem[9] = {7'b0001000, 5'd20, 5'd0, 3'b010, 5'b00100, 7'b0100011};
+            // 0x28: JAL x0, 0
+            u_axil_ram.mem[10] = 32'h0000006f;
+
+            // ========== Handler at 0x80 (mem[32]) ==========
+            // 0x80: CSRRS x28, mepc, x0
+            u_axil_ram.mem[32] = 32'h34102e73;
+            // 0x84: ADDI x28, x28, 4 — skip ECALL
+            u_axil_ram.mem[33] = 32'h004e0e13;
+            // 0x88: CSRRW x0, mepc, x28
+            u_axil_ram.mem[34] = 32'h341e1073;
+            // 0x8C: ADDI x20, x20, 1
+            u_axil_ram.mem[35] = 32'h001a0a13;
+            // 0x90: MRET
+            u_axil_ram.mem[36] = 32'h30200073;
+        end
+    endtask
 
 endmodule

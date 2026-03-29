@@ -83,7 +83,8 @@ module axil_timer_tb;
         .s_axil_rresp(s_axil_rresp),
         .s_axil_rvalid(s_axil_rvalid),
         .s_axil_rready(s_axil_rready),
-        .ext_event_i(ext_event_i)
+        .ext_event_i(ext_event_i),
+        .timer_irq_o() // Not used in standalone timer TB
     );
 
     // Clock Generation

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Z-Core is a 32-bit RISC-V processor implementing the RV32IM base integer instruction set. It uses a **5-stage pipelined architecture** (IF, ID, EX, MEM, WB) with an AXI4-Lite memory interface.
+Z-Core is a 32-bit RISC-V processor implementing the **RV32IM** base integer instruction set with the **Zicsr extension** for Control and Status Register access. It uses a **5-stage pipelined architecture** (IF, ID, EX, MEM, WB) with an AXI4-Lite memory interface and supports **M-mode interrupt handling**.
 
 ## Z-Core Architecture Diagram
 
@@ -24,7 +24,8 @@ The **Control Unit** is the top-level module of the processor core. It orchestra
 - **Forwarding Unit**: Solves Data Hazards by forwarding results from EX/MEM and MEM/WB stages to the ID/EX stage.
 - **System Signals**: Handles reset logic and halt signals (for simulation/verification).
 - **Instruction Cache**: Z-Core includes a parameterizable direct-mapped instruction cache (`rtl/z_core_instr_cache.v`) used by the fetch stage to reduce repeated AXI-Lite instruction fetches on short loops and hot code paths. At a high level it stores recently fetched 32-bit instructions improving instruction throughput.
-- **Branch Predictor**: A Two-Bit branch predictor is implemented. It tracks recent branches and jumps in order to predict their future behaviour. The predictor includes a Branch History Table (BHT) and a Branch Target Buffer (BTB), these are direct-mapped tables that store the predictor bits and recent branch/jump addresses. 
+- **Branch Predictor**: A Two-Bit branch predictor is implemented. It tracks recent branches and jumps in order to predict their future behaviour. The predictor includes a Branch History Table (BHT) and a Branch Target Buffer (BTB), these are direct-mapped tables that store the predictor bits and recent branch/jump addresses.
+- **CSR Access & Trap Handling**: Implements the Zicsr extension for atomic CSR read-modify-write operations and M-mode trap entry/exit logic for both **interrupts** and **exceptions**. See the [Exceptions & Interrupts Documentation](EXCEPTIONS_AND_INTERRUPTS.md) for full details.
 
 The following components are **instantiated internally** within the Control Unit structure:
 
@@ -222,6 +223,36 @@ A separate module instantiated within the Control Unit (`u_axil_master`) to hand
   - Serializes requests if necessary (though current CPU is single-issue blocking).
   - Converts internal read/write signals into AXI address and data phases.
 
+### 1.8 CSR File (`z_core_csr_file`)
+
+Implements the RISC-V **M-mode Control and Status Registers** per Privileged Spec v1.12, providing the Zicsr extension and interrupt handling infrastructure.
+
+**Implemented CSRs:**
+
+| Address | Name | Access | Description |
+|---------|------|--------|-------------|
+| `0x300` | `mstatus` | RW | Machine status (MIE, MPIE, MPP) |
+| `0x301` | `misa` | RO | ISA description (hardwired RV32IM) |
+| `0x304` | `mie` | RW | Interrupt enable bits (MEIE, MTIE, MSIE) |
+| `0x305` | `mtvec` | RW | Trap vector base address |
+| `0x340` | `mscratch` | RW | Scratch register for trap handlers |
+| `0x341` | `mepc` | RW | Exception program counter |
+| `0x342` | `mcause` | RW | Trap cause (interrupt bit + code) |
+| `0x343` | `mtval` | RW | Trap value |
+| `0x344` | `mip` | RO | Interrupt pending (driven by external inputs) |
+| `0xB00` | `mcycle` | RO | Cycle counter (low 32 bits) |
+| `0xB80` | `mcycleh` | RO | Cycle counter (high 32 bits) |
+| `0xB02` | `minstret` | RO | Retired instruction counter (low 32 bits) |
+| `0xB82` | `minstreth` | RO | Retired instruction counter (high 32 bits) |
+
+**Key Features:**
+- Atomic read-modify-write for all CSR instructions (CSRRW/S/C and immediate variants)
+- Trap entry: saves `mepc`, `mcause`, sets `MPIE←MIE`, `MIE←0`
+- MRET: restores `MIE←MPIE`, `MPIE←1`, returns to `mepc`
+- Interrupt pending output gated by `mstatus.MIE & mie & mip`
+
+> For complete register bit fields, interrupt priority, pipeline integration details, and usage examples, see the [Exceptions & Interrupts Documentation](EXCEPTIONS_AND_INTERRUPTS.md).
+
 
 ## 2. Peripherals & Interconnect
 
@@ -237,7 +268,7 @@ Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
 **Configuration:**
 - 1 Slave Interface (from Control Unit)
-- 3 Master Interfaces (to Memory, UART, GPIO, Timer)
+- 4 Master Interfaces (to Memory, UART, GPIO, Timer)
 
 ### 2.3 UART (`axil_uart`)
 - Base Address: `0x0400_0000`
@@ -257,7 +288,7 @@ Connects the Control Unit (Master) to multiple Slaves based on the address map.
 
 ## Supported Instructions
 
-The Z-Core implements the RV32IM Instruction Set Archiecture, supporting the following instructions.
+The Z-Core implements the **RV32IM** Instruction Set Architecture with the **Zicsr** extension, supporting the following instructions.
 
 ### R-Type (Register-Register)
 ```
@@ -289,6 +320,12 @@ LUI, AUIPC
 ### J-Type (Jump)
 ```
 JAL
+```
+
+### System (Zicsr Extension)
+```
+CSRRW, CSRRS, CSRRC, CSRRWI, CSRRSI, CSRRCI
+MRET, ECALL, EBREAK
 ```
 
 ## Memory Map
