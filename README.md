@@ -263,6 +263,8 @@ Z-Core includes a basic hardware performance-monitoring facility. The **mcycle**
 
 | Counter Name | Event |
 |--------------|-------|
+| mcycle | Clock Cycles |
+| minstret | Retired Instructions |
 | mhpmcountert3 | Instruction Cache Hits |
 | mhpmcountert4 | Data Cache Hits (Not implemented yet) |
 | mhpmcountert5 | Load Requests |
