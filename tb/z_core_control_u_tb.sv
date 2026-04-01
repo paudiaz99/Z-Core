@@ -501,11 +501,11 @@ module z_core_control_u_tb;
             // Accumulate internal counters (read before reset)
             // Skip first call (before any test runs) to avoid X/garbage
             if (resets_done > 0) begin
-                total_internal_cycles = total_internal_cycles + uut.perf_cycle;
-                total_internal_instrs = total_internal_instrs + uut.perf_instret;
-                total_internal_cache_hits = total_internal_cache_hits + uut.perf_inst_cache_hits;
-                total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
-                total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
+                total_internal_cycles = total_internal_cycles + uut.u_csr_file.mcycle_r;
+                total_internal_instrs = total_internal_instrs + uut.u_csr_file.minstret_r;
+                total_internal_cache_hits = total_internal_cache_hits + uut.u_csr_file.mhpmcounter3_r;
+                total_internal_memory_writes = total_internal_memory_writes + uut.u_csr_file.mhpmcounter6_r;
+                total_internal_memory_reads = total_internal_memory_reads + uut.u_csr_file.mhpmcounter5_r;
             end
             resets_done = resets_done + 1;
             
@@ -529,11 +529,11 @@ module z_core_control_u_tb;
             total_memory_reads = total_memory_reads + exp_reads;
             
             // Check against current test counters (which reset on reset_cpu)
-            if (uut.perf_memory_writes == exp_writes && uut.perf_memory_reads == exp_reads) begin
-                $display("  [PERF] %0s: Writes=%0d, Reads=%0d (MATCH)", test_name, uut.perf_memory_writes, uut.perf_memory_reads);
+            if (uut.u_csr_file.mhpmcounter6_r == exp_writes && uut.u_csr_file.mhpmcounter5_r == exp_reads) begin
+                $display("  [PERF] %0s: Writes=%0d, Reads=%0d (MATCH)", test_name, uut.u_csr_file.mhpmcounter6_r, uut.u_csr_file.mhpmcounter5_r);
             end else begin
-                $display("  [PERF-FAIL] %0s: Writes=%0d (Exp %0d), Reads=%0d (Exp %0d)", 
-                         test_name, uut.perf_memory_writes, exp_writes, uut.perf_memory_reads, exp_reads);
+                $display("  [PERF-FAIL] %0s: Writes=%0d (Exp %0d), Reads=%0d (Exp %0d)",
+                         test_name, uut.u_csr_file.mhpmcounter6_r, exp_writes, uut.u_csr_file.mhpmcounter5_r, exp_reads);
                 fail_count = fail_count + 1;
             end
         end
@@ -1516,9 +1516,9 @@ module z_core_control_u_tb;
         // Performance info
         $display("  ─────────────────────────────────────────────");
         $display("  Cache Locality Performance:");
-        $display("  Cache Hits: %0d", uut.perf_inst_cache_hits);
-        $display("  Cycles: %0d", uut.perf_cycle);
-        $display("  Retired Instructions: %0d", uut.perf_instret);
+        $display("  Cache Hits: %0d", uut.u_csr_file.mhpmcounter3_r);
+        $display("  Cycles: %0d", uut.u_csr_file.mcycle_r);
+        $display("  Retired Instructions: %0d", uut.u_csr_file.minstret_r);
         $display("  ─────────────────────────────────────────────");
         verify_counters(3, 0, "Test 24");
 
@@ -1539,9 +1539,9 @@ module z_core_control_u_tb;
         check_mem(260, 70, "SW mem[260] = 70 (B)");
         verify_counters(2, 0, "Test 25");
 
-        $display("  Cache Hits (cumulative): %0d", uut.perf_inst_cache_hits);
-        $display("  Cycles (cumulative):     %0d", uut.perf_cycle);
-        $display("  Retired Instructions (cumulative): %0d", uut.perf_instret);
+        $display("  Cache Hits (cumulative): %0d", uut.u_csr_file.mhpmcounter3_r);
+        $display("  Cycles (cumulative):     %0d", uut.u_csr_file.mcycle_r);
+        $display("  Retired Instructions (cumulative): %0d", uut.u_csr_file.minstret_r);
 
         // ==========================================
         // Test 26: Full Pipeline Exploitation
@@ -1579,10 +1579,10 @@ module z_core_control_u_tb;
         // Performance analysis
         $display("  ─────────────────────────────────────────────");
         $display("  Pipeline Exploitation Performance:");
-        $display("  Cache Hits: %0d", uut.perf_inst_cache_hits);
-        $display("  Cycles: %0d", uut.perf_cycle);
-        $display("  Retired Instructions: %0d", uut.perf_instret);
-        $display("  IPC (Instructions/Cycle): %0.3f", real'(uut.perf_instret) / real'(uut.perf_cycle));
+        $display("  Cache Hits: %0d", uut.u_csr_file.mhpmcounter3_r);
+        $display("  Cycles: %0d", uut.u_csr_file.mcycle_r);
+        $display("  Retired Instructions: %0d", uut.u_csr_file.minstret_r);
+        $display("  IPC (Instructions/Cycle): %0.3f", real'(uut.u_csr_file.minstret_r) / real'(uut.u_csr_file.mcycle_r));
         $display("  ─────────────────────────────────────────────");
 
         // ==========================================
@@ -1894,11 +1894,11 @@ module z_core_control_u_tb;
         total_instrs = total_instrs + instr_counter;
         
         // Accumulate internal counters for the final test
-        total_internal_cycles = total_internal_cycles + uut.perf_cycle;
-        total_internal_instrs = total_internal_instrs + uut.perf_instret;
-        total_internal_cache_hits = total_internal_cache_hits + uut.perf_inst_cache_hits;
-        total_internal_memory_writes = total_internal_memory_writes + uut.perf_memory_writes;
-        total_internal_memory_reads = total_internal_memory_reads + uut.perf_memory_reads;
+        total_internal_cycles = total_internal_cycles + uut.u_csr_file.mcycle_r;
+        total_internal_instrs = total_internal_instrs + uut.u_csr_file.minstret_r;
+        total_internal_cache_hits = total_internal_cache_hits + uut.u_csr_file.mhpmcounter3_r;
+        total_internal_memory_writes = total_internal_memory_writes + uut.u_csr_file.mhpmcounter6_r;
+        total_internal_memory_reads = total_internal_memory_reads + uut.u_csr_file.mhpmcounter5_r;
         $display("");
         $display(" ___________________________________________________________");
         $display("|                    TEST SUMMARY                           |");
