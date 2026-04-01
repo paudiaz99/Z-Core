@@ -257,6 +257,27 @@ The processor has been verified with a comprehensive system-level testbench (`tb
 | Memory Size | 64KB (configurable) |
 | Cache Size | 256 Entries (configurable) |
 
+## Performance Monitoring
+
+Z-Core includes a basic hardware performance-monitoring facility. The **mcycle** CSR counts the number of clock cycles executed by the processor core on which the hart is running. The **minstret** CSR counts the number of instructions the hart has retired. Additionally, Z-Core has eight additional performance counters accessible through **mhpmcountert3–mhpmcounter10**. 
+
+| Counter Name | Event |
+|--------------|-------|
+| mcycle | Clock Cycles |
+| minstret | Retired Instructions |
+| mhpmcountert3 | Instruction Cache Hits |
+| mhpmcountert4 | Data Cache Hits (Not implemented yet) |
+| mhpmcountert5 | Load Requests |
+| mhpmcountert6 | Store Requests |
+| mhpmcountert7 | Branch Misspredictions |
+| mhpmcountert8 | Pipeline flushes |
+| mhpmcountert9 | Instruction Cache Misses |
+| mhpmcountert10 | Memory Instruction Fetches |
+
+> [!NOTE]
+> For additional information regarding performance monitoring, refer to the RISC-V Privileged Specification Version 1.12.
+
+
 ## Configuration
 
 The processor is parameterizable through top-level parameters:

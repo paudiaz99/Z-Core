@@ -150,19 +150,6 @@ reg mem_op_pending;
 
 
 // ##################################################
-//           PERFORMANCE COUNTERS
-// ##################################################
-
-reg [63:0] perf_cycle;
-reg [63:0] perf_instret;
-reg [63:0] perf_inst_cache_hits;
-reg [63:0] perf_inst_fetch;
-reg [63:0] perf_memory_reads;
-reg [63:0] perf_memory_writes;
-reg [63:0] perf_pipeline_flush;
-
-
-// ##################################################
 //              PIPELINE REGISTERS
 // ##################################################
 
@@ -501,6 +488,12 @@ wire        csr_mie_meie;
 wire        csr_mie_mtie;
 wire        csr_mie_msie;
 
+// Pulse generators for performance counters
+reg load_pulse;
+reg write_pulse;
+reg inst_fetch_pulse;
+reg inst_cache_miss_pulse;
+
 z_core_csr_file #(
     .DATA_WIDTH(DATA_WIDTH)
 ) u_csr_file (
@@ -519,6 +512,13 @@ z_core_csr_file #(
     .mtip(mtip),
     .msip(msip),
     .instret_pulse(mem_wb_valid),
+    .inst_cache_hit_pulse(cache_hit),  // No need pulse: Always single cycle
+    .mem_read_pulse(load_pulse),
+    .mem_write_pulse(write_pulse),
+    .mem_inst_fetch_pulse(inst_fetch_pulse),
+    .branch_misprediction_pulse(prediction_flush), // No need pulse: Always single cycle
+    .pipeline_flush_pulse(flush),
+    .inst_cache_miss_pulse(inst_cache_miss_pulse),
     .mstatus_mie(csr_mstatus_mie),
     .mtvec_out(csr_mtvec),
     .mepc_out(csr_mepc),
@@ -606,6 +606,8 @@ wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
                           (fetch_wait && mem_ready) || // From Memory
                           (instr_cache_valid && instr_cache_cache_hit); // From I-Cache
 
+wire cache_hit = !fetch_wait && !stall && (instr_cache_valid && instr_cache_cache_hit) && !fetch_buffer_valid;
+
 always @(posedge clk) begin
     if (~rstn) begin
         PC <= PC_INIT;
@@ -624,7 +626,6 @@ always @(posedge clk) begin
         instr_cache_wen <= 1'b0;
         if (flush) begin
             // Flush: invalidate IF/ID (delay slot) and redirect PC to target
-            perf_pipeline_flush <= perf_pipeline_flush + 1;
             if_id_valid <= 1'b0;
             if_id_ir <= 32'h00000013;
             // Also invalidate the fetch buffer to prevent stale instructions from being loaded
@@ -649,7 +650,7 @@ always @(posedge clk) begin
                 fetch_buffer_valid <= 1'b0;
             end else if (fetch_wait && mem_ready) begin
                 // Fetch complete - use fetch_pc for the address, not current PC
-                perf_inst_fetch <= perf_inst_fetch + 1;
+                inst_fetch_pulse <= 1'b1;
                 // Make branch prediction
                 if_id_branch_taken_pred <= branch_taken_pred;
                 if_id_branch_target_pred <= branch_target_pred;
@@ -672,13 +673,12 @@ always @(posedge clk) begin
                 // Advance PC from the address we just fetched and clear flags
                 PC <= branch_taken_pred ? branch_target_pred : fetch_pc + 4;
                 fetch_wait <= 1'b0;
-            end else if (!fetch_wait && !stall && (instr_cache_valid && instr_cache_cache_hit) && !fetch_buffer_valid) begin
+            end else if (cache_hit) begin
                 // Cache hit: load instruction and advance PC
                 if_id_ir <= instr_cache_data_out;
                 if_id_pc <= instr_cache_address;
                 if_id_valid <= 1'b1;
                 PC <= branch_taken_pred ? branch_target_pred : PC + 4;
-                perf_inst_cache_hits <= perf_inst_cache_hits + 1;
                 // Make branch prediction
                 if_id_branch_taken_pred <= branch_taken_pred;
                 if_id_branch_target_pred <= branch_target_pred;
@@ -688,6 +688,7 @@ always @(posedge clk) begin
                          !instr_cache_valid && !instr_cache_cache_hit) begin
                 // Cache miss - start memory fetch
                 fetch_wait <= 1'b1;
+                inst_cache_miss_pulse <= 1'b1;
                 fetch_pc <= PC;
             end
         end
@@ -886,7 +887,7 @@ always @(posedge clk) begin
         if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy) begin
             mem_op_pending <= 1'b1;
             if (ex_mem_is_store) begin
-                perf_memory_writes <= perf_memory_writes + 1;
+                write_pulse <= 1'b1;
                 case (ex_mem_funct3[1:0])
                     2'b00: begin
                         mem_data_out_r <= {4{ex_mem_rs2_data[7:0]}};
@@ -902,7 +903,7 @@ always @(posedge clk) begin
                     end
                 endcase
             end else if (ex_mem_is_load) begin
-                perf_memory_reads <= perf_memory_reads + 1;
+                load_pulse <= 1'b1;
             end
         end else if (mem_op_pending && mem_ready) begin
             mem_op_pending <= 1'b0;
@@ -1053,25 +1054,20 @@ always @* begin
 end
 
 // ##################################################
-//          PERFORMANCE COUNTERS CONTROL
+//  PERFORMANCE COUNTERS CONTROL (Pulse Generators)
 // ##################################################
 
 always @(posedge clk) begin
     if (~rstn) begin
-        perf_cycle <= 64'd0;
-        perf_instret <= 64'd0;
-        perf_inst_cache_hits <= 64'd0;
-        perf_inst_fetch <= 64'd0;
-        perf_memory_reads <= 64'd0;
-        perf_memory_writes <= 64'd0;
-        perf_pipeline_flush <= 64'd0;
+        load_pulse <= 1'b0;
+        write_pulse <= 1'b0;
+        inst_fetch_pulse <= 1'b0;
+        inst_cache_miss_pulse <= 1'b0;
     end else begin
-        perf_cycle <= perf_cycle + 1;
-        
-        // Count committed instructions (MEM/WB stage valid)
-        if (mem_wb_valid) begin
-            perf_instret <= perf_instret + 1;
-        end
+        if (load_pulse) load_pulse <= 1'b0;
+        if (write_pulse) write_pulse <= 1'b0;
+        if (inst_fetch_pulse) inst_fetch_pulse <= 1'b0;
+        if (inst_cache_miss_pulse) inst_cache_miss_pulse <= 1'b0;        
     end
 end
 
