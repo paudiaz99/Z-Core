@@ -108,8 +108,6 @@ module z_core_instr_cache #(
             line_q         <= mem[idx_rd];
             tag_q          <= tag_rd;
             addr_rd_q      <= addr_rd;
-            // valid_at_rd_q reflects whether idx_rd was valid at the
-            // moment of the read (with same-cycle fill considered valid)
             valid_at_rd_q  <= valid_arr[idx_rd] || (wen && (idx_wr == idx_rd));
 
             // ---- RAW bypass capture ----
