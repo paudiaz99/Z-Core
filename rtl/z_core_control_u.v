@@ -508,13 +508,10 @@ wire perf_axi_grant_dmem = ex_mem_valid
 assign load_pulse  = perf_axi_grant_dmem && ex_mem_is_load;
 assign write_pulse = perf_axi_grant_dmem && ex_mem_is_store;
 
-// Instruction fetch pulse: one cycle per AXI fill that the fetch FSM
-// actually consumes (i.e. not killed by a flush).
+
 assign inst_fetch_pulse = fetch_wait && mem_ready && !flush;
 
-// Instruction cache miss pulse: one cycle when the fetch FSM transitions
-// from "miss reported" to "fill in flight" (matches the original
-// registered pulse, just one cycle earlier in time).
+
 assign inst_cache_miss_pulse = !flush
                             && !fetch_wait
                             && !stall
@@ -600,7 +597,6 @@ z_core_branch_pred branch_predictor(
     .branch_target_pred(branch_target_pred)
 );
 
-// synthesis translate_on
 
 assign branch_target_misspredict = is_branch ? (id_ex_branch_target_pred != branch_target) : (is_jump ? (id_ex_branch_target_pred != jump_target) : 1'b0);
 
@@ -611,7 +607,6 @@ wire prediction_flush = (branch_taken & branch_target_misspredict) || (is_jump ?
 wire flush = prediction_flush || trap_enter_r || mret_in_ex;
 
 // Track if we need to squash the NEXT instruction entering id_ex
-// This is set when the CURRENT if_id contains a jump being decoded into id_ex
 wire if_id_is_jump = if_id_valid && (dec_is_jal || dec_is_jalr);
 wire if_id_is_branch = if_id_valid && dec_is_branch;
 
@@ -872,9 +867,7 @@ end
 //              PIPELINE STAGE: MEMORY
 // ##################################################
 
-// Combinational load data extraction from mem_rdata
 // Acts as a LSU (Load Store Unit)
-// This allows WB stage to use the correct data immediately
 reg [31:0] mem_load_data;
 always @* begin
     case (ex_mem_funct3)
@@ -909,10 +902,6 @@ always @(posedge clk) begin
         mem_data_out_r <= 32'b0;
         mem_wstrb_r <= 4'b1111;
     end else begin
-        // Start mem_op_pending when:
-        // - Not currently pending
-        // - mem_busy is false (AXI bus available - either idle or just completed)
-        // This allows stores to be queued while waiting for fetch to complete
         if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy && !fetch_wait) begin
             mem_op_pending <= 1'b1;
             if (ex_mem_is_store) begin
@@ -1045,7 +1034,7 @@ always @(posedge clk) begin
 end
 
 // ##################################################
-//           STATE FOR TESTBENCH COMPATIBILITY
+//             PIPELINE STATE TRACKING
 // ##################################################
 
 localparam N_STATES = 5;
@@ -1060,7 +1049,6 @@ wire [N_STATES-1:0] state;
 assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait | consume_inst};
 
 // Unified Memory Request Logic (Arbiter)
-// mem_addr is defined as reg above but driven combinationally here.
 // IMPORTANT: Don't assert mem_req when mem_ready is high to avoid race condition
 // where the AXI master starts a new transaction while we're processing the old one.
 always @* begin
