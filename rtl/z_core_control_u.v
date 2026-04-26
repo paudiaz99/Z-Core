@@ -403,14 +403,20 @@ z_core_div_unit div_unit (
 //              DATA FORWARDING
 // ##################################################
 
+wire ex_mem_load_completing = ex_mem_is_load && mem_op_pending && mem_ready;
+wire ex_mem_load_in_flight  = ex_mem_is_load && !ex_mem_load_completing;
+wire [31:0] ex_mem_fwd_value = ex_mem_load_completing ? mem_load_data : ex_mem_alu_result;
+wire ex_mem_fwd_ok = ex_mem_valid && ex_mem_reg_write && ex_mem_rd != 5'b0
+                  && !ex_mem_load_in_flight;
+
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
 assign fwd_rs1_data = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == id_ex_rs1_addr) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs1_data;
 
 assign fwd_rs2_data = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs2_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == id_ex_rs2_addr) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs2_data;
 
@@ -724,12 +730,12 @@ end
 
 // Forwarding for decode stage (into ID/EX)
 wire [31:0] dec_fwd_rs1 = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == dec_rs1 && dec_rs1 != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == dec_rs1 && dec_rs1 != 5'b0) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs1 && mem_wb_rd != 5'b0) ? mem_wb_result :
     rf_rs1_data;
 
 wire [31:0] dec_fwd_rs2 = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == dec_rs2 && dec_rs2 != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == dec_rs2 && dec_rs2 != 5'b0) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs2 && mem_wb_rd != 5'b0) ? mem_wb_result :
     rf_rs2_data;
 
