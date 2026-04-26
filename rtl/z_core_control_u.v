@@ -31,7 +31,7 @@ module z_core_control_u #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
-    parameter CACHE_DEPTH = 256
+    parameter CACHE_DEPTH = 4096
 )(
     input  wire                   clk,
     input  wire                   rstn,
@@ -141,11 +141,13 @@ axil_master #(
 // **************************************************
 
 localparam PC_INIT = 32'd0;
-reg [31:0] PC;
 
+
+reg [31:0] PC;
+reg        pc_q_valid;
 
 reg fetch_wait;
-reg [31:0] fetch_pc;  // Captures PC when fetch starts - used when fetch completes
+reg [31:0] fetch_pc;  // PC of the cache fill in progress
 reg mem_op_pending;
 
 
@@ -159,11 +161,6 @@ reg [31:0] if_id_ir;
 reg        if_id_valid;
 reg        if_id_branch_taken_pred;
 reg [31:0] if_id_branch_target_pred;
-
-// --- Skid Buffer for Fetch ---
-reg [31:0] fetch_buffer_ir;
-reg [31:0] fetch_buffer_pc;
-reg        fetch_buffer_valid;
 
 // --- ID/EX Pipeline Register ---
 reg [31:0] id_ex_pc;
@@ -215,9 +212,10 @@ reg        mem_wb_valid;
 // ##################################################
 
 wire [31:0] instr_cache_address;
-reg [31:0] instr_cache_data_in;
-reg instr_cache_wen;
+wire [31:0] instr_cache_data_in;
+wire instr_cache_wen;
 
+wire [31:0] instr_cache_address_d;    // registered: the address presented LAST cycle
 wire [31:0] instr_cache_data_out;
 wire instr_cache_valid;
 wire instr_cache_cache_hit;
@@ -232,6 +230,7 @@ z_core_instr_cache#(
     .rstn(rstn),
     .wen(instr_cache_wen), 
     .addr_rd(instr_cache_address),
+    .addr_rd_d(instr_cache_address_d),
     .addr_wr(fetch_pc),
     .data_in(instr_cache_data_in),
     .data_out(instr_cache_data_out),
@@ -404,14 +403,20 @@ z_core_div_unit div_unit (
 //              DATA FORWARDING
 // ##################################################
 
+wire ex_mem_load_completing = ex_mem_is_load && mem_op_pending && mem_ready;
+wire ex_mem_load_in_flight  = ex_mem_is_load && !ex_mem_load_completing;
+wire [31:0] ex_mem_fwd_value = ex_mem_load_completing ? mem_load_data : ex_mem_alu_result;
+wire ex_mem_fwd_ok = ex_mem_valid && ex_mem_reg_write && ex_mem_rd != 5'b0
+                  && !ex_mem_load_in_flight;
+
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
 assign fwd_rs1_data = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs1_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == id_ex_rs1_addr) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs1_data;
 
 assign fwd_rs2_data = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == id_ex_rs2_addr && ex_mem_rd != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == id_ex_rs2_addr) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
     id_ex_rs2_data;
 
@@ -489,10 +494,32 @@ wire        csr_mie_mtie;
 wire        csr_mie_msie;
 
 // Pulse generators for performance counters
-reg load_pulse;
-reg write_pulse;
-reg inst_fetch_pulse;
-reg inst_cache_miss_pulse;
+wire load_pulse;
+wire write_pulse;
+wire inst_fetch_pulse;
+wire inst_cache_miss_pulse;
+
+// AXI bus is granted to the EX/MEM load/store this cycle.
+wire perf_axi_grant_dmem = ex_mem_valid
+                        && (ex_mem_is_load || ex_mem_is_store)
+                        && !mem_op_pending
+                        && !mem_busy
+                        && !fetch_wait;
+assign load_pulse  = perf_axi_grant_dmem && ex_mem_is_load;
+assign write_pulse = perf_axi_grant_dmem && ex_mem_is_store;
+
+
+assign inst_fetch_pulse = fetch_wait && mem_ready && !flush;
+
+
+assign inst_cache_miss_pulse = !flush
+                            && !fetch_wait
+                            && !stall
+                            && cache_miss_q
+                            && !mem_busy
+                            && !mem_op_pending
+                            && !(ex_mem_valid &&
+                                 (ex_mem_is_load || ex_mem_is_store));
 
 z_core_csr_file #(
     .DATA_WIDTH(DATA_WIDTH)
@@ -512,7 +539,7 @@ z_core_csr_file #(
     .mtip(mtip),
     .msip(msip),
     .instret_pulse(mem_wb_valid),
-    .inst_cache_hit_pulse(cache_hit),  // No need pulse: Always single cycle
+    .inst_cache_hit_pulse(consume_inst),  // 1-cycle pulse per consumed I-cache hit
     .mem_read_pulse(load_pulse),
     .mem_write_pulse(write_pulse),
     .mem_inst_fetch_pulse(inst_fetch_pulse),
@@ -570,7 +597,6 @@ z_core_branch_pred branch_predictor(
     .branch_target_pred(branch_target_pred)
 );
 
-// synthesis translate_on
 
 assign branch_target_misspredict = is_branch ? (id_ex_branch_target_pred != branch_target) : (is_jump ? (id_ex_branch_target_pred != jump_target) : 1'b0);
 
@@ -581,7 +607,6 @@ wire prediction_flush = (branch_taken & branch_target_misspredict) || (is_jump ?
 wire flush = prediction_flush || trap_enter_r || mret_in_ex;
 
 // Track if we need to squash the NEXT instruction entering id_ex
-// This is set when the CURRENT if_id contains a jump being decoded into id_ex
 wire if_id_is_jump = if_id_valid && (dec_is_jal || dec_is_jalr);
 wire if_id_is_branch = if_id_valid && dec_is_branch;
 
@@ -593,104 +618,103 @@ wire [31:0] jump_target   = id_ex_is_jalr ? jalr_target : branch_target;
 //              PIPELINE STAGE: FETCH
 // ##################################################
 
-// Cache address priority (Read Port): trap > MRET > redirection > normal PC
-assign instr_cache_address = trap_enter_r               ? csr_mtvec :
-                             mret_in_ex                 ? csr_mepc :
-                             (is_jump && flush)         ? jump_target :
-                             (id_ex_branch_taken_pred && flush) ? (id_ex_pc + 4) :
-                             (branch_taken && flush)    ? branch_target :
-                             PC;
+wire [31:0] flush_target = trap_enter_r           ? csr_mtvec :
+                           mret_in_ex             ? csr_mepc :
+                           is_jump                ? jump_target :
+                           id_ex_branch_taken_pred ? (id_ex_pc + 4) :
+                                                    branch_target;
 
-// New instruction arriving this cycle (from any source)
-wire new_instr_arriving = fetch_buffer_valid || // From Fetch Buffer
-                          (fetch_wait && mem_ready) || // From Memory
-                          (instr_cache_valid && instr_cache_cache_hit); // From I-Cache
+wire cache_hit_q  = pc_q_valid && instr_cache_cache_hit;
+wire cache_miss_q = pc_q_valid && instr_cache_cache_miss;
 
-wire cache_hit = !fetch_wait && !stall && (instr_cache_valid && instr_cache_cache_hit) && !fetch_buffer_valid;
+
+wire [31:0] next_target = branch_taken_pred ? branch_target_pred : (PC + 32'd4);
+
+// Direct delivery: AXI fill done and pipeline is ready to accept.
+wire deliver_direct     = fetch_wait && mem_ready && !stall && !flush;
+
+wire deliver_from_cache = cache_hit_q && !stall && !fetch_wait && !flush;
+wire consume_inst       = deliver_direct || deliver_from_cache;
+
+assign instr_cache_wen     = fetch_wait && mem_ready && !flush;
+assign instr_cache_data_in = mem_rdata;
+
+// Next address presented at the cache.
+//   Priority: flush > deliver_direct (pre-fetch next_target during the fill)
+//           > fetch_wait (hold at fetch_pc) > stall (hold) > consume (advance)
+//           > default (hold)
+assign instr_cache_address =
+    flush          ? flush_target :
+    deliver_direct ? next_target  :
+    fetch_wait     ? fetch_pc     :
+    stall          ? PC           :
+    consume_inst   ? next_target  :
+                     PC;
 
 always @(posedge clk) begin
     if (~rstn) begin
-        PC <= PC_INIT;
-        fetch_wait <= 1'b0;
-        fetch_pc <= PC_INIT;
-        if_id_ir <= 32'h00000013;  // NOP
-        if_id_pc <= 32'b0;
-        if_id_valid <= 1'b0;
-        if_id_branch_taken_pred <= 1'b0;
+        PC                       <= PC_INIT;
+        pc_q_valid               <= 1'b0;
+        fetch_wait               <= 1'b0;
+        fetch_pc                 <= PC_INIT;
+        if_id_ir                 <= 32'h00000013;  // NOP
+        if_id_pc                 <= 32'b0;
+        if_id_valid              <= 1'b0;
+        if_id_branch_taken_pred  <= 1'b0;
         if_id_branch_target_pred <= 32'b0;
-        fetch_buffer_valid <= 1'b0;
-        fetch_buffer_ir <= 32'b0;
-        fetch_buffer_pc <= 32'b0;
-        instr_cache_wen <= 1'b0;
     end else begin
-        instr_cache_wen <= 1'b0;
-        if (flush) begin
-            // Flush: invalidate IF/ID (delay slot) and redirect PC to target
+        // Invalidate consumed IF/ID
+        if (!stall && if_id_valid && !consume_inst)
             if_id_valid <= 1'b0;
-            if_id_ir <= 32'h00000013;
-            // Also invalidate the fetch buffer to prevent stale instructions from being loaded
-            fetch_buffer_valid <= 1'b0;
-            // PC redirect priority: trap > MRET > jump/branch misprediction
-            PC <= trap_enter_r           ? csr_mtvec :
-                  mret_in_ex             ? csr_mepc :
-                  is_jump                ? jump_target :
-                  id_ex_branch_taken_pred ? (id_ex_pc + 4) :
-                  branch_target;
-            fetch_wait <= 1'b0;
-        end else begin            
-            // Clear if_id_valid when consumed (unless new instruction arriving)
-            if (!stall && if_id_valid && !new_instr_arriving)
-                if_id_valid <= 1'b0;
-            
-            if (!stall && fetch_buffer_valid) begin
-                // Move buffer to IF/ID
-                if_id_ir <= fetch_buffer_ir;
-                if_id_pc <= fetch_buffer_pc;
-                if_id_valid <= 1'b1;
-                fetch_buffer_valid <= 1'b0;
-            end else if (fetch_wait && mem_ready) begin
-                // Fetch complete - use fetch_pc for the address, not current PC
-                inst_fetch_pulse <= 1'b1;
-                // Make branch prediction
-                if_id_branch_taken_pred <= branch_taken_pred;
-                if_id_branch_target_pred <= branch_target_pred;
-                // Write the new instruction to the cache
-                instr_cache_wen <= 1'b1;
-                instr_cache_data_in <= mem_rdata;
 
-                if (!stall && !fetch_buffer_valid) begin
-                    // Pipeline active and buffer empty: load directly to IF/ID
-                    if_id_ir <= mem_rdata;
-                    if_id_pc <= fetch_pc;
-                    if_id_valid <= 1'b1;
+        if (flush) begin
+            PC          <= flush_target;
+            pc_q_valid  <= 1'b1;
+            fetch_wait  <= 1'b0;
+            if_id_valid <= 1'b0;          // 1-cycle bubble (sync-cache penalty)
+        end else if (fetch_wait) begin
+            if (mem_ready) begin
+                // AXI fill done.
+                fetch_wait       <= 1'b0;
+                if (!stall) begin
+                    if_id_ir                 <= mem_rdata;
+                    if_id_pc                 <= fetch_pc;
+                    if_id_valid              <= 1'b1;
+                    if_id_branch_taken_pred  <= branch_taken_pred;
+                    if_id_branch_target_pred <= branch_target_pred;
+                    PC                       <= next_target;
+                    pc_q_valid               <= 1'b1;
                 end else begin
-                    // Pipeline stalled or buffer full: load to buffer
-                    fetch_buffer_ir <= mem_rdata;
-                    fetch_buffer_pc <= fetch_pc;
-                    fetch_buffer_valid <= 1'b1;
+                    PC         <= fetch_pc;
+                    pc_q_valid <= 1'b1;
                 end
-                
-                // Advance PC from the address we just fetched and clear flags
-                PC <= branch_taken_pred ? branch_target_pred : fetch_pc + 4;
-                fetch_wait <= 1'b0;
-            end else if (cache_hit) begin
-                // Cache hit: load instruction and advance PC
-                if_id_ir <= instr_cache_data_out;
-                if_id_pc <= instr_cache_address;
-                if_id_valid <= 1'b1;
-                PC <= branch_taken_pred ? branch_target_pred : PC + 4;
-                // Make branch prediction
-                if_id_branch_taken_pred <= branch_taken_pred;
-                if_id_branch_target_pred <= branch_target_pred;
-            end else if (!fetch_wait && !mem_op_pending && !mem_busy &&
-                         !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) && 
-                         (!fetch_buffer_valid || !stall) && 
-                         !instr_cache_valid && !instr_cache_cache_hit) begin
-                // Cache miss - start memory fetch
-                fetch_wait <= 1'b1;
-                inst_cache_miss_pulse <= 1'b1;
-                fetch_pc <= PC;
+            end else begin
+                // Still waiting for AXI, hold at fetch_pc.
+                PC         <= fetch_pc;
+                pc_q_valid <= 1'b0;
             end
+        end else if (stall) begin
+            // Pipeline stall -> No delays when resumed
+        end else if (cache_hit_q) begin
+            // Hit
+            if_id_ir                 <= instr_cache_data_out;
+            if_id_pc                 <= PC;
+            if_id_valid              <= 1'b1;
+            if_id_branch_taken_pred  <= branch_taken_pred;
+            if_id_branch_target_pred <= branch_target_pred;
+            PC                       <= next_target;
+            pc_q_valid               <= 1'b1;
+        end else if (cache_miss_q) begin
+            // Miss
+            if (!mem_busy && !mem_op_pending &&
+                !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store))) begin
+                fetch_wait            <= 1'b1;
+                fetch_pc              <= PC;
+                pc_q_valid            <= 1'b0;
+            end
+        end else begin
+            // addr_rd this cycle = PC, so next cycle the cache will have a valid instr
+            pc_q_valid <= 1'b1;
         end
     end
 end
@@ -701,12 +725,12 @@ end
 
 // Forwarding for decode stage (into ID/EX)
 wire [31:0] dec_fwd_rs1 = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == dec_rs1 && dec_rs1 != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == dec_rs1 && dec_rs1 != 5'b0) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs1 && mem_wb_rd != 5'b0) ? mem_wb_result :
     rf_rs1_data;
 
 wire [31:0] dec_fwd_rs2 = 
-    (ex_mem_valid && ex_mem_reg_write && ex_mem_rd == dec_rs2 && dec_rs2 != 5'b0) ? ex_mem_alu_result :
+    (ex_mem_fwd_ok && ex_mem_rd == dec_rs2 && dec_rs2 != 5'b0) ? ex_mem_fwd_value :
     (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs2 && mem_wb_rd != 5'b0) ? mem_wb_result :
     rf_rs2_data;
 
@@ -843,9 +867,7 @@ end
 //              PIPELINE STAGE: MEMORY
 // ##################################################
 
-// Combinational load data extraction from mem_rdata
 // Acts as a LSU (Load Store Unit)
-// This allows WB stage to use the correct data immediately
 reg [31:0] mem_load_data;
 always @* begin
     case (ex_mem_funct3)
@@ -880,14 +902,9 @@ always @(posedge clk) begin
         mem_data_out_r <= 32'b0;
         mem_wstrb_r <= 4'b1111;
     end else begin
-        // Start mem_op_pending when:
-        // - Not currently pending
-        // - mem_busy is false (AXI bus available - either idle or just completed)
-        // This allows stores to be queued while waiting for fetch to complete
-        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy) begin
+        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy && !fetch_wait) begin
             mem_op_pending <= 1'b1;
             if (ex_mem_is_store) begin
-                write_pulse <= 1'b1;
                 case (ex_mem_funct3[1:0])
                     2'b00: begin
                         mem_data_out_r <= {4{ex_mem_rs2_data[7:0]}};
@@ -902,8 +919,6 @@ always @(posedge clk) begin
                         mem_wstrb_r <= 4'b1111;
                     end
                 endcase
-            end else if (ex_mem_is_load) begin
-                load_pulse <= 1'b1;
             end
         end else if (mem_op_pending && mem_ready) begin
             mem_op_pending <= 1'b0;
@@ -1019,7 +1034,7 @@ always @(posedge clk) begin
 end
 
 // ##################################################
-//           STATE FOR TESTBENCH COMPATIBILITY
+//             PIPELINE STATE TRACKING
 // ##################################################
 
 localparam N_STATES = 5;
@@ -1031,10 +1046,9 @@ localparam STATE_WRITE_b = 4;
 
 wire [N_STATES-1:0] state;
 
-assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait | (instr_cache_valid && instr_cache_cache_hit)};
+assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait | consume_inst};
 
 // Unified Memory Request Logic (Arbiter)
-// mem_addr is defined as reg above but driven combinationally here.
 // IMPORTANT: Don't assert mem_req when mem_ready is high to avoid race condition
 // where the AXI master starts a new transaction while we're processing the old one.
 always @* begin
@@ -1053,22 +1067,5 @@ always @* begin
     end
 end
 
-// ##################################################
-//  PERFORMANCE COUNTERS CONTROL (Pulse Generators)
-// ##################################################
-
-always @(posedge clk) begin
-    if (~rstn) begin
-        load_pulse <= 1'b0;
-        write_pulse <= 1'b0;
-        inst_fetch_pulse <= 1'b0;
-        inst_cache_miss_pulse <= 1'b0;
-    end else begin
-        if (load_pulse) load_pulse <= 1'b0;
-        if (write_pulse) write_pulse <= 1'b0;
-        if (inst_fetch_pulse) inst_fetch_pulse <= 1'b0;
-        if (inst_cache_miss_pulse) inst_cache_miss_pulse <= 1'b0;        
-    end
-end
 
 endmodule
