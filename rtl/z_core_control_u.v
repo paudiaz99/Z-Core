@@ -497,7 +497,8 @@ wire inst_cache_miss_pulse;
 wire perf_axi_grant_dmem = ex_mem_valid
                         && (ex_mem_is_load || ex_mem_is_store)
                         && !mem_op_pending
-                        && !mem_busy;
+                        && !mem_busy
+                        && !fetch_wait;
 assign load_pulse  = perf_axi_grant_dmem && ex_mem_is_load;
 assign write_pulse = perf_axi_grant_dmem && ex_mem_is_store;
 
@@ -906,7 +907,7 @@ always @(posedge clk) begin
         // - Not currently pending
         // - mem_busy is false (AXI bus available - either idle or just completed)
         // This allows stores to be queued while waiting for fetch to complete
-        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy) begin
+        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy && !fetch_wait) begin
             mem_op_pending <= 1'b1;
             if (ex_mem_is_store) begin
                 case (ex_mem_funct3[1:0])
