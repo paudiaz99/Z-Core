@@ -2,7 +2,9 @@
 
 ## Cache Architecture
 
-`rtl/z_core_data_cache.v` — 2-way set-associative, write-back, write-allocate.
+`rtl/z_core_data_cache.v` — 2-way set-associative, write-back, write-allocate. Writebacks
+and refills are **handled externally by the LSU**; the cache exposes the raw signals
+needed to drive that handshake.
 
 | Parameter | Value |
 |-----------|-------|
@@ -13,108 +15,126 @@
 | Byte offset | `addr[1:0]` (ignored — word-granularity) |
 | Write policy | Write-back, write-allocate |
 | Replacement | 1-bit LRU per index |
-| Eviction | External signal handshake (`eviction_complete`) |
+| Refill | External LSU (cache asserts `request_refill`, LSU drives `refill_complete`) |
 
 ### Port Summary
 
 | Port | Dir | Width | Description |
 |------|-----|-------|-------------|
 | `clk`, `rstn` | in | 1 | Clock, active-low reset |
-| `wen` | in | 1 | Write enable (1=write, 0=read) |
+| `cs` | in | 1 | Chip-select — gates all access (0 = idle) |
+| `wen` | in | 1 | Write enable (1=write, 0=read), only meaningful when `cs=1` |
 | `addr` | in | 32 | Word-aligned address |
-| `data_in` | in | 32 | Write data |
-| `eviction_complete` | in | 1 | External: dirty line flushed to memory |
+| `data_in` | in | 32 | Write data (or refill data when `refill_complete=1`) |
+| `refill_complete` | in | 1 | LSU signal: install line at `addr` with `data_in` |
 | `data_out` | out | 32 | Read result (registered, 1-cycle latency) |
 | `cache_hit` | out | 1 | Hit indicator (registered, 1-cycle latency) |
-| `wait_for_eviction_complete` | out | 1 | Stall: waiting for dirty writeback |
+| `request_refill` | out | 1 | Set on miss; tells LSU to fetch (and writeback if needed) |
+| `dirty_writeback_enabled` | out | 1 | Set with `request_refill` when victim is dirty |
+| `dirty_writeback_addr` | out | 32 | Drives miss `addr` (see Bug 8) |
+| `dirty_writeback_data` | out | 32 | Victim line data to be written back |
 
-**Important:** `cache_hit` and `data_out` are registered — check outputs on the cycle **after** applying stimulus.
+**Important:** `cache_hit`, `data_out`, `request_refill`, `dirty_writeback_*` are all
+registered — sample on the cycle **after** applying stimulus.
+
+### LSU ↔ Cache protocol
+
+```
+   request_refill ── 1 ─────────────── 1 ─── 0  ← cache
+   refill_complete ─ 0 ─────────────── 1 ─── 0  ← LSU drives
+   addr            : miss_addr (LSU holds it stable through complete)
+   data_in         :         ?         ↑
+                                       └── LSU drives fetched word (for read)
+                                           or store data    (for write-allocate)
+   dirty_writeback_*: valid the cycle request_refill rises; LSU must capture
+                      and perform the AXI writeback before refill_complete.
+```
+
+The LSU is responsible for:
+1. Sampling `dirty_writeback_addr` / `_data` when `dirty_writeback_enabled=1`,
+   issuing the AXI writeback, then
+2. Reading the missed line from memory, then
+3. Driving `addr=miss_addr`, `data_in=fetched/store_word`, `refill_complete=1` for
+   one cycle to install the line.
 
 ---
 
-## Known Bugs
+## Known Bugs / RTL Quirks
 
 | # | Location | Description | Severity |
 |---|----------|-------------|----------|
-| 1 | Line 27 | `valid_bits` missing `[CACHE_DEPTH-1:0]` dimension — only 2 bits | Compile/functional |
-| 2 | Line 119–126 | Read path does not update LRU bits | Functional |
-| 3 | Line 46 | `cache_hit` declared as both `wire` and `output reg` | Compile error |
-| 4 | Line 123 | Read-miss returns 0 with no memory-fetch mechanism | Missing feature |
-| 5 | Line 118 | `else (!wen)` — syntax error | Compile error |
-| 6 | Lines 88–97 | Eviction path does not expose dirty data/address to external logic | Missing feature |
-| 7 | Port list | No `wstrb` port for byte/halfword writes (SB/SH) | Missing feature |
-
-Bugs 1, 3, 5 are **compile blockers** — fixed before any test can run.
+| 1 | Read path | Read does not update LRU bits | Functional |
+| 2 | Refill path | `dirty_bits<=1'b1` on refill_complete unconditionally — read fills are marked dirty | Functional |
+| 3 | Eviction path | `dirty_writeback_addr <= addr` uses **miss addr** instead of victim's reconstructed addr (`{tags[victim][index], index, 2'b00}`) — LSU cannot tell where to write back the victim from this signal alone | Functional |
+| 4 | Refill buffer | `refill_buffer_data/tag/index/set` are written but **never read** (refill_complete branch uses live inputs) — LSU must hold `addr` stable through `refill_complete`. If `addr` changes between miss and complete, the line is installed at the wrong location. | Protocol gotcha |
+| 5 | `dirty_writeback_enabled` | Only assigned on write-miss path; only cleared by reset. After a write-miss with clean victim it stays at the previous value. | Functional |
+| 6 | No `wstrb` port | Byte/halfword writes (SB/SH) cannot be expressed | Missing feature |
+| 7 | No interlock on `request_refill` | If a new `cs && wen` arrives while `request_refill=1` is pending, the cache overwrites the buffer/state. LSU contract must hold off. | Missing feature / protocol contract |
 
 ---
 
-## Phase 1: Compile-Blocker Fixes (prerequisite)
+## Phase 1: Unit-Level Testbench
 
-Fix in `rtl/z_core_data_cache.v`:
-1. Line 27: `reg valid_bits [ASSOCIATIVITY-1:0];` → `reg valid_bits [ASSOCIATIVITY-1:0] [CACHE_DEPTH-1:0];`
-2. Line 46: rename `wire cache_hit` → `wire cache_hit_comb` (avoid conflict with `output reg cache_hit`)
-3. Line 118: `else (!wen) begin` → `else begin`
-4. Update all uses of old `cache_hit` wire inside the always block to `cache_hit_comb`
-
-Also: add `z_core_data_cache.v` to `rtl/flist.vc`.
-
----
-
-## Phase 2: Unit-Level Testbench
-
-**File:** `tb/z_core_data_cache_tb.sv`  
+**File:** `tb/z_core_data_cache_tb.sv`
 **Run:** `cd sim && make -f ../tb/Makefile run TB_FILE=z_core_data_cache_tb.sv [SIM=iverilog]`
 
 ### Test Cases
 
-| ID | Name | Bugs Caught |
-|----|------|-------------|
-| T1.01 | Reset clears all state | Bug 1 (valid_bits) |
-| T1.02 | Read miss on empty cache | Bug 5 (syntax) |
-| T1.03 | Write-allocate + read hit | Bug 1, 3, 5 |
-| T1.04 | Write-then-read back-to-back | Bug 3 (wire/reg) |
-| T1.05 | Read-then-write same address | — |
-| T1.06 | Same tag, different indices | — |
-| T1.07 | Overwrite existing data | — |
-| T1.08 | Two-way fill (both sets at same index) | Bug 1 |
-| T1.09 | Same index, different tags (3-way alias → eviction) | — |
-| T1.10 | LRU replacement correctness | Bug 2 (LRU on reads) |
-| T1.11 | Dirty eviction flow | Bug 6 (documents gap) |
-| T1.12 | Eviction buffer stability (20-cycle stall) | — |
-| T1.13 | Capacity stress — fill all 512 indices | Bug 1 |
-| T1.14 | Hit-rate tracking (mixed 100-op sequence) | — |
+| ID | Name | Coverage |
+|----|------|----------|
+| T1.01 | Reset clears all state | reset, port defaults |
+| T1.02 | `cs=0` keeps cache idle | chip-select gating |
+| T1.03 | Read miss asserts `request_refill` | miss path basics |
+| T1.04 | Read-miss refill installs line; next read hits | refill handshake |
+| T1.05 | Write hit updates data, no refill request | hit-write path |
+| T1.06 | Write miss with clean victim — no writeback | clean-victim allocate |
+| T1.07 | Write miss + refill completes write-allocate | full write-allocate |
+| T1.08 | Same tag, different indices | indexing |
+| T1.09 | Two-way fill (both sets at same index) | associativity |
+| T1.10 | Eviction with dirty victim — writeback signals exposed | dirty eviction |
+| T1.11 | Refill / writeback signals stable during 20-cycle stall | LSU pacing |
+| T1.12 | `request_refill` clears after `refill_complete` | handshake teardown |
+| T1.13 | LRU replacement correctness | catches Bug 1 (LRU on read) |
+| T1.14 | Read-fill leaves dirty=1 | documents Bug 2 |
+| T1.15 | `dirty_writeback_addr` observation | documents Bug 3 |
+| T1.16 | Capacity stress (all 512 × 2) | depth |
+| T1.17 | Hit-rate tracking | mixed sequence |
+| T1.18 | `dirty_writeback_enabled` stickiness | documents Bug 5 |
+| T1.19 | `addr` stability contract during refill | documents Bug 4 |
+| T1.20 | No interlock on pending refill | documents Bug 7 |
 
-**T1.10 note:** This test has two valid expected outcomes. With Bug 2 present, the read does not update LRU so the read-accessed way gets evicted. After Bug 2 is fixed, the opposite way (true LRU) gets evicted. The TB prints which behavior is observed without hard-failing, so it serves as a regression oracle for both states.
+T1.13–T1.15, T1.18–T1.20 print [INFO] without hard-failing — they
+document RTL behavior and serve as regression oracles whether the
+bug is present or has been fixed.
 
 ---
 
-## Phase 3: Integration-Level Tests
+## Phase 2: Integration-Level Tests
 
-**Prerequisites before Phase 3:**
-- Data cache instantiated in `z_core_control_u.v` (between MEM stage and `axil_master`)
-- Read-miss fill path implemented (Bug 4 fixed)
-- Dirty-line eviction writeback to AXI implemented (Bug 6 fixed)
-- `wstrb` port added (Bug 7 fixed)
-- LRU updated on read hits (Bug 2 fixed)
+**Prerequisites:**
+- Data cache instantiated in `z_core_control_u.v` between MEM stage and `axil_master`
+- LSU/control logic that consumes `request_refill` / `dirty_writeback_*` and
+  drives `refill_complete` after AXI traffic
+- `wstrb` support for SB/SH (Bug 6)
 - `dcache_hit_pulse` wired to `mhpmcounter4` in `rtl/z_core_csr_file.v`
 
-**File:** `tb/z_core_control_u_tb.sv` (add new test tasks)  
+**File:** `tb/z_core_control_u_tb.sv` (new test tasks)
 **Run:** `cd sim && make -f ../tb/Makefile run TB_FILE=z_core_control_u_tb.sv`
 
 ### Test Cases
 
-| ID | Name | Bugs Caught | Key Check |
-|----|------|-------------|-----------|
-| T2.01 | Basic SW then LW (cache hit) | — | `check_reg`, `mhpmcounter4 >= 1` |
-| T2.02 | Store-load (no pipeline hazard, 4 NOPs) | — | `check_reg` |
-| T2.03 | Byte/halfword through cache | Bug 7 (wstrb) | LB/LBU/LH/LHU correctness |
-| T2.04 | Cache miss + AXI fill | Bug 4 (read-miss) | First load misses, second hits |
-| T2.05 | Write-back verification | Bug 6 (eviction) | `check_mem` on evicted address |
-| T2.06 | Multi-address stress loop (64 addrs) | — | x15 error count == 0 |
-| T2.07 | Cache + branch predictor (20-iter loop) | — | Accumulated value + perf counters |
-| T2.08 | Cache + timer interrupt | — | Cache coherent after MRET |
-| T2.09 | D-cache performance counter | — | `mhpmcounter4 == 2` after 2 hits |
-| T2.10 | Mixed I-cache + D-cache (100-iter loop) | — | Both counters non-zero, independent |
+| ID | Name | Key Check |
+|----|------|-----------|
+| T2.01 | Basic SW then LW (cache hit) | `check_reg`, `mhpmcounter4 >= 1` |
+| T2.02 | Store-load with 4 NOPs | `check_reg` |
+| T2.03 | Byte/halfword through cache | LB/LBU/LH/LHU correctness (Bug 6) |
+| T2.04 | Cache miss + AXI refill | First load misses, second hits |
+| T2.05 | Dirty eviction writeback verification | `check_mem` on victim's addr |
+| T2.06 | Multi-address stress loop (64 addrs) | x15 error count == 0 |
+| T2.07 | Cache + branch predictor (20-iter loop) | accumulated value + counters |
+| T2.08 | Cache + timer interrupt | cache coherent after MRET |
+| T2.09 | D-cache performance counter | `mhpmcounter4` matches expected hits |
+| T2.10 | Mixed I-cache + D-cache (100-iter loop) | both counters non-zero, independent |
 
 ### Integration point in `z_core_control_u.v`
 
@@ -122,28 +142,17 @@ Also: add `z_core_data_cache.v` to `rtl/flist.vc`.
 MEM stage
   ex_mem_alu_result  → cache addr
   ex_mem_rs2_data    → cache data_in
-  mem_wstrb_r        → cache wstrb (new port)
+  ex_mem_is_load     → cache cs (or load|store)
   ex_mem_is_store    → cache wen
          ↓
   z_core_data_cache
-         ↓ hit:  cache_hit=1, data_out → mem_rdata, assert mem_ready (1 cycle)
-         ↓ miss: forward to axil_master; on completion fill cache + assert mem_ready
-         ↓ eviction: write dirty line via axil_master before filling
+         ↓ hit:                cache_hit=1, data_out → mem_rdata, mem_ready=1
+         ↓ request_refill=1:   LSU forwards to axil_master; if
+                               dirty_writeback_enabled=1, first issues
+                               an AXI write of dirty_writeback_data.
+                               After AXI read returns, drives
+                               refill_complete=1 with the fetched word.
 ```
-
----
-
-## Bug Coverage Matrix
-
-| Bug | T1 Tests | T2 Tests |
-|-----|----------|----------|
-| 1 — valid_bits dimension | T1.01, T1.03, T1.08, T1.13 | All (compile blocker) |
-| 2 — LRU not updated on read | T1.10 | T2.05, T2.06 |
-| 3 — wire/reg conflict | T1.04 (any test) | All (compile blocker) |
-| 4 — no read-miss fill | T1.02 (documents) | T2.04 |
-| 5 — syntax error | T1.02, T1.03 | All (compile blocker) |
-| 6 — eviction writeback missing | T1.11 (documents) | T2.05 |
-| 7 — no wstrb port | — | T2.03 |
 
 ---
 
@@ -151,11 +160,11 @@ MEM stage
 
 | Phase | Command | Gate |
 |-------|---------|------|
-| Compile check | `make compile TB_FILE=z_core_data_cache_tb.sv` | After Phase 1 |
-| Lint | `make lint` | After Phase 1 |
-| Unit tests (14 checks) | `make run TB_FILE=z_core_data_cache_tb.sv` | Phase 2 |
-| Integration tests (10 tests) | `make run TB_FILE=z_core_control_u_tb.sv` | Phase 3 |
-| Full regression | `make all` | After Phase 3 |
+| Compile check | `make compile TB_FILE=z_core_data_cache_tb.sv` | Anytime |
+| Lint | `make lint` | Anytime |
+| Unit tests | `make run TB_FILE=z_core_data_cache_tb.sv` | Phase 1 |
+| Integration tests | `make run TB_FILE=z_core_control_u_tb.sv` | Phase 2 |
+| Full regression | `make all` | After Phase 2 |
 
 ---
 
@@ -169,5 +178,5 @@ MEM stage
 | `rtl/flist.vc` | RTL file list |
 | `tb/z_core_data_cache_tb.sv` | Unit testbench |
 | `tb/z_core_instr_cache_tb.sv` | Reference TB (style guide) |
-| `tb/z_core_control_u_tb.sv` | System TB (Tier 2 tests added here) |
+| `tb/z_core_control_u_tb.sv` | System TB (Phase 2 tests added here) |
 | `tb/Makefile` | Build system |

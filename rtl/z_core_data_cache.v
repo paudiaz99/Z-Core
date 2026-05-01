@@ -11,14 +11,18 @@ module z_core_data_cache #(
     input wire clk,
     input wire rstn,
     input wire wen,
+    input wire cs,
+    input wire refill_complete,
 
     input wire [ADDR_WIDTH-1:0] addr,
     input wire [DATA_WIDTH-1:0] data_in,
-    input wire eviction_complete,
     
     output reg [DATA_WIDTH-1:0] data_out,
     output reg cache_hit,
-    output reg wait_for_eviction_complete
+    output reg dirty_writeback_enabled,
+    output reg [ADDR_WIDTH-1:0] dirty_writeback_addr,
+    output reg [DATA_WIDTH-1:0] dirty_writeback_data,
+    output reg request_refill
 );
 
 reg [DATA_WIDTH-1:0] data [ASSOCIATIVITY-1:0] [CACHE_DEPTH-1:0];
@@ -27,13 +31,13 @@ reg valid_bits [ASSOCIATIVITY-1:0] [CACHE_DEPTH-1:0];
 reg dirty_bits [ASSOCIATIVITY-1:0] [CACHE_DEPTH-1:0];
 reg lru_bits [ASSOCIATIVITY-1:0] [CACHE_DEPTH-1:0];
 
+reg [DATA_WIDTH-1:0] refill_buffer_data;
+reg [CACHE_TAG_WIDTH-1:0] refill_buffer_tag;
+reg [CACHE_ADDR_WIDTH-1:0] refill_buffer_index;
+reg [ASSOCIATIVITY-1:0] refill_buffer_set;
+
 wire [CACHE_TAG_WIDTH-1:0] tag_addr = addr[ADDR_WIDTH-1:CACHE_ADDR_WIDTH+2];
 wire [CACHE_ADDR_WIDTH-1:0] index_addr = addr[CACHE_ADDR_WIDTH+1:2];
-
-reg [DATA_WIDTH-1:0] data_to_write_on_eviction;
-reg [CACHE_TAG_WIDTH-1:0] tag_to_write_on_eviction;
-reg [CACHE_ADDR_WIDTH-1:0] index_to_write_on_eviction;
-reg [ASSOCIATIVITY-1:0] set_index_to_write_on_eviction;
 
 // 2-Set Associative Cache - Set One and Set Two Hits
 wire set_one_hit = tags[0][index_addr] == tag_addr && valid_bits[0][index_addr];
@@ -77,24 +81,19 @@ always @(posedge clk) begin
                 tags[i][j] <= 32'b0;
             end
         end
-        data_to_write_on_eviction <= 32'b0;
-        tag_to_write_on_eviction <= 32'b0;
-        index_to_write_on_eviction <= 32'b0;
-        set_index_to_write_on_eviction <= 2'b0;
-        wait_for_eviction_complete <= 1'b0;
+        dirty_writeback_enabled <= 1'b0;
         cache_hit <= 1'b0;
         data_out <= 32'b0;
-    end else if(wait_for_eviction_complete) begin
-        if(eviction_complete) begin
-            data[set_index_to_write_on_eviction][index_to_write_on_eviction] <= data_to_write_on_eviction;
-            tags[set_index_to_write_on_eviction][index_to_write_on_eviction] <= tag_to_write_on_eviction;
-            valid_bits[set_index_to_write_on_eviction][index_to_write_on_eviction] <= 1'b1;
-            dirty_bits[set_index_to_write_on_eviction][index_to_write_on_eviction] <= 1'b1;
-            lru_bits[set_index_to_write_on_eviction][index_to_write_on_eviction] <= 1'b0;
-            lru_bits[!set_index_to_write_on_eviction][index_to_write_on_eviction] <= 1'b1;
-            wait_for_eviction_complete <= 1'b0;
-        end   
-    end else if(wen) begin
+        request_refill <= 1'b0;
+    end else if(refill_complete) begin
+        request_refill <= 1'b0;
+        data[set_to_write_on_miss][index_addr] <= data_in;
+        tags[set_to_write_on_miss][index_addr] <= tag_addr;
+        valid_bits[set_to_write_on_miss][index_addr] <= 1'b1;
+        dirty_bits[set_to_write_on_miss][index_addr] <= 1'b1;
+        lru_bits[set_to_write_on_miss][index_addr] <= 1'b0;
+        lru_bits[!set_to_write_on_miss][index_addr] <= 1'b1;
+    end else if(cs && wen) begin
         if(cache_hit_comb) begin
             data[set_to_write_on_hit][index_addr] <= data_in;
             tags[set_to_write_on_hit][index_addr] <= tag_addr;
@@ -103,23 +102,26 @@ always @(posedge clk) begin
             lru_bits[set_to_write_on_hit][index_addr] <= 1'b0;
             lru_bits[!set_to_write_on_hit][index_addr] <= 1'b1;
         end else begin
-            if(dirty_bits[set_to_write_on_miss][index_addr]) begin
-                wait_for_eviction_complete <= 1'b1;
-            end else begin
-                data[set_to_write_on_miss][index_addr] <= data_in;
-                tags[set_to_write_on_miss][index_addr] <= tag_addr;
-                valid_bits[set_to_write_on_miss][index_addr] <= 1'b1;
-                dirty_bits[set_to_write_on_miss][index_addr] <= 1'b1;
-                lru_bits[set_to_write_on_miss][index_addr] <= 1'b0;
-                lru_bits[!set_to_write_on_miss][index_addr] <= 1'b1;
-            end
+            dirty_writeback_enabled <= dirty_bits[set_to_write_on_miss][index_addr];
+            dirty_writeback_addr <= addr;
+            dirty_writeback_data <= data[set_to_write_on_miss][index_addr];
+            refill_buffer_data <= data_in;
+            refill_buffer_tag <= tag_addr;
+            refill_buffer_index <= index_addr;
+            refill_buffer_set <= set_to_write_on_miss;
+            request_refill <= 1'b1;
+            cache_hit <= 1'b0;
         end
-    end else begin
+    end else if(cs && !wen) begin
         if(cache_hit_comb) begin
             data_out <= data[set_to_write_on_hit][index_addr];
             cache_hit <= 1'b1;
         end else begin
-            // TODO: Handle cache miss
+            request_refill <= 1'b1;
+            refill_buffer_data <= data_in;
+            refill_buffer_tag <= tag_addr;
+            refill_buffer_index <= index_addr;
+            refill_buffer_set <= set_to_write_on_miss;
             data_out <= 32'b0;
             cache_hit <= 1'b0;
         end
