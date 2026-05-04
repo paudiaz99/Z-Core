@@ -126,6 +126,7 @@ endif
 ifeq ($(SIM),iverilog)
 COMPILE_CMD := iverilog \
 								-g2012 \
+								-I../rtl \
 								$(subst +define+,-D,$(DFLAGS)) \
 								-o $(TB_TOP).vvp \
 								$(RTL_FILES) \

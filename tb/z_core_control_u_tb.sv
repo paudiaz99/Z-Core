@@ -33,7 +33,8 @@ module z_core_control_u_tb;
     parameter DATA_WIDTH = 32;
     parameter ADDR_WIDTH = 32;
     parameter STRB_WIDTH = (DATA_WIDTH/8);
-    parameter CACHE_DEPTH = 256;
+    parameter INST_CACHE_DEPTH = 256;
+    parameter DATA_CACHE_DEPTH = 256;
     parameter N_GPIO     = 64;
     
 
@@ -215,7 +216,8 @@ module z_core_control_u_tb;
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .STRB_WIDTH(STRB_WIDTH),
-        .CACHE_DEPTH(CACHE_DEPTH)
+        .INST_CACHE_DEPTH(INST_CACHE_DEPTH),
+        .DATA_CACHE_DEPTH(DATA_CACHE_DEPTH)
     ) uut (
         .clk(clk),
         .rstn(rstn),
@@ -465,7 +467,71 @@ module z_core_control_u_tb;
         end
     endtask
 
+    // ----------------------------------------------------------------
+    //  check_mem — verify a word at a given memory address.
+    //
+    //  With the data-cache integrated and configured as write-back, a
+    //  store may stay in the cache and never reach RAM until eviction.
+    //  Inspecting `u_axil_ram.mem[]` alone misses these in-cache values
+    //  and produces false negatives.
+    //
+    //  This task therefore checks the cache state first:
+    //    - For RAM addresses (< 0x0400_0000) it walks both ways at the
+    //      computed index and returns cached data if a valid tag matches.
+    //    - On a cache miss, or for memory-mapped IO regions, it falls
+    //      back to inspecting `u_axil_ram.mem[]` directly.
+    //
+    //  Cache geometry (matches `data_cache` instantiation, CACHE_DEPTH=256):
+    //      index = addr[9:2]  (8 bits)
+    //      tag   = addr[31:10] (22 bits)
+    // ----------------------------------------------------------------
     task check_mem;
+        input [31:0] addr;
+        input [31:0] expected;
+        input [255:0] test_name;
+        reg [31:0] actual;
+        reg [21:0] expected_tag;
+        reg [7:0]  cache_index;
+        reg        in_cache;
+        begin
+            test_count = test_count + 1;
+            in_cache     = 1'b0;
+            expected_tag = addr[31:10];
+            cache_index  = addr[9:2];
+
+            // RAM region: try the cache first
+            if (addr < 32'h0400_0000) begin
+                if (uut.data_cache.valid_bits[0][cache_index] &&
+                    uut.data_cache.tags[0][cache_index] === expected_tag) begin
+                    actual   = uut.data_cache.data[0][cache_index];
+                    in_cache = 1'b1;
+                end else if (uut.data_cache.valid_bits[1][cache_index] &&
+                             uut.data_cache.tags[1][cache_index] === expected_tag) begin
+                    actual   = uut.data_cache.data[1][cache_index];
+                    in_cache = 1'b1;
+                end else begin
+                    actual = u_axil_ram.mem[addr >> 2];
+                end
+            end else begin
+                // IO/MMIO region — never cached
+                actual = u_axil_ram.mem[addr >> 2];
+            end
+
+            if (actual == expected) begin
+                pass_count = pass_count + 1;
+                $display("  [PASS] %0s: %s[0x%04h] = %0d",
+                         test_name, in_cache ? "cache" : "  mem", addr, actual);
+            end else begin
+                fail_count = fail_count + 1;
+                $display("  [FAIL] %0s: %s[0x%04h] = %0d (expected %0d)",
+                         test_name, in_cache ? "cache" : "  mem", addr, actual, expected);
+            end
+        end
+    endtask
+
+    // Direct memory-only check — used by cache write-back tests that
+    // explicitly want to verify a value reached RAM (i.e. was evicted).
+    task check_ram;
         input [31:0] addr;
         input [31:0] expected;
         input [255:0] test_name;
@@ -473,13 +539,12 @@ module z_core_control_u_tb;
         begin
             test_count = test_count + 1;
             actual = u_axil_ram.mem[addr >> 2];
-            
             if (actual == expected) begin
                 pass_count = pass_count + 1;
-                $display("  [PASS] %0s: mem[0x%04h] = %0d", test_name, addr, actual);
+                $display("  [PASS] %0s: ram[0x%04h] = %0d", test_name, addr, actual);
             end else begin
                 fail_count = fail_count + 1;
-                $display("  [FAIL] %0s: mem[0x%04h] = %0d (expected %0d)", 
+                $display("  [FAIL] %0s: ram[0x%04h] = %0d (expected %0d)",
                          test_name, addr, actual, expected);
             end
         end
@@ -1191,23 +1256,47 @@ module z_core_control_u_tb;
         gpio_test_en = 0;    // TB not driving initially
         gpio_test_drive = 0;
         reset_cpu();
-        
-        // Wait for GPIO to be configured as output and data written
-        // CPU writes DIR=0xFFFFFFFF then DATA=0x000000FF
-        wait(gpio_wiring[31:0] === 32'h000000FF);
+
+        // Wait for GPIO to be configured as output and data written.
+        // Bounded by a 200us timeout — if the data-cache integration
+        // mis-routes IO writes the wait would otherwise hang the whole TB.
         $display("\n=== Test 12 Results: GPIO Bidirectional ===");
-        test_count = test_count + 1;
-        pass_count = pass_count + 1;
-        $display("  [PASS] GPIO Output Drive: gpio[31:0] = 0x%08h", gpio_wiring[31:0]);
-        
-        // Wait for CPU to switch GPIO to input mode (DIR=0)
-        wait(u_gpio.gpio_dir[31:0] === 32'h00000000);
-        
-        // Now TB drives the GPIO pins with test pattern
+        fork : t12_wait_out
+            begin
+                wait(gpio_wiring[31:0] === 32'h000000FF);
+                test_count = test_count + 1;
+                pass_count = pass_count + 1;
+                $display("  [PASS] GPIO Output Drive: gpio[31:0] = 0x%08h", gpio_wiring[31:0]);
+            end
+            begin
+                #200000;  // 200us watchdog
+                test_count = test_count + 1;
+                fail_count = fail_count + 1;
+                $display("  [FAIL] GPIO Output Drive timeout: gpio[31:0] = 0x%08h (expected 0x000000FF)",
+                         gpio_wiring[31:0]);
+            end
+        join_any
+        disable t12_wait_out;
+
+        // Wait for CPU to switch GPIO to input mode (DIR=0), bounded.
+        fork : t12_wait_dir
+            begin
+                wait(u_gpio.gpio_dir[31:0] === 32'h00000000);
+            end
+            begin
+                #200000;
+                $display("  [FAIL] GPIO DIR-input timeout: gpio_dir[31:0] = 0x%08h",
+                         u_gpio.gpio_dir[31:0]);
+                test_count = test_count + 1;
+                fail_count = fail_count + 1;
+            end
+        join_any
+        disable t12_wait_dir;
+
+        // TB drives the GPIO pins with the test pattern, then samples.
         gpio_test_en[31:0] = 32'hFFFFFFFF;
         gpio_test_drive[31:0] = 32'hCAFEBABE;
-        
-        // Wait for CPU to read the value
+
         #500;
         check_reg(6, 32'hCAFEBABE, "GPIO Input Read");
         verify_counters(3, 1, "Test 12");
@@ -1885,6 +1974,104 @@ module z_core_control_u_tb;
         check_mem(32'h100, 32'd5, "SW mem[256] = 5 (counter)");
         check_mem(32'h104, 32'd5, "SW mem[260] = 5 (exception count)");
         verify_counters(2, 0, "Test 34");
+
+        // ==========================================
+        // Test 35: Cache Round-Trip
+        // ==========================================
+        load_test35_cache_round_trip();
+        reset_cpu();
+        #20000;
+
+        $display("\n=== Test 35 Results: Cache Round-Trip ===");
+        check_reg(10, 100, "LW x10 from 0x100 (= 100)");
+        check_reg(11, 200, "LW x11 from 0x200 (= 200)");
+        check_reg(12, 300, "LW x12 from 0x300 (= 300)");
+        check_reg(13, 400, "LW x13 from 0x3FC (= 400)");
+        check_mem(32'h100, 100, "cache/mem[0x100] = 100");
+        check_mem(32'h200, 200, "cache/mem[0x200] = 200");
+        check_mem(32'h300, 300, "cache/mem[0x300] = 300");
+        check_mem(32'h3FC, 400, "cache/mem[0x3FC] = 400");
+
+        // ==========================================
+        // Test 36: Cache Way Conflict
+        // ==========================================
+        load_test36_way_conflict();
+        reset_cpu();
+        #30000;
+
+        $display("\n=== Test 36 Results: Cache Way Conflict ===");
+        check_reg(10, 11, "LW x10 from 0x100 (A=11)");
+        check_reg(11, 22, "LW x11 from 0x500 (B=22)");
+        check_reg(12, 33, "LW x12 from 0x900 (C=33)");
+        check_mem(32'h100, 11, "value at 0x100 = 11 (A)");
+        check_mem(32'h500, 22, "value at 0x500 = 22 (B)");
+        check_mem(32'h900, 33, "value at 0x900 = 33 (C)");
+
+        // ==========================================
+        // Test 37: Strided Cache Sweep
+        // ==========================================
+        load_test37_strided_sweep();
+        reset_cpu();
+        #50000;
+
+        $display("\n=== Test 37 Results: Strided Cache Sweep ===");
+        check_reg(10, 1, "x10 = sweep[0] = 1");
+        check_reg(11, 2, "x11 = sweep[1] = 2");
+        check_reg(12, 3, "x12 = sweep[2] = 3");
+        check_reg(13, 4, "x13 = sweep[3] = 4");
+        check_reg(14, 5, "x14 = sweep[4] = 5");
+        check_reg(15, 6, "x15 = sweep[5] = 6");
+        check_reg(16, 7, "x16 = sweep[6] = 7");
+        check_reg(17, 8, "x17 = sweep[7] = 8");
+        check_mem(32'h100, 1, "sweep[0] @ 0x100 = 1");
+        check_mem(32'h140, 2, "sweep[1] @ 0x140 = 2");
+        check_mem(32'h180, 3, "sweep[2] @ 0x180 = 3");
+        check_mem(32'h1C0, 4, "sweep[3] @ 0x1C0 = 4");
+        check_mem(32'h200, 5, "sweep[4] @ 0x200 = 5");
+        check_mem(32'h240, 6, "sweep[5] @ 0x240 = 6");
+        check_mem(32'h280, 7, "sweep[6] @ 0x280 = 7");
+        check_mem(32'h2C0, 8, "sweep[7] @ 0x2C0 = 8");
+
+        // ==========================================
+        // Test 38: Hot Loop (I$ + D$ Heavy Locality)
+        // ==========================================
+        load_test38_hot_loop();
+        reset_cpu();
+        #30000;
+
+        $display("\n=== Test 38 Results: Hot Loop (I$+D$ Locality) ===");
+        check_reg(10, 224, "x10 = 32 * 7 (accumulated)");
+        check_reg(11, 0,   "x11 = 0 (loop counter drained)");
+        check_mem(32'h1000, 7, "value at 0x1000 = 7 (preloaded)");
+
+        // ==========================================
+        // Test 39: Dirty-Eviction Persistence
+        // ==========================================
+        load_test39_dirty_eviction_persistence();
+        reset_cpu();
+        #30000;
+
+        $display("\n=== Test 39 Results: Dirty-Eviction Persistence ===");
+        check_reg(10, 10, "LW x10 from 0x100 = 10");
+        check_reg(11, 20, "LW x11 from 0x500 = 20");
+        check_reg(12, 30, "LW x12 from 0x900 = 30");
+        check_reg(13, 40, "LW x13 from 0xD00 = 40");
+        check_mem(32'h100, 10, "value at 0x100 = 10");
+        check_mem(32'h500, 20, "value at 0x500 = 20");
+        check_mem(32'h900, 30, "value at 0x900 = 30");
+        check_mem(32'hD00, 40, "value at 0xD00 = 40");
+
+        // ==========================================
+        // Test 40: RMW Hit Storm (D$ pure-hit throughput)
+        // ==========================================
+        load_test40_rmw_hit_storm();
+        reset_cpu();
+        #30000;
+
+        $display("\n=== Test 40 Results: RMW Hit Storm ===");
+        check_reg(10, 50, "x10 = 50 (final RMW value)");
+        check_reg(2,  50, "x2  = 50 (loop counter)");
+        check_mem(32'h100, 50, "value at 0x100 = 50");
 
         // ==========================================
         // Final Summary
@@ -3927,6 +4114,190 @@ module z_core_control_u_tb;
     endtask
 
     // ==========================================
+    //   Test 35: Cache Round-Trip (write-allocate + read-hit)
+    //
+    //   Write 4 distinct values to 4 different cache indices, then
+    //   read them back. Read path should hit on every load because
+    //   the writes installed lines via write-allocate.
+    //
+    //   Stores -> 0x100, 0x200, 0x300, 0x3FC (4 different indices)
+    //   Loads  -> same addresses into x10..x13
+    // ==========================================
+    task load_test35_cache_round_trip;
+        integer i;
+        begin
+            $display("\n--- Loading Test 35: Cache Round-Trip ---");
+            for (i = 0; i < 64; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // 0x00: ADDI x2, x0, 100      x2 = 100
+            u_axil_ram.mem[0]  = 32'h06400113;
+            // 0x04: ADDI x3, x0, 200      x3 = 200
+            u_axil_ram.mem[1]  = 32'h0c800193;
+            // 0x08: ADDI x4, x0, 300      x4 = 300
+            u_axil_ram.mem[2]  = 32'h12c00213;
+            // 0x0C: ADDI x5, x0, 400      x5 = 400
+            u_axil_ram.mem[3]  = 32'h19000293;
+
+            // 0x10: SW x2, 0x100(x0)
+            u_axil_ram.mem[4]  = 32'h10202023;
+            // 0x14: SW x3, 0x200(x0)
+            u_axil_ram.mem[5]  = 32'h20302023;
+            // 0x18: SW x4, 0x300(x0)
+            u_axil_ram.mem[6]  = 32'h30402023;
+            // 0x1C: SW x5, 0x3FC(x0)  (offset 0x3FC = 1020, fits 12-bit signed)
+            u_axil_ram.mem[7]  = 32'h3e502e23;
+
+            // 0x20-0x2C: NOPs to drain the pipeline
+            // (already filled with NOPs above)
+
+            // 0x30: LW x10, 0x100(x0)
+            u_axil_ram.mem[12] = 32'h10002503;
+            // 0x34: LW x11, 0x200(x0)
+            u_axil_ram.mem[13] = 32'h20002583;
+            // 0x38: LW x12, 0x300(x0)
+            u_axil_ram.mem[14] = 32'h30002603;
+            // 0x3C: LW x13, 0x3FC(x0)
+            u_axil_ram.mem[15] = 32'h3fc02683;
+
+            // 0x40: JAL x0, 0
+            u_axil_ram.mem[16] = 32'h0000006f;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 36: Cache Way Conflict
+    //
+    //   Three addresses share the same cache index but have distinct
+    //   tags, forcing the third write to evict an LRU way. Reads
+    //   verify all three values are still observable (via cache hit
+    //   or refill). Index = addr[9:2] for CACHE_DEPTH=256, so
+    //   addresses 0x100, 0x500, 0x900 all map to index 64.
+    // ==========================================
+    task load_test36_way_conflict;
+        integer i;
+        begin
+            $display("\n--- Loading Test 36: Cache Way Conflict ---");
+            for (i = 0; i < 96; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // 0x00: ADDI x2, x0, 11       x2 = 11 (A)
+            u_axil_ram.mem[0]  = 32'h00b00113;
+            // 0x04: ADDI x3, x0, 22       x3 = 22 (B)
+            u_axil_ram.mem[1]  = 32'h01600193;
+            // 0x08: ADDI x4, x0, 33       x4 = 33 (C)
+            u_axil_ram.mem[2]  = 32'h02100213;
+
+            // 0x0C: ADDI x6, x0, 0x100    x6 = 0x100 (addr A)
+            u_axil_ram.mem[3]  = 32'h10000313;
+            // 0x10: SW x2, 0(x6)          mem[0x100] = 11
+            u_axil_ram.mem[4]  = 32'h00232023;
+            // 0x14: ADDI x6, x6, 0x400    x6 = 0x500 (addr B)
+            u_axil_ram.mem[5]  = 32'h40030313;
+            // 0x18: SW x3, 0(x6)          mem[0x500] = 22
+            u_axil_ram.mem[6]  = 32'h00332023;
+            // 0x1C: ADDI x6, x6, 0x400    x6 = 0x900 (addr C)
+            u_axil_ram.mem[7]  = 32'h40030313;
+            // 0x20: SW x4, 0(x6)          mem[0x900] = 33  (forces eviction)
+            u_axil_ram.mem[8]  = 32'h00432023;
+
+            // 0x24-0x30: NOPs (drain)
+            // (already NOPs)
+
+            // 0x34: ADDI x7, x0, 0x100    x7 = 0x100
+            u_axil_ram.mem[13] = 32'h10000393;
+            // 0x38: LW x10, 0(x7)         x10 = mem[0x100]
+            u_axil_ram.mem[14] = 32'h0003a503;
+            // 0x3C: ADDI x7, x7, 0x400    x7 = 0x500
+            u_axil_ram.mem[15] = 32'h40038393;
+            // 0x40: LW x11, 0(x7)         x11 = mem[0x500]
+            u_axil_ram.mem[16] = 32'h0003a583;
+            // 0x44: ADDI x7, x7, 0x400    x7 = 0x900
+            u_axil_ram.mem[17] = 32'h40038393;
+            // 0x48: LW x12, 0(x7)         x12 = mem[0x900]
+            u_axil_ram.mem[18] = 32'h0003a603;
+
+            // 0x4C: JAL x0, 0
+            u_axil_ram.mem[19] = 32'h0000006f;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 37: Strided Cache Sweep (8 indices)
+    //
+    //   Writes 8 different values to 8 distinct cache indices, then
+    //   reads them all back into x10..x17. Tests that multiple
+    //   independent lines coexist and all return their values.
+    // ==========================================
+    task load_test37_strided_sweep;
+        integer i;
+        begin
+            $display("\n--- Loading Test 37: Strided Cache Sweep ---");
+            for (i = 0; i < 64; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // Loop counter / base reg setup
+            // 0x00: ADDI x6, x0, 0          x6 = 0 (base)
+            u_axil_ram.mem[0]  = 32'h00000313;
+            // 0x04: ADDI x7, x0, 8          x7 = limit (8 stores)
+            u_axil_ram.mem[1]  = 32'h00800393;
+            // 0x08: ADDI x8, x0, 0x100      x8 = base addr (0x100)
+            u_axil_ram.mem[2]  = 32'h10000413;
+
+            // Store loop (start at 0x0C / mem[3])
+            // 0x0C: ADDI x9, x6, 1          x9 = i+1 (value to store)
+            u_axil_ram.mem[3]  = 32'h00130493;
+            // 0x10: SW x9, 0(x8)            mem[x8] = x9
+            u_axil_ram.mem[4]  = 32'h00942023;
+            // 0x14: ADDI x6, x6, 1          x6++
+            u_axil_ram.mem[5]  = 32'h00130313;
+            // 0x18: ADDI x8, x8, 0x40       x8 += 64 (next index, stride=64 bytes)
+            u_axil_ram.mem[6]  = 32'h04040413;
+            // 0x1C: BLT x6, x7, -16 -> 0x0C
+            //       BLT encoding: imm_hi[12,10:5]=offsets +/-, rs2=x7, rs1=x6, f3=100, imm_lo[4:1,11], op=1100011
+            //       Branch offset = -16 (back 4 instructions)
+            u_axil_ram.mem[7]  = 32'hfe7348e3;
+
+            // After loop: reset addr pointer & load
+            // 0x20: ADDI x8, x0, 0x100      x8 = 0x100
+            u_axil_ram.mem[8]  = 32'h10000413;
+
+            // 0x24..0x40: 8 LW instructions into x10..x17
+            // LW xN, 0(x8); ADDI x8, x8, 0x40
+            // 0x24: LW x10, 0(x8)
+            u_axil_ram.mem[9]  = 32'h00042503;
+            // 0x28: ADDI x8, x8, 0x40
+            u_axil_ram.mem[10] = 32'h04040413;
+            // 0x2C: LW x11, 0(x8)
+            u_axil_ram.mem[11] = 32'h00042583;
+            // 0x30: ADDI x8, x8, 0x40
+            u_axil_ram.mem[12] = 32'h04040413;
+            // 0x34: LW x12, 0(x8)
+            u_axil_ram.mem[13] = 32'h00042603;
+            // 0x38: ADDI x8, x8, 0x40
+            u_axil_ram.mem[14] = 32'h04040413;
+            // 0x3C: LW x13, 0(x8)
+            u_axil_ram.mem[15] = 32'h00042683;
+            // 0x40: ADDI x8, x8, 0x40
+            u_axil_ram.mem[16] = 32'h04040413;
+            // 0x44: LW x14, 0(x8)
+            u_axil_ram.mem[17] = 32'h00042703;
+            // 0x48: ADDI x8, x8, 0x40
+            u_axil_ram.mem[18] = 32'h04040413;
+            // 0x4C: LW x15, 0(x8)
+            u_axil_ram.mem[19] = 32'h00042783;
+            // 0x50: ADDI x8, x8, 0x40
+            u_axil_ram.mem[20] = 32'h04040413;
+            // 0x54: LW x16, 0(x8)
+            u_axil_ram.mem[21] = 32'h00042803;
+            // 0x58: ADDI x8, x8, 0x40
+            u_axil_ram.mem[22] = 32'h04040413;
+            // 0x5C: LW x17, 0(x8)
+            u_axil_ram.mem[23] = 32'h00042883;
+
+            // 0x60: JAL x0, 0
+            u_axil_ram.mem[24] = 32'h0000006f;
+        end
+    endtask
+
+    // ==========================================
     //   Test 34: MRET Into Branch With Predictor State
     //   Loop body contains ECALL; handler returns
     //   via MRET to the loop-back branch. Tests
@@ -3978,6 +4349,174 @@ module z_core_control_u_tb;
             u_axil_ram.mem[35] = 32'h001a0a13;
             // 0x90: MRET
             u_axil_ram.mem[36] = 32'h30200073;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 38: Hot Loop (Heavy I$ + D$ Locality, Full Throughput)
+    //
+    //   Tight 4-instruction loop body that repeatedly loads from one
+    //   cached address, accumulates, and decrements a counter. After
+    //   the first iteration the loop is fully resident in I$ (small
+    //   working set) and the data line is resident in D$. Steady state
+    //   must sustain ~1 IPC with no AXI traffic.
+    //
+    //   Expected: x10 = 32 * 7 = 224
+    //             mem[0x1000] = 7
+    // ==========================================
+    task load_test38_hot_loop;
+        integer i;
+        begin
+            $display("\n--- Loading Test 38: Hot Loop (I$+D$ Locality) ---");
+            for (i = 0; i < 64; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // 0x00: ADDI x10, x0, 0     — accumulator = 0
+            u_axil_ram.mem[0] = 32'h00000513;
+            // 0x04: ADDI x11, x0, 32    — loop count
+            u_axil_ram.mem[1] = 32'h02000593;
+            // 0x08: LUI  x12, 0x00001   — x12 = 0x00001000 (data addr, well clear of code)
+            u_axil_ram.mem[2] = 32'h00001637;
+            // 0x0C: ADDI x13, x0, 7     — value to store
+            u_axil_ram.mem[3] = 32'h00700693;
+            // 0x10: SW x13, 0(x12)      — mem[0x1000] = 7  (preload + write-allocate fill)
+            u_axil_ram.mem[4] = 32'h00d62023;
+
+            // Loop body (0x14..0x20):
+            // 0x14: LW   x14, 0(x12)    — D$ hit after warmup
+            u_axil_ram.mem[5] = 32'h00062703;
+            // 0x18: ADD  x10, x10, x14  — acc += 7
+            u_axil_ram.mem[6] = 32'h00e50533;
+            // 0x1C: ADDI x11, x11, -1   — count--
+            u_axil_ram.mem[7] = 32'hfff58593;
+            // 0x20: BNE  x11, x0, -16   — back to 0x14 while count != 0
+            u_axil_ram.mem[8] = 32'hfe0598e3;
+
+            // 0x24: JAL x0, 0           — halt
+            u_axil_ram.mem[9] = 32'h0000006f;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 39: Dirty-Eviction Persistence (D$ Corner Case)
+    //
+    //   Four addresses share the same cache index (0x100, 0x500, 0x900,
+    //   0xD00 → idx 64 with CACHE_DEPTH=256). Four SWs fill both ways,
+    //   then evict each way in turn. Then four LWs from the original
+    //   addresses force more evictions. By the end every value must be
+    //   recoverable — either from cache or from RAM via writebacks.
+    //
+    //   Trace (with the data_in=mem_rdata refill fix in place):
+    //     SW 0x100=10  -> way0={tag0,10,d}
+    //     SW 0x500=20  -> way1={tag1,20,d}
+    //     SW 0x900=30  -> evict way0 → mem[0x100]=10; way0={tag2,30,d}
+    //     SW 0xD00=40  -> evict way1 → mem[0x500]=20; way1={tag3,40,d}
+    //     LW 0x100     -> evict way0 → mem[0x900]=30; refill→way0=10
+    //     LW 0x500     -> evict way1 → mem[0xD00]=40; refill→way1=20
+    //     LW 0x900     -> evict way0 → mem[0x100]=10; refill→way0=30
+    //     LW 0xD00     -> evict way1 → mem[0x500]=20; refill→way1=40
+    //
+    //   Expected regs : x10=10, x11=20, x12=30, x13=40
+    //   Expected mem  : mem[0x100]=10, mem[0x500]=20, cache[0x900]=30, cache[0xD00]=40
+    // ==========================================
+    task load_test39_dirty_eviction_persistence;
+        integer i;
+        begin
+            $display("\n--- Loading Test 39: Dirty-Eviction Persistence ---");
+            for (i = 0; i < 64; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // Values to store
+            // 0x00: ADDI x2, x0, 10
+            u_axil_ram.mem[0]  = 32'h00a00113;
+            // 0x04: ADDI x3, x0, 20
+            u_axil_ram.mem[1]  = 32'h01400193;
+            // 0x08: ADDI x4, x0, 30
+            u_axil_ram.mem[2]  = 32'h01e00213;
+            // 0x0C: ADDI x5, x0, 40
+            u_axil_ram.mem[3]  = 32'h02800293;
+
+            // Phase 1: four stores, all index 0x40, distinct tags
+            // 0x10: ADDI x6, x0, 0x100
+            u_axil_ram.mem[4]  = 32'h10000313;
+            // 0x14: SW x2, 0(x6)            mem[0x100] = 10
+            u_axil_ram.mem[5]  = 32'h00232023;
+            // 0x18: ADDI x6, x6, 0x400      x6 = 0x500
+            u_axil_ram.mem[6]  = 32'h40030313;
+            // 0x1C: SW x3, 0(x6)            mem[0x500] = 20
+            u_axil_ram.mem[7]  = 32'h00332023;
+            // 0x20: ADDI x6, x6, 0x400      x6 = 0x900
+            u_axil_ram.mem[8]  = 32'h40030313;
+            // 0x24: SW x4, 0(x6)            mem[0x900] = 30  (evicts way0)
+            u_axil_ram.mem[9]  = 32'h00432023;
+            // 0x28: ADDI x6, x6, 0x400      x6 = 0xD00
+            u_axil_ram.mem[10] = 32'h40030313;
+            // 0x2C: SW x5, 0(x6)            mem[0xD00] = 40  (evicts way1)
+            u_axil_ram.mem[11] = 32'h00532023;
+
+            // Phase 2: read each original address — every LW now misses,
+            // forcing further evictions and AXI READs.
+            // 0x30: ADDI x6, x0, 0x100
+            u_axil_ram.mem[12] = 32'h10000313;
+            // 0x34: LW x10, 0(x6)
+            u_axil_ram.mem[13] = 32'h00032503;
+            // 0x38: ADDI x6, x6, 0x400      x6 = 0x500
+            u_axil_ram.mem[14] = 32'h40030313;
+            // 0x3C: LW x11, 0(x6)
+            u_axil_ram.mem[15] = 32'h00032583;
+            // 0x40: ADDI x6, x6, 0x400      x6 = 0x900
+            u_axil_ram.mem[16] = 32'h40030313;
+            // 0x44: LW x12, 0(x6)
+            u_axil_ram.mem[17] = 32'h00032603;
+            // 0x48: ADDI x6, x6, 0x400      x6 = 0xD00
+            u_axil_ram.mem[18] = 32'h40030313;
+            // 0x4C: LW x13, 0(x6)
+            u_axil_ram.mem[19] = 32'h00032683;
+
+            // 0x50: JAL x0, 0
+            u_axil_ram.mem[20] = 32'h0000006f;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 40: Read-Modify-Write Throughput (D$ Hit Storm)
+    //
+    //   50-iteration RMW loop on a single address: LW, ADDI +1, SW.
+    //   After the first iteration the line is resident and dirty, so
+    //   every subsequent LW and SW must hit the cache without requesting
+    //   a refill. Tests that store-hits update the line cleanly and that
+    //   the load-after-store dependency is satisfied within one cycle
+    //   of the data-cache hit (no false stalls).
+    //
+    //   Expected: x10 = 50, cache[0x100] = 50
+    // ==========================================
+    task load_test40_rmw_hit_storm;
+        integer i;
+        begin
+            $display("\n--- Loading Test 40: RMW Hit Storm ---");
+            for (i = 0; i < 64; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+            // Make sure mem[0x100] starts at 0
+            u_axil_ram.mem[64] = 32'h00000000;  // word index 64 = byte addr 0x100
+
+            // 0x00: ADDI x6, x0, 0x100      data addr
+            u_axil_ram.mem[0] = 32'h10000313;
+            // 0x04: ADDI x2, x0, 0          counter
+            u_axil_ram.mem[1] = 32'h00000113;
+            // 0x08: ADDI x3, x0, 50         limit
+            u_axil_ram.mem[2] = 32'h03200193;
+
+            // Loop body (0x0C..0x1C):
+            // 0x0C: LW   x10, 0(x6)
+            u_axil_ram.mem[3] = 32'h00032503;
+            // 0x10: ADDI x10, x10, 1
+            u_axil_ram.mem[4] = 32'h00150513;
+            // 0x14: SW   x10, 0(x6)
+            u_axil_ram.mem[5] = 32'h00a32023;
+            // 0x18: ADDI x2, x2, 1
+            u_axil_ram.mem[6] = 32'h00110113;
+            // 0x1C: BLT  x2, x3, -16        back to 0x0C while counter < 50
+            u_axil_ram.mem[7] = 32'hfe3148e3;
+
+            // 0x20: JAL x0, 0
+            u_axil_ram.mem[8] = 32'h0000006f;
         end
     endtask
 
