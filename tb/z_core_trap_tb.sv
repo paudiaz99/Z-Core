@@ -32,7 +32,8 @@ module z_core_trap_tb;
     parameter DATA_WIDTH = 32;
     parameter ADDR_WIDTH = 32;
     parameter STRB_WIDTH = (DATA_WIDTH/8);
-    parameter CACHE_DEPTH = 256;
+    parameter INST_CACHE_DEPTH = 4096;
+    parameter DATA_CACHE_DEPTH = 8192;
 
     // Only memory is required for trap-focused tests.
     localparam S_COUNT = 1;
@@ -279,7 +280,8 @@ module z_core_trap_tb;
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .STRB_WIDTH(STRB_WIDTH),
-        .CACHE_DEPTH(CACHE_DEPTH)
+        .INST_CACHE_DEPTH(INST_CACHE_DEPTH),
+        .DATA_CACHE_DEPTH(DATA_CACHE_DEPTH)
     ) uut (
         .clk(clk),
         .rstn(rstn),
@@ -391,15 +393,34 @@ module z_core_trap_tb;
         input [31:0] expected;
         input [255:0] name;
         reg [31:0] actual;
+        reg [16:0] expected_tag;
+        reg [12:0] cache_index;
+        reg        in_cache;
         begin
             test_count = test_count + 1;
-            actual = u_axil_ram.mem[addr >> 2];
+            in_cache     = 1'b0;
+            expected_tag = addr[31:15];
+            cache_index  = addr[14:2];
+
+            // Check data cache first (2-way, DATA_CACHE_DEPTH=8192)
+            if (uut.data_cache.valid_bits[0][cache_index] &&
+                uut.data_cache.tags[0][cache_index] === expected_tag) begin
+                actual   = uut.data_cache.data[0][cache_index];
+                in_cache = 1'b1;
+            end else if (uut.data_cache.valid_bits[1][cache_index] &&
+                         uut.data_cache.tags[1][cache_index] === expected_tag) begin
+                actual   = uut.data_cache.data[1][cache_index];
+                in_cache = 1'b1;
+            end else begin
+                actual = u_axil_ram.mem[addr >> 2];
+            end
+
             if (actual === expected) begin
                 pass_count = pass_count + 1;
-                $display("  [PASS] %0s: mem[0x%0h] = 0x%08h", name, addr, actual);
+                $display("  [PASS] %0s: %s[0x%0h] = 0x%08h", name, in_cache ? "cache" : "  mem", addr, actual);
             end else begin
                 fail_count = fail_count + 1;
-                $display("  [FAIL] %0s: mem[0x%0h] = 0x%08h (expected 0x%08h)", name, addr, actual, expected);
+                $display("  [FAIL] %0s: %s[0x%0h] = 0x%08h (expected 0x%08h)", name, in_cache ? "cache" : "  mem", addr, actual, expected);
             end
         end
     endtask

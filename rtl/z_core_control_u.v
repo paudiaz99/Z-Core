@@ -32,7 +32,7 @@ module z_core_control_u #(
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     parameter INST_CACHE_DEPTH = 4096,
-    parameter DATA_CACHE_DEPTH = 8192
+    parameter DATA_CACHE_DEPTH = 4096
 )(
     input  wire                   clk,
     input  wire                   rstn,
@@ -646,8 +646,10 @@ wire perf_axi_grant_dmem = ex_mem_valid
                         && !mem_op_pending
                         && !mem_busy
                         && !fetch_wait;
-assign load_pulse  = perf_axi_grant_dmem && ex_mem_is_load;
-assign write_pulse = perf_axi_grant_dmem && ex_mem_is_store;
+assign load_pulse  = (perf_axi_grant_dmem && ex_mem_is_load)
+                   || (data_cache_hit_comb && ex_mem_is_load);
+assign write_pulse = (perf_axi_grant_dmem && ex_mem_is_store)
+                   || (data_cache_hit_comb && ex_mem_is_store);
 
 
 assign inst_fetch_pulse = fetch_wait && mem_ready && !flush;
@@ -681,6 +683,7 @@ z_core_csr_file #(
     .msip(msip),
     .instret_pulse(mem_wb_valid),
     .inst_cache_hit_pulse(consume_inst),  // 1-cycle pulse per consumed I-cache hit
+    .data_cache_hit_pulse(data_cache_hit_comb),
     .mem_read_pulse(load_pulse),
     .mem_write_pulse(write_pulse),
     .mem_inst_fetch_pulse(inst_fetch_pulse),
@@ -1079,9 +1082,7 @@ wire uncached_req = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
                     && data_uncacheable_mem
                     && !mem_op_pending && !mem_busy && !fetch_wait;
 
-// Byte-positioned store data, identical to the data_cache_data_in
-// non-refill case. Re-derived here because data_cache_data_in is
-// muxed with refill data and not directly suitable for AXI write.
+
 reg [31:0] uncached_store_data;
 always @* begin
     case (ex_mem_funct3[1:0])

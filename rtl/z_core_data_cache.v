@@ -1,7 +1,7 @@
 module z_core_data_cache #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
-    parameter CACHE_ENTRIES = 1024,
+    parameter CACHE_ENTRIES = 8192,
     parameter ASSOCIATIVITY = 2,
     parameter CACHE_LINE_SIZE = 4,
     parameter CACHE_DEPTH = CACHE_ENTRIES / ASSOCIATIVITY,

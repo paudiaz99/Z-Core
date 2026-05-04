@@ -55,32 +55,28 @@ SIG = {
     "pc_q_valid":        "l&",
     "fetch_wait":        "<&",
 }
-ID2NAME = {v: k for k, v in SIG.items()}
-
-# CSR counters from uut.u_csr_file (64-bit regs)
-#  mcycle_r       : c(
-#  minstret_r     : p(
-#  mhpmcounter3_r : f(  (icache hits)
-#  mhpmcounter5_r : h(  (memory reads)
-#  mhpmcounter6_r : i(  (memory writes)
 CSR_SIG = {
     "mcycle": "c(",
     "minstret": "p(",
     "cache_hits": "f(",
+    "dcache_hits": "",
     "mem_reads": "h(",
     "mem_writes": "i(",
 }
-CSR_ID2NAME = {v: k for k, v in CSR_SIG.items()}
 
 # Testbench CSR-accumulated mirrors (read from CSR before each reset_cpu).
 TB_CSR_ACC_SIG = {
     "acc_cache_hits": "Q",
+    "acc_dcache_hits": "",
     "acc_cycles": "R",
     "acc_instrs": "S",
     "acc_mem_reads": "T",
     "acc_mem_writes": "U",
 }
-TB_CSR_ACC_ID2NAME = {v: k for k, v in TB_CSR_ACC_SIG.items()}
+
+ID2NAME = {}
+CSR_ID2NAME = {}
+TB_CSR_ACC_ID2NAME = {}
 
 state_bit = {name: 0 for name in SIG if name != "if_id_pc"}
 state_pc = 0  # if_id_pc current value
@@ -180,6 +176,27 @@ with open(VCD, "rb") as f:
         if in_header:
             if line.startswith("$enddefinitions"):
                 in_header = False
+                ID2NAME = {v: k for k, v in SIG.items() if v}
+                CSR_ID2NAME = {v: k for k, v in CSR_SIG.items() if v}
+                TB_CSR_ACC_ID2NAME = {v: k for k, v in TB_CSR_ACC_SIG.items() if v}
+            elif line.startswith("$var"):
+                parts = line.split()
+                if len(parts) >= 5:
+                    var_id = parts[3]
+                    var_name = parts[4]
+                    if var_name in SIG: SIG[var_name] = var_id
+                    elif var_name == "mcycle_r": CSR_SIG["mcycle"] = var_id
+                    elif var_name == "minstret_r": CSR_SIG["minstret"] = var_id
+                    elif var_name == "mhpmcounter3_r": CSR_SIG["cache_hits"] = var_id
+                    elif var_name == "mhpmcounter4_r": CSR_SIG["dcache_hits"] = var_id
+                    elif var_name == "mhpmcounter5_r": CSR_SIG["mem_reads"] = var_id
+                    elif var_name == "mhpmcounter6_r": CSR_SIG["mem_writes"] = var_id
+                    elif var_name == "total_internal_cache_hits": TB_CSR_ACC_SIG["acc_cache_hits"] = var_id
+                    elif var_name == "total_internal_dcache_hits": TB_CSR_ACC_SIG["acc_dcache_hits"] = var_id
+                    elif var_name == "total_internal_cycles": TB_CSR_ACC_SIG["acc_cycles"] = var_id
+                    elif var_name == "total_internal_instrs": TB_CSR_ACC_SIG["acc_instrs"] = var_id
+                    elif var_name == "total_internal_memory_reads": TB_CSR_ACC_SIG["acc_mem_reads"] = var_id
+                    elif var_name == "total_internal_memory_writes": TB_CSR_ACC_SIG["acc_mem_writes"] = var_id
             continue
         if not line:
             continue
@@ -312,10 +329,10 @@ def report(label, c):
         print(f"  via cache hit        : {c.deliver_from_cache}  "
               f"({pct(c.deliver_from_cache, c.consume_inst):.2f}% of consumes)")
     print()
-    print(f"Cache hits  (lookups)  : {c.cache_hit_q}")
-    print(f"Cache miss  (lookups)  : {c.cache_miss_q}")
+    print(f"I$ hits  (lookups)     : {c.cache_hit_q}")
+    print(f"I$ miss  (lookups)     : {c.cache_miss_q}")
     if c.cache_hit_q + c.cache_miss_q:
-        print(f"Hit rate (per lookup)  : "
+        print(f"I$ Hit rate            : "
               f"{pct(c.cache_hit_q, c.cache_hit_q + c.cache_miss_q):.2f}%")
     print(f"AXI mem_ready pulses   : {c.mem_ready}")
     print()
@@ -366,6 +383,7 @@ csr_suite = {
     "cycles": state_tb_csr_acc["acc_cycles"] + csr_live["mcycle"],
     "instrs": state_tb_csr_acc["acc_instrs"] + csr_live["minstret"],
     "cache_hits": state_tb_csr_acc["acc_cache_hits"] + csr_live["cache_hits"],
+    "dcache_hits": state_tb_csr_acc["acc_dcache_hits"] + csr_live["dcache_hits"],
     "mem_reads": state_tb_csr_acc["acc_mem_reads"] + csr_live["mem_reads"],
     "mem_writes": state_tb_csr_acc["acc_mem_writes"] + csr_live["mem_writes"],
 }
@@ -377,8 +395,12 @@ print(f"minstret               : {csr_live['minstret']}")
 print(f"CSR IPC                : "
       f"{(csr_live['minstret'] / csr_live['mcycle']):.4f}" if csr_live["mcycle"] else "n/a")
 print(f"mhpmcounter3 (i$ hits) : {csr_live['cache_hits']}")
+print(f"mhpmcounter4 (d$ hits) : {csr_live['dcache_hits']}")
 print(f"mhpmcounter5 (dmem rd) : {csr_live['mem_reads']}")
 print(f"mhpmcounter6 (dmem wr) : {csr_live['mem_writes']}")
+d_lookups_live = csr_live['mem_reads'] + csr_live['mem_writes']
+print(f"D$ hit rate            : "
+      f"{(100.0 * csr_live['dcache_hits'] / d_lookups_live):.2f}%" if d_lookups_live else "n/a")
 print()
 print("Full-suite CSR totals (accumulated from CSR reads):")
 print(f"cycles                 : {csr_suite['cycles']}")
@@ -386,8 +408,12 @@ print(f"instructions           : {csr_suite['instrs']}")
 print(f"CSR IPC                : "
       f"{(csr_suite['instrs'] / csr_suite['cycles']):.4f}" if csr_suite["cycles"] else "n/a")
 print(f"i$ hits                : {csr_suite['cache_hits']}")
+print(f"d$ hits                : {csr_suite['dcache_hits']}")
 print(f"dmem reads             : {csr_suite['mem_reads']}")
 print(f"dmem writes            : {csr_suite['mem_writes']}")
+d_lookups_suite = csr_suite['mem_reads'] + csr_suite['mem_writes']
+print(f"D$ hit rate            : "
+      f"{(100.0 * csr_suite['dcache_hits'] / d_lookups_suite):.2f}%" if d_lookups_suite else "n/a")
 print()
 print("======================================================================")
 print(f"Trimmed (polluted) cycles : {trimmed_cycles_total}  "

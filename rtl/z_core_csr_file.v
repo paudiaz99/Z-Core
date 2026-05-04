@@ -79,6 +79,7 @@ module z_core_csr_file #(
     // ============================================
     input  wire                 inst_cache_hit_pulse,    // Pulse when cache hit
     input  wire                 inst_cache_miss_pulse,    // Pulse when cache miss
+    input  wire                 data_cache_hit_pulse,    // Pulse when cache hit
 
     // ============================================
     //           Memory Access Counters
@@ -246,7 +247,7 @@ module z_core_csr_file #(
     reg [63:0] mcycle_r;
     reg [63:0] minstret_r;
     reg [63:0] mhpmcounter3_r; // I-Cache Hits
-    reg [63:0] mhpmcounter4_r; // D-Cache Hits (Not implemented yet)
+    reg [63:0] mhpmcounter4_r; // D-Cache Hits
     reg [63:0] mhpmcounter5_r; // Load Requests 
     reg [63:0] mhpmcounter6_r; // Store Requests
     reg [63:0] mhpmcounter7_r; // Branch Mispredictions
@@ -359,6 +360,8 @@ module z_core_csr_file #(
                 minstret_r <= minstret_r + 1;
             if (inst_cache_hit_pulse)
                 mhpmcounter3_r <= mhpmcounter3_r + 1;
+            if(data_cache_hit_pulse)
+                mhpmcounter4_r <= mhpmcounter4_r + 1;
             if (mem_read_pulse)
                 mhpmcounter5_r <= mhpmcounter5_r + 1;
             if (mem_write_pulse)
