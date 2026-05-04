@@ -36,7 +36,7 @@ module z_core_top #(
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     parameter MEM_ADDR_WIDTH = 16,      // 64KB memory
     parameter INST_CACHE_DEPTH = 4096,
-    parameter DATA_CACHE_DEPTH = 8192,
+    parameter DATA_CACHE_DEPTH = 4096,
     parameter N_GPIO = 32,
     parameter PIPELINE_OUTPUT = 0
 )(
