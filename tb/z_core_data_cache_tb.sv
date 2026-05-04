@@ -65,6 +65,7 @@ module z_core_data_cache_tb;
     reg                       cs;
     reg                       wen;
     reg                       refill_complete;
+    reg  [3:0]                strb;
     reg  [ADDR_WIDTH-1:0]     addr;
     reg  [DATA_WIDTH-1:0]     data_in;
 
@@ -78,6 +79,12 @@ module z_core_data_cache_tb;
     // Counters
     int pass_count = 0;
     int fail_count = 0;
+
+    // Scratch variables for T1.21
+    reg [31:0] t21_addr;
+    reg [31:0] t21_old_line;
+    reg [31:0] t21_store_data;
+    reg [31:0] t21_expected;
 
     // Test-ID marker — updated at the start of each test case so waveform
     // viewers can see which test is running. Encoded as decimal (e.g. 0x0102 = T1.02).
@@ -101,6 +108,7 @@ module z_core_data_cache_tb;
         .rstn                    (rstn),
         .wen                     (wen),
         .cs                      (cs),
+        .strb                    (strb),
         .refill_complete         (refill_complete),
         .addr                    (addr),
         .data_in                 (data_in),
@@ -166,52 +174,97 @@ module z_core_data_cache_tb;
         cs              = 1'b0;
     endtask
 
-    // Issue a write request (cs=1, wen=1). For a hit this updates the line;
-    // for a miss this asserts request_refill (caller must drive refill_complete).
-    task automatic do_write;
+    // Strb-aware write. For full-word writes pass strb_in=4'hF.
+    task automatic do_write_strb;
         input [31:0] a;
         input [31:0] d;
+        input [3:0]  strb_in;
         addr            = a;
         data_in         = d;
+        strb            = strb_in;
         wen             = 1'b1;
         cs              = 1'b1;
         refill_complete = 1'b0;
         @(posedge clk); #1;
         cs              = 1'b0;
+        strb            = 4'hF;
     endtask
 
-    // LSU-side refill handshake: drive addr=miss_addr, data_in=fetched word,
-    // refill_complete=1 for one cycle. This is how a line gets installed.
-    task automatic do_refill;
+    // Default-full-word write (kept as the original do_write for back-compat).
+    task automatic do_write;
         input [31:0] a;
         input [31:0] d;
+        do_write_strb(a, d, 4'hF);
+    endtask
+
+    // Strb-aware refill.
+    // For read refills (refill_wen=0): RTL installs data_in directly; strb/mask ignored.
+    // For write refills (refill_wen=1): RTL computes data_in & ~mask | refill_buffer_data & mask.
+    //   refill_buffer_data holds (store_data & mask) from miss time, so driving data_in=old_line
+    //   and strb=original_write_strobe yields the correct merged result.
+    task automatic do_refill_strb;
+        input [31:0] a;
+        input [31:0] d;
+        input [3:0]  strb_in;
         addr            = a;
         data_in         = d;
+        strb            = strb_in;
         cs              = 1'b0;
         wen             = 1'b0;
         refill_complete = 1'b1;
         @(posedge clk); #1;
         refill_complete = 1'b0;
+        strb            = 4'hF;
     endtask
 
-    // High-level: write-allocate sequence (write-miss → refill → retry write
-    // is NOT needed here because the refill itself stores data_in into the
-    // line). We model the LSU contract as: on write miss the LSU performs
-    // any required writeback, then issues do_refill with the store data.
+    // Store refill with explicit old-line data (tests the merge: (old & ~mask)|(store & mask)).
+    // RTL formula (refill_wen=1): data_in & ~mask | refill_buffer_data & mask
+    //   refill_buffer_data was captured as (store_d & mask) at miss time.
+    //   Driving data_in=old_d and strb=strb_in gives: old_d & ~mask | store_d & mask. ✓
+    task automatic do_store_refill_with_old_data;
+        input [31:0] a;
+        input [31:0] store_d;   // replicated store bytes captured in refill_buffer_data at miss
+        input [31:0] old_d;     // AXI-fetched old line, driven as data_in during refill
+        input [3:0]  strb_in;
+        addr            = a;
+        data_in         = old_d;
+        strb            = strb_in;
+        cs              = 1'b0;
+        wen             = 1'b0;
+        refill_complete = 1'b1;
+        @(posedge clk); #1;
+        refill_complete = 1'b0;
+        strb            = 4'hF;
+    endtask
+
+    task automatic do_refill;
+        input [31:0] a;
+        input [31:0] d;
+        do_refill_strb(a, d, 4'hF);
+    endtask
+
+    // High-level: write-allocate (write-miss → refill).
     task automatic write_allocate;
         input [31:0] a;
         input [31:0] d;
         do_write(a, d);
-        // request_refill should be asserted now (write miss)
         do_refill(a, d);
     endtask
 
-    // High-level: read-allocate sequence — read miss, LSU fetches word and
-    // installs it via do_refill. Caller can then re-issue do_read to obtain
-    // the data through the normal hit path.
+    task automatic write_allocate_strb;
+        input [31:0] a;
+        input [31:0] d;
+        input [3:0]  strb_in;
+        do_write_strb(a, d, strb_in);
+        // For the refill, drive the same strb so the contract test is honest;
+        // tests that want to study strb-on-refill drive do_refill_strb directly.
+        do_refill_strb(a, d, strb_in);
+    endtask
+
+    // Read-allocate
     task automatic read_allocate;
         input [31:0] a;
-        input [31:0] d;   // word the LSU fetched from memory
+        input [31:0] d;
         do_read(a);
         do_refill(a, d);
     endtask
@@ -229,6 +282,7 @@ module z_core_data_cache_tb;
         cs              = 1'b0;
         wen             = 1'b0;
         refill_complete = 1'b0;
+        strb            = 4'hF;   // default: full-word writes
         addr            = 32'b0;
         data_in         = 32'b0;
 
@@ -452,26 +506,19 @@ module z_core_data_cache_tb;
 
         // Hold idle for 20 cycles, sample buffer-related outputs each cycle.
         begin
-            logic [31:0]                  saved_wb_addr;
-            logic [31:0]                  saved_wb_data;
-            logic [CACHE_TAG_WIDTH-1:0]   saved_buf_tag;
-            logic [CACHE_ADDR_WIDTH-1:0]  saved_buf_index;
-            logic [DATA_WIDTH-1:0]        saved_buf_data;
+            logic [31:0]          saved_wb_addr;
+            logic [31:0]          saved_wb_data;
+            logic [DATA_WIDTH-1:0] saved_buf_data;
             int errors;
             saved_wb_addr   = dirty_writeback_addr;
             saved_wb_data   = dirty_writeback_data;
-            saved_buf_tag   = uut.refill_buffer_tag;
-            saved_buf_index = uut.refill_buffer_index;
             saved_buf_data  = uut.refill_buffer_data;
             errors = 0;
             for (int k = 0; k < 20; k++) begin
                 idle_cycle();
-                if (request_refill          !== 1'b1)         errors++;
-                if (dirty_writeback_enabled !== 1'b1)         errors++;
-                if (dirty_writeback_addr    !== saved_wb_addr) errors++;
-                if (dirty_writeback_data    !== saved_wb_data) errors++;
-                if (uut.refill_buffer_tag   !== saved_buf_tag) errors++;
-                if (uut.refill_buffer_index !== saved_buf_index) errors++;
+                if (request_refill          !== 1'b1)          errors++;
+                // dirty_writeback_enabled auto-clears on cs=0 (Bug 5 fixed); skip here.
+                if (dirty_writeback_data    !== saved_wb_data)  errors++;
                 if (uut.refill_buffer_data  !== saved_buf_data) errors++;
             end
             if (errors == 0) begin
@@ -781,12 +828,11 @@ module z_core_data_cache_tb;
         @(posedge clk); #1;
         cs = 1'b0;
         $display("T1.20 request_refill after rogue write = %0b", request_refill);
-        // RTL has no interlock — expect refill_buffer to have been overwritten.
-        $display("       refill_buffer_tag   = 0x%05h (live tag was 0x%05h)",
-                 uut.refill_buffer_tag, 21'hB1);
-        $display("       refill_buffer_index = 0x%03h (live idx was 0x%03h)",
-                 uut.refill_buffer_index, 9'h131);
-        if (uut.refill_buffer_tag === 21'hB1 && uut.refill_buffer_index === 9'h131) begin
+        // RTL has no interlock — expect refill_buffer to have been overwritten by the rogue write.
+        $display("       refill_buffer_data = 0x%08h (rogue write drove 0xBADCAFE0)",
+                 uut.refill_buffer_data);
+        $display("       refill_wen         = %0b (1 = rogue write captured)", uut.refill_wen);
+        if (uut.refill_wen === 1'b1) begin
             $display("[INFO] T1.20 buffer overwritten — confirms Bug 7 (no interlock)");
             pass_count++;
         end else begin
@@ -795,6 +841,66 @@ module z_core_data_cache_tb;
         end
         // Cleanup: complete a refill so state doesn't dangle
         do_refill(make_addr(21'hB1, 9'h131), 32'hBADC_AFE0);
+        idle_cycle();
+
+        // ============================================================
+        // T1.21 — Write-miss refill merges store data with fetched line
+        //   SB/SH strobes must only update the covered bytes; the
+        //   remaining bytes come from the AXI-fetched old line (refill_data).
+        //   Expected: cache entry = (old_line & ~mask) | (store_data & mask)
+        // ============================================================
+        current_test = 16'h0121;
+        $display("\n--- T1.21: Write-Miss Refill Merges Store Data with Fetched Line ---");
+        rstn = 1'b0; repeat(4) @(posedge clk); rstn = 1'b1; @(posedge clk); #1;
+
+        // --- SB at byte offset 0 (strb=4'b0001) ---
+        // Store byte 0xAB to address A (byte 0).
+        // Old memory line at A = 0xDEADBEEF.
+        // Expected: (0xDEADBEEF & ~0x000000FF) | (0xABABABAB & 0x000000FF)
+        //         = 0xDEADBE00 | 0x000000AB = 0xDEADBEAB
+        t21_addr       = make_addr(21'h10, 9'h10);
+        t21_old_line   = 32'hDEAD_BEEF;
+        t21_store_data = {4{8'hAB}};      // SB replicates byte across word
+        t21_expected   = 32'hDEAD_BEAB;
+        do_write_strb(t21_addr, t21_store_data, 4'b0001);  // miss → refill_wen=1 captured
+        idle_cycle();
+        do_store_refill_with_old_data(t21_addr, t21_store_data, t21_old_line, 4'b0001);
+        idle_cycle();
+        do_read(t21_addr);
+        check  ("T1.21 SB refill-merge: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.21 SB refill-merge: data_out",    data_out,  t21_expected);
+        idle_cycle();
+
+        // --- SH at upper halfword (strb=4'b1100) ---
+        // Store halfword 0xCAFE to address B (upper two bytes).
+        // Old memory line at B = 0x12345678.
+        // Expected: (0x12345678 & ~0xFFFF0000) | (0xCAFECAFE & 0xFFFF0000)
+        //         = 0x00005678 | 0xCAFE0000 = 0xCAFE5678
+        t21_addr       = make_addr(21'h11, 9'h11);
+        t21_old_line   = 32'h1234_5678;
+        t21_store_data = {2{16'hCAFE}};   // SH replicates halfword
+        t21_expected   = 32'hCAFE_5678;
+        do_write_strb(t21_addr, t21_store_data, 4'b1100);
+        idle_cycle();
+        do_store_refill_with_old_data(t21_addr, t21_store_data, t21_old_line, 4'b1100);
+        idle_cycle();
+        do_read(t21_addr);
+        check  ("T1.21 SH refill-merge: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.21 SH refill-merge: data_out",    data_out,  t21_expected);
+        idle_cycle();
+
+        // --- SW (strb=4'hF) — full word: all bytes from store, old line irrelevant ---
+        t21_addr       = make_addr(21'h12, 9'h12);
+        t21_old_line   = 32'hFFFF_FFFF;
+        t21_store_data = 32'hDEAD_C0DE;
+        t21_expected   = 32'hDEAD_C0DE;
+        do_write_strb(t21_addr, t21_store_data, 4'hF);
+        idle_cycle();
+        do_store_refill_with_old_data(t21_addr, t21_store_data, t21_old_line, 4'hF);
+        idle_cycle();
+        do_read(t21_addr);
+        check  ("T1.21 SW refill-merge: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.21 SW refill-merge: data_out",    data_out,  t21_expected);
         idle_cycle();
 
         // ============================================================

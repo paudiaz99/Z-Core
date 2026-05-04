@@ -35,7 +35,8 @@ module z_core_top #(
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
     parameter MEM_ADDR_WIDTH = 16,      // 64KB memory
-    parameter CACHE_DEPTH = 4096,
+    parameter INST_CACHE_DEPTH = 4096,
+    parameter DATA_CACHE_DEPTH = 8192,
     parameter N_GPIO = 32,
     parameter PIPELINE_OUTPUT = 0
 )(
@@ -193,7 +194,8 @@ z_core_control_u #(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(ADDR_WIDTH),
     .STRB_WIDTH(STRB_WIDTH),
-    .CACHE_DEPTH(CACHE_DEPTH)
+    .INST_CACHE_DEPTH(INST_CACHE_DEPTH),
+    .DATA_CACHE_DEPTH(DATA_CACHE_DEPTH)
 ) u_control_unit (
     .clk(clk),
     .rstn(rstn),
