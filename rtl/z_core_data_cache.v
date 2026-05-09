@@ -96,6 +96,9 @@ always @(posedge clk) begin
         dirty_bits[refill_buffer_set][index_addr] <= 1'b1;
         lru_bits[refill_buffer_set][index_addr] <= 1'b0;
         lru_bits[!refill_buffer_set][index_addr] <= 1'b1;
+    end else if (!cs) begin
+        cache_hit <= cache_hit ? 1'b0 : cache_hit;
+        dirty_writeback_enabled <= dirty_writeback_enabled ? 1'b0 : dirty_writeback_enabled;
     end else if(cs && wen) begin
         if(cache_hit_comb) begin
             data[set_to_write_on_hit][index_addr] <= data_in & mask;
@@ -134,16 +137,5 @@ always @(posedge clk) begin
     end
 end
 
-always @(posedge clk) begin
-    if(!cs && cache_hit) begin
-        cache_hit <= 1'b0;
-    end
-end
-
-always @(posedge clk) begin
-    if(!cs && dirty_writeback_enabled) begin
-        dirty_writeback_enabled <= 1'b0;
-    end
-end
 
 endmodule
