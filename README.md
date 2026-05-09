@@ -37,13 +37,10 @@
 ## Block Diagram
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/fec3a0e0-5cef-46e4-a3fd-7f07b1387a11" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/4bbf7820-d755-439e-af04-6aa5481f24fa" alt="centered image">
   <br>
   <sup>Z-Core SoC Architecture.</sup>
 </div>
-
-> [!WARNING]
-> The SoC diagram does not include neither the Timer and Branch Predictor modules.
 
 ## Z-Core RV32IM Architecture
 <div align="center">
@@ -51,6 +48,9 @@
   <br>
   <sup>Z-Core RV32IM Architecture Diagram.</sup>
 </div>
+
+> [!WARNING]
+> The Core diagram does not include neither the Branch Predictor and Data Cache. Updated diagram is WiP.
 
 > [!NOTE]
 > For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
