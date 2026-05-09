@@ -31,7 +31,8 @@ module z_core_control_u #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
     parameter STRB_WIDTH = (DATA_WIDTH/8),
-    parameter CACHE_DEPTH = 4096
+    parameter INST_CACHE_DEPTH = 4096,
+    parameter DATA_CACHE_DEPTH = 4096
 )(
     input  wire                   clk,
     input  wire                   rstn,
@@ -149,7 +150,7 @@ reg        pc_q_valid;
 reg fetch_wait;
 reg [31:0] fetch_pc;  // PC of the cache fill in progress
 reg mem_op_pending;
-
+reg mem_op_is_uncached_r;
 
 // ##################################################
 //              PIPELINE REGISTERS
@@ -190,6 +191,7 @@ reg [4:0]  id_ex_csr_zimm;
 reg        id_ex_is_ecall;
 reg        id_ex_is_ebreak;
 reg        id_ex_is_illegal;
+reg        id_ex_is_iaf;     // PMA instruction access fault (cause 1)
 reg [31:0] id_ex_ir;         // Raw instruction (for mtval on illegal insn)
 
 // --- EX/MEM Pipeline Register ---
@@ -224,7 +226,7 @@ wire instr_cache_cache_miss;
 z_core_instr_cache#(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(ADDR_WIDTH),
-    .CACHE_DEPTH(CACHE_DEPTH)
+    .CACHE_DEPTH(INST_CACHE_DEPTH)
 ) instr_cache (
     .clk(clk),
     .rstn(rstn),
@@ -238,6 +240,140 @@ z_core_instr_cache#(
     .cache_hit(instr_cache_cache_hit),
     .cache_miss(instr_cache_cache_miss)
 );
+
+// ##################################################
+//     DATA CACHE (uses z_core_data_cache.v)
+// ##################################################
+
+wire data_cache_wen;
+wire data_cache_cs;
+wire [ADDR_WIDTH-1:0] data_cache_addr;
+reg [DATA_WIDTH-1:0] data_cache_data_in;
+reg [3:0] data_cache_strb;
+wire data_cache_refill_complete;
+reg data_cache_writeback_pending_r;
+
+wire [DATA_WIDTH-1:0] data_cache_data_out;
+wire data_cache_cache_hit;
+wire data_cache_dirty_writeback_enabled;
+wire [ADDR_WIDTH-1:0] data_cache_dirty_writeback_addr;
+wire [DATA_WIDTH-1:0] data_cache_dirty_writeback_data;
+wire [3:0] data_cache_dirty_writeback_strb;
+wire data_cache_request_refill;
+
+assign data_cache_wen = ex_mem_is_store;
+assign data_cache_cs = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
+                       && !mem_op_pending && !data_uncacheable_mem;
+assign data_cache_addr = ex_mem_alu_result & ~32'b11;
+assign data_cache_refill_complete = mem_op_pending && mem_ready && data_cache_request_refill
+                                    && !data_cache_writeback_pending_r && !mem_op_is_uncached_r;
+
+z_core_data_cache#(
+    .ADDR_WIDTH(ADDR_WIDTH),
+    .DATA_WIDTH(DATA_WIDTH),
+    .CACHE_ENTRIES(DATA_CACHE_DEPTH*2)
+) data_cache (
+    .clk(clk),
+    .rstn(rstn),
+    .wen(data_cache_wen),
+    .cs(data_cache_cs),
+    .refill_complete(data_cache_refill_complete),
+    .addr(data_cache_addr),
+    .data_in(data_cache_data_in),
+    .strb(data_cache_strb),
+    .data_out(data_cache_data_out),
+    .cache_hit(data_cache_cache_hit),
+    .dirty_writeback_enabled(data_cache_dirty_writeback_enabled),
+    .dirty_writeback_addr(data_cache_dirty_writeback_addr),
+    .dirty_writeback_data(data_cache_dirty_writeback_data),
+    .dirty_writeback_strb(data_cache_dirty_writeback_strb),
+    .request_refill(data_cache_request_refill)
+
+);
+
+// ##################################################
+//      PMA CHECKERS (uses z_core_pma)
+// ##################################################
+//
+// Three combinational instances:
+//   - pma_fetch_dec : PMA on if_id_pc, type=fetch. Drives dec_is_iaf
+//                     (instruction access fault) and instr_cache_wen gate
+//                     (suppress fill of non-cacheable I-fetches).
+//   - pma_data_ex  : PMA on alu_out (data address being formed in EX),
+//                    type=load|store. Drives load/store access faults
+//                    that fire in the same EX trap cycle as misalign.
+//   - pma_data_mem : PMA on ex_mem_alu_result (MEM stage address).
+//                    Drives data_uncacheable_mem, which gates
+//                    data_cache_cs and triggers the uncached AXI path.
+
+localparam [1:0] PMA_ACCESS_FETCH = 2'b00;
+localparam [1:0] PMA_ACCESS_LOAD  = 2'b01;
+localparam [1:0] PMA_ACCESS_STORE = 2'b10;
+
+// ---- Fetch PMA: at decode (against if_id_pc) ----
+wire pma_fetch_dec_executable;
+wire pma_fetch_dec_access_fault;
+wire pma_fetch_dec_unused_c, pma_fetch_dec_unused_r, pma_fetch_dec_unused_w, pma_fetch_dec_unused_io;
+
+z_core_pma #(.ADDR_WIDTH(ADDR_WIDTH)) pma_fetch_dec (
+    .addr        (if_id_pc),
+    .access_type (PMA_ACCESS_FETCH),
+    .cacheable   (pma_fetch_dec_unused_c),
+    .readable    (pma_fetch_dec_unused_r),
+    .writable    (pma_fetch_dec_unused_w),
+    .executable  (pma_fetch_dec_executable),
+    .is_io       (pma_fetch_dec_unused_io),
+    .access_fault(pma_fetch_dec_access_fault)
+);
+
+// ---- Fetch PMA: at fill (against fetch_pc) ----
+wire pma_fetch_pc_cacheable;
+wire pma_fetch_pc_unused_r, pma_fetch_pc_unused_w, pma_fetch_pc_unused_x, pma_fetch_pc_unused_io, pma_fetch_pc_unused_af;
+
+z_core_pma #(.ADDR_WIDTH(ADDR_WIDTH)) pma_fetch_fill (
+    .addr        (fetch_pc),
+    .access_type (PMA_ACCESS_FETCH),
+    .cacheable   (pma_fetch_pc_cacheable),
+    .readable    (pma_fetch_pc_unused_r),
+    .writable    (pma_fetch_pc_unused_w),
+    .executable  (pma_fetch_pc_unused_x),
+    .is_io       (pma_fetch_pc_unused_io),
+    .access_fault(pma_fetch_pc_unused_af)
+);
+
+// ---- Data PMA at EX stage (against alu_out) ----
+wire [1:0] pma_data_ex_acctype = id_ex_is_store ? PMA_ACCESS_STORE : PMA_ACCESS_LOAD;
+wire pma_data_ex_access_fault;
+wire pma_data_ex_unused_c, pma_data_ex_unused_r, pma_data_ex_unused_w, pma_data_ex_unused_x, pma_data_ex_unused_io;
+
+z_core_pma #(.ADDR_WIDTH(ADDR_WIDTH)) pma_data_ex (
+    .addr        (alu_out),
+    .access_type (pma_data_ex_acctype),
+    .cacheable   (pma_data_ex_unused_c),
+    .readable    (pma_data_ex_unused_r),
+    .writable    (pma_data_ex_unused_w),
+    .executable  (pma_data_ex_unused_x),
+    .is_io       (pma_data_ex_unused_io),
+    .access_fault(pma_data_ex_access_fault)
+);
+
+// ---- Data PMA at MEM stage (against ex_mem_alu_result) ----
+wire pma_data_mem_cacheable;
+wire pma_data_mem_unused_r, pma_data_mem_unused_w, pma_data_mem_unused_x, pma_data_mem_unused_io, pma_data_mem_unused_af;
+
+z_core_pma #(.ADDR_WIDTH(ADDR_WIDTH)) pma_data_mem (
+    .addr        (ex_mem_alu_result),
+    .access_type (PMA_ACCESS_LOAD), // access_type irrelevant for cacheable bit
+    .cacheable   (pma_data_mem_cacheable),
+    .readable    (pma_data_mem_unused_r),
+    .writable    (pma_data_mem_unused_w),
+    .executable  (pma_data_mem_unused_x),
+    .is_io       (pma_data_mem_unused_io),
+    .access_fault(pma_data_mem_unused_af)
+);
+
+wire data_uncacheable_mem = ~pma_data_mem_cacheable;
+
 
 // ##################################################
 //      INSTRUCTION DECODER (uses z_core_decoder)
@@ -305,6 +441,8 @@ wire dec_opcode_valid = dec_is_load | dec_is_store | dec_is_branch |
                         dec_is_r_type | dec_is_i_alu | dec_is_csr |
                         dec_is_mret | dec_is_ecall | dec_is_ebreak | dec_is_fence;
 wire dec_is_illegal = if_id_valid && !dec_opcode_valid && (if_id_ir != 32'h0);
+
+wire dec_is_iaf = if_id_valid && pma_fetch_dec_access_fault;
 
 wire dec_reg_write = dec_is_r_type | dec_is_i_alu | dec_is_load | 
                      dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc |
@@ -454,6 +592,9 @@ wire misalign_store = id_ex_valid && id_ex_is_store &&
     ((id_ex_funct3[1:0] == 2'b01 && alu_out[0]  != 1'b0) ||      // SH
      (id_ex_funct3[1:0] == 2'b10 && alu_out[1:0] != 2'b00));     // SW
 
+wire load_access_fault  = id_ex_valid && id_ex_is_load  && !misalign_load  && pma_data_ex_access_fault;
+wire store_access_fault = id_ex_valid && id_ex_is_store && !misalign_store && pma_data_ex_access_fault;
+
 // ##################################################
 //     CSR FILE INSTANTIATION (Zicsr Extension)
 // ##################################################
@@ -505,8 +646,10 @@ wire perf_axi_grant_dmem = ex_mem_valid
                         && !mem_op_pending
                         && !mem_busy
                         && !fetch_wait;
-assign load_pulse  = perf_axi_grant_dmem && ex_mem_is_load;
-assign write_pulse = perf_axi_grant_dmem && ex_mem_is_store;
+assign load_pulse  = (perf_axi_grant_dmem && ex_mem_is_load)
+                   || (data_cache_hit_comb && ex_mem_is_load);
+assign write_pulse = (perf_axi_grant_dmem && ex_mem_is_store)
+                   || (data_cache_hit_comb && ex_mem_is_store);
 
 
 assign inst_fetch_pulse = fetch_wait && mem_ready && !flush;
@@ -540,6 +683,7 @@ z_core_csr_file #(
     .msip(msip),
     .instret_pulse(mem_wb_valid),
     .inst_cache_hit_pulse(consume_inst),  // 1-cycle pulse per consumed I-cache hit
+    .data_cache_hit_pulse(data_cache_hit_comb),
     .mem_read_pulse(load_pulse),
     .mem_write_pulse(write_pulse),
     .mem_inst_fetch_pulse(inst_fetch_pulse),
@@ -559,12 +703,15 @@ z_core_csr_file #(
 // Need to stall EX stage if:
 // 1. MEM stage has pending operation waiting for completion (mem_stall)
 // 2. EX/MEM has load/store but can't start yet (waiting for AXI bus to be free)
-// 3. Division instruction in EX stage and division not complete yet
+// 3. Data Cache Writeback Completed but not yet refilled
+// 4. Division instruction in EX stage and division not complete yet
 wire div_stall = id_ex_valid && id_ex_is_div && !div_complete;
 
 wire ex_stall = mem_stall || 
                 (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
-                 (!mem_op_pending || mem_busy)) ||
+                (!data_cache_hit_comb) &&
+                (!mem_op_pending || mem_busy)) ||
+                ((mem_op_pending && mem_ready && data_cache_writeback_pending_r)) || 
                 div_stall;
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
@@ -636,7 +783,7 @@ wire deliver_direct     = fetch_wait && mem_ready && !stall && !flush;
 wire deliver_from_cache = cache_hit_q && !stall && !fetch_wait && !flush;
 wire consume_inst       = deliver_direct || deliver_from_cache;
 
-assign instr_cache_wen     = fetch_wait && mem_ready && !flush;
+assign instr_cache_wen     = fetch_wait && mem_ready && !flush && pma_fetch_pc_cacheable;
 assign instr_cache_data_in = mem_rdata;
 
 // Next address presented at the cache.
@@ -765,6 +912,7 @@ always @(posedge clk) begin
         id_ex_is_ecall <= 1'b0;
         id_ex_is_ebreak <= 1'b0;
         id_ex_is_illegal <= 1'b0;
+        id_ex_is_iaf <= 1'b0;
         id_ex_ir <= 32'b0;
     end else if (trap_enter_r || mret_in_ex || ((prediction_flush || load_use_hazard) && !ex_stall)) begin
         // Insert bubble on flush or load-use hazard.
@@ -790,6 +938,7 @@ always @(posedge clk) begin
         id_ex_is_ecall <= 1'b0;
         id_ex_is_ebreak <= 1'b0;
         id_ex_is_illegal <= 1'b0;
+        id_ex_is_iaf <= 1'b0;
     end else if (!stall && if_id_valid) begin
         id_ex_pc <= if_id_pc;
         id_ex_rs1_data <= dec_fwd_rs1;
@@ -816,6 +965,7 @@ always @(posedge clk) begin
         id_ex_is_ecall <= dec_is_ecall;
         id_ex_is_ebreak <= dec_is_ebreak;
         id_ex_is_illegal <= dec_is_illegal;
+        id_ex_is_iaf <= dec_is_iaf;
         id_ex_ir <= if_id_ir;
         id_ex_reg_write <= dec_reg_write;
         id_ex_branch_taken_pred <= if_id_branch_taken_pred;
@@ -855,11 +1005,13 @@ always @(posedge clk) begin
         ex_mem_is_load <= id_ex_is_load;
         ex_mem_is_store <= id_ex_is_store;
         ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store && !id_ex_is_mret
-                           && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r
-                           && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump;
+                           && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !id_ex_is_iaf && !trap_enter_r
+                           && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
+                           && !load_access_fault && !store_access_fault;
         ex_mem_valid <= id_ex_valid && !id_ex_is_branch && !id_ex_is_mret
-                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !trap_enter_r
-                        && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump;
+                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !id_ex_is_iaf && !trap_enter_r
+                        && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
+                        && !load_access_fault && !store_access_fault;
     end
 end
 
@@ -872,56 +1024,104 @@ reg [31:0] mem_load_data;
 always @* begin
     case (ex_mem_funct3)
         3'b000: case (ex_mem_alu_result[1:0])  // LB (signed)
-            2'b00: mem_load_data = {{24{mem_rdata[7]}}, mem_rdata[7:0]};
-            2'b01: mem_load_data = {{24{mem_rdata[15]}}, mem_rdata[15:8]};
-            2'b10: mem_load_data = {{24{mem_rdata[23]}}, mem_rdata[23:16]};
-            2'b11: mem_load_data = {{24{mem_rdata[31]}}, mem_rdata[31:24]};
+            2'b00: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[7]}}, data_cache_data_out[7:0]} : {{24{mem_rdata[7]}}, mem_rdata[7:0]};
+            2'b01: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[15]}}, data_cache_data_out[15:8]} : {{24{mem_rdata[15]}}, mem_rdata[15:8]};
+            2'b10: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[23]}}, data_cache_data_out[23:16]} : {{24{mem_rdata[23]}}, mem_rdata[23:16]};
+            2'b11: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[31]}}, data_cache_data_out[31:24]} : {{24{mem_rdata[31]}}, mem_rdata[31:24]};
         endcase
         3'b001: case (ex_mem_alu_result[1])  // LH (signed)
-            1'b0: mem_load_data = {{16{mem_rdata[15]}}, mem_rdata[15:0]};
-            1'b1: mem_load_data = {{16{mem_rdata[31]}}, mem_rdata[31:16]};
+            1'b0: mem_load_data = data_cache_cache_hit ? {{16{data_cache_data_out[15]}}, data_cache_data_out[15:0]} : {{16{mem_rdata[15]}}, mem_rdata[15:0]};
+            1'b1: mem_load_data = data_cache_cache_hit ? {{16{data_cache_data_out[31]}}, data_cache_data_out[31:16]} : {{16{mem_rdata[31]}}, mem_rdata[31:16]};
         endcase
-        3'b010: mem_load_data = mem_rdata;  // LW
+        3'b010: mem_load_data = data_cache_cache_hit ? data_cache_data_out : mem_rdata;  // LW
         3'b100: case (ex_mem_alu_result[1:0])  // LBU (unsigned)
-            2'b00: mem_load_data = {24'b0, mem_rdata[7:0]};
-            2'b01: mem_load_data = {24'b0, mem_rdata[15:8]};
-            2'b10: mem_load_data = {24'b0, mem_rdata[23:16]};
-            2'b11: mem_load_data = {24'b0, mem_rdata[31:24]};
+            2'b00: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[7:0]} : {24'b0, mem_rdata[7:0]};
+            2'b01: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[15:8]} : {24'b0, mem_rdata[15:8]};
+            2'b10: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[23:16]} : {24'b0, mem_rdata[23:16]};
+            2'b11: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[31:24]} : {24'b0, mem_rdata[31:24]};
         endcase
         3'b101: case (ex_mem_alu_result[1])  // LHU (unsigned)
-            1'b0: mem_load_data = {16'b0, mem_rdata[15:0]};
-            1'b1: mem_load_data = {16'b0, mem_rdata[31:16]};
+            1'b0: mem_load_data = data_cache_cache_hit ? {16'b0, data_cache_data_out[15:0]} : {16'b0, mem_rdata[15:0]};
+            1'b1: mem_load_data = data_cache_cache_hit ? {16'b0, data_cache_data_out[31:16]} : {16'b0, mem_rdata[31:16]};
         endcase
-        default: mem_load_data = mem_rdata;
+        default: mem_load_data = data_cache_cache_hit ? data_cache_data_out : mem_rdata;
+    endcase
+end
+
+always @* begin
+    if (data_cache_refill_complete) begin
+        data_cache_data_in = mem_rdata;
+    end else begin
+        case (ex_mem_funct3[1:0])
+            2'b00: data_cache_data_in = {4{ex_mem_rs2_data[7:0]}};
+            2'b01: data_cache_data_in = {2{ex_mem_rs2_data[15:0]}};
+            2'b10: data_cache_data_in = ex_mem_rs2_data;
+            2'b11: data_cache_data_in = {2{ex_mem_rs2_data[15:0]}};
+            default: data_cache_data_in = ex_mem_rs2_data;
+        endcase
+    end
+end
+
+always @* begin
+    case (ex_mem_funct3[1:0])
+        2'b00: data_cache_strb = 4'b0001 << ex_mem_alu_result[1:0];
+        2'b01: data_cache_strb = 4'b0011 << ex_mem_alu_result[1:0];
+        2'b10: data_cache_strb = 4'b1111;
+        2'b11: data_cache_strb = 4'b0011 << ex_mem_alu_result[1:0];
+    endcase
+end
+
+wire data_cache_hit_comb = data_cache_cs && data_cache_cache_hit;
+wire data_cache_refill_comb = data_cache_cs && !data_cache_cache_hit && data_cache_request_refill;
+
+// PMA uncached path: an EX/MEM load/store to a non-cacheable address
+// requests a direct AXI transaction. Mirrors the cache-miss trigger
+// conditions (no concurrent fetch / no AXI bus busy / no other op
+// already pending) so the cycle budget matches a current cache miss.
+wire uncached_req = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
+                    && data_uncacheable_mem
+                    && !mem_op_pending && !mem_busy && !fetch_wait;
+
+
+reg [31:0] uncached_store_data;
+always @* begin
+    case (ex_mem_funct3[1:0])
+        2'b00: uncached_store_data = {4{ex_mem_rs2_data[7:0]}};
+        2'b01: uncached_store_data = {2{ex_mem_rs2_data[15:0]}};
+        2'b10: uncached_store_data = ex_mem_rs2_data;
+        2'b11: uncached_store_data = {2{ex_mem_rs2_data[15:0]}};
+        default: uncached_store_data = ex_mem_rs2_data;
     endcase
 end
 
 always @(posedge clk) begin
     if (~rstn) begin
         mem_op_pending <= 1'b0;
+        mem_op_is_uncached_r <= 1'b0;
         mem_data_out_r <= 32'b0;
         mem_wstrb_r <= 4'b1111;
     end else begin
-        if (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && !mem_op_pending && !mem_busy && !fetch_wait) begin
+        if (data_cache_hit_comb) begin
+            // Cache Hit -> No operation
+        end else if(data_cache_refill_comb && data_cache_dirty_writeback_enabled && !fetch_wait && !mem_busy) begin // Dirty Writeback Missed -> Writeback
+            // For now, writeback will be done sequentially before refill,
+            // Future work: Build Store Buffer to handle multiple writebacks in parallel.
             mem_op_pending <= 1'b1;
-            if (ex_mem_is_store) begin
-                case (ex_mem_funct3[1:0])
-                    2'b00: begin
-                        mem_data_out_r <= {4{ex_mem_rs2_data[7:0]}};
-                        mem_wstrb_r <= 4'b0001 << ex_mem_alu_result[1:0];
-                    end
-                    2'b01: begin
-                        mem_data_out_r <= {2{ex_mem_rs2_data[15:0]}};
-                        mem_wstrb_r <= 4'b0011 << ex_mem_alu_result[1:0];
-                    end
-                    default: begin
-                        mem_data_out_r <= ex_mem_rs2_data;
-                        mem_wstrb_r <= 4'b1111;
-                    end
-                endcase
-            end
+            mem_data_out_r <= data_cache_dirty_writeback_data;
+            mem_wstrb_r <= data_cache_dirty_writeback_strb;
+            data_cache_writeback_pending_r <= 1'b1;
+         end else if(((data_cache_refill_comb && !data_cache_dirty_writeback_enabled) || (data_cache_writeback_pending_r && mem_op_pending && mem_ready)) && !fetch_wait && !mem_busy) begin // Cache Missed / Writback Complete -> Refill
+            mem_op_pending <= 1'b1;
+            data_cache_writeback_pending_r <= 1'b0;
+        end else if (uncached_req) begin
+            // PMA uncached: launch a direct AXI load/store. No cache fill on completion.
+            mem_op_pending <= 1'b1;
+            mem_op_is_uncached_r <= 1'b1;
+            mem_data_out_r <= uncached_store_data;
+            mem_wstrb_r <= ex_mem_is_store ? data_cache_strb : 4'b1111;
         end else if (mem_op_pending && mem_ready) begin
             mem_op_pending <= 1'b0;
+            mem_op_is_uncached_r <= 1'b0;
         end
     end
 end
@@ -936,16 +1136,18 @@ always @(posedge clk) begin
         mem_wb_result <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
-    end else if ((!mem_stall && !ex_stall) || (mem_op_pending && mem_ready)) begin
+    end else if ((!mem_stall && !ex_stall) || (mem_op_pending && mem_ready) || data_cache_hit_comb) begin
         // Advance MEM/WB pipeline register when:
         // 1. No stalls (neither memory nor EX stage stalled), OR
         // 2. A memory operation just completed (even if stalled, we take the result)
         mem_wb_rd <= ex_mem_rd;
         mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
         mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
-        
-        if (ex_mem_is_load && mem_op_pending && mem_ready) begin
+
+        if ((ex_mem_is_load && mem_op_pending && mem_ready) || data_cache_hit_comb) begin
             mem_wb_result <= mem_load_data;
+        end else if(data_cache_hit_comb) begin
+            mem_wb_result <= data_cache_data_out;
         end else begin
             mem_wb_result <= ex_mem_alu_result;
         end
@@ -1003,6 +1205,21 @@ always @(posedge clk) begin
                 trap_mepc_r   <= id_ex_pc;
                 trap_mcause_r <= {1'b0, 31'd6};   // Store/AMO address misaligned
                 trap_mtval_r  <= alu_out;
+            end else if (load_access_fault) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd5};   // Load access fault (PMA)
+                trap_mtval_r  <= alu_out;
+            end else if (store_access_fault) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd7};   // Store/AMO access fault (PMA)
+                trap_mtval_r  <= alu_out;
+            end else if (id_ex_is_iaf) begin
+                trap_enter_r  <= 1'b1;
+                trap_mepc_r   <= id_ex_pc;
+                trap_mcause_r <= {1'b0, 31'd1};   // Instruction access fault (PMA)
+                trap_mtval_r  <= id_ex_pc;
             end else if (id_ex_is_illegal) begin
                 trap_enter_r  <= 1'b1;
                 trap_mepc_r   <= id_ex_pc;
@@ -1023,8 +1240,9 @@ always @(posedge clk) begin
 
         // Asynchronous interrupts (lower priority than exceptions)
         if (csr_irq_pending && !flush && !stall && !trap_enter_r &&
-            !(id_ex_valid && (id_ex_is_illegal || id_ex_is_ecall || id_ex_is_ebreak ||
-                             misalign_branch || misalign_jump || misalign_load || misalign_store))) begin
+            !(id_ex_valid && (id_ex_is_illegal || id_ex_is_ecall || id_ex_is_ebreak || id_ex_is_iaf ||
+                             misalign_branch || misalign_jump || misalign_load || misalign_store ||
+                             load_access_fault || store_access_fault))) begin
             trap_enter_r  <= 1'b1;
             trap_mepc_r   <= trap_mepc_next;
             trap_mcause_r <= irq_cause;
@@ -1054,8 +1272,14 @@ assign state = {mem_wb_valid, ex_mem_valid, id_ex_valid, if_id_valid, fetch_wait
 always @* begin
     if (mem_op_pending && !mem_ready) begin
         mem_req_comb = 1'b1;
-        mem_wen_comb = ex_mem_is_store;
-        mem_addr = ex_mem_alu_result;
+        if (mem_op_is_uncached_r) begin
+            // PMA uncached load/store: route directly to AXI.
+            mem_wen_comb = ex_mem_is_store;
+            mem_addr = ex_mem_alu_result & ~32'b11;
+        end else begin
+            mem_wen_comb = data_cache_dirty_writeback_enabled;
+            mem_addr = data_cache_dirty_writeback_enabled ? data_cache_dirty_writeback_addr : ex_mem_alu_result;
+        end
     end else if (fetch_wait && !mem_ready) begin
         mem_req_comb = 1'b1;
         mem_wen_comb = 1'b0;

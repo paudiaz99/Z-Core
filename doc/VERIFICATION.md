@@ -393,6 +393,18 @@ A loop body contains an ECALL. The handler skips past the ECALL by writing mepc+
 | mem[256] | 5 |
 | mem[260] | 5 |
 
+## Test 35-40: Data Cache Stress Tests
+**Purpose:** Comprehensive verification of the 2-way set-associative write-back data cache.
+
+| Test | Focus | Description |
+|------|-------|-------------|
+| **35: Cache Round-Trip** | Hit semantics | Write/read of 4 distinct addresses mapped to different sets, verifying 1-cycle hits. |
+| **36: Cache Way Conflict** | Associativity | Reads 3 addresses aliasing to the same set to trigger way conflict, forcing LRU replacement. |
+| **37: Strided Cache Sweep** | Hit tracking | Sweeps 8 addresses forcing an initial miss followed by a cache hit. Tests `dcache_hit_pulse`. |
+| **38: Hot Loop (I$+D$)** | System Locality | Deep loop execution testing concurrent instruction cache and data cache hits without pipeline stalls. |
+| **39: Dirty-Eviction** | Writebacks | Write-allocates lines and then forces eviction, verifying that dirty victim data is successfully written to backing RAM. |
+| **40: RMW Hit Storm** | Hit sustained throughput | Rapid Load-Add-Store sequences at the same address, keeping the pipeline at high throughput (1 cycle load/store hits). |
+
 ## Instruction Coverage
 
 ### RV32IM Base Integer Instructions

@@ -14,7 +14,8 @@ TB_FILES_ALL := axil_gpio_tb.v \
 								z_core_decoder_tb.v \
 								z_core_div_unit_tb.v \
 								z_core_reg_file_tb.v \
-								z_core_riscof_tb.sv
+								z_core_riscof_tb.sv \
+								z_core_data_cache_tb.sv
 
 # Goals
 .PHONY: compile run clean-all clean-questa clean-dsim clean-waves clean-logs lint
@@ -125,6 +126,7 @@ endif
 ifeq ($(SIM),iverilog)
 COMPILE_CMD := iverilog \
 								-g2012 \
+								-I../rtl \
 								$(subst +define+,-D,$(DFLAGS)) \
 								-o $(TB_TOP).vvp \
 								$(RTL_FILES) \

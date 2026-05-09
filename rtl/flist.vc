@@ -20,3 +20,5 @@ z_core_csr_file.v
 z_core_32b_timer.v
 axil_timer.v
 z_core_branch_pred.v
+z_core_data_cache.v
+z_core_pma.v
