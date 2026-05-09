@@ -85,6 +85,7 @@ Z-Core/
 │   ├── z_core_mult_unit.v     # Multiplier unit top level
 │   ├── z_core_div_unit.v      # Divider unit
 │   ├── z_core_instr_cache.v   # Instruction cache
+│   ├── z_core_data_cache.v    # Data cache
 │   ├── z_core_branch_pred.v   # Branch Predictor
 │   ├── z_core_csr_file.v      # CSR Register File (Zicsr)
 │   ├── axil_interconnect.v    # AXI-Lite Interconnect
@@ -113,6 +114,7 @@ Z-Core/
 │   ├── axil_gpio_tb.v         # GPIO testbench
 │   ├── axil_timer_tb.sv       # Timer testbench
 │   ├── z_core_instr_cache_tb.sv # Instruction cache testbench
+│   ├── z_core_data_cache_tb.sv  # Data cache testbench
 │   ├── z_core_branch_pred_tb.sv # Branch Predictor testbench
 │   └── z_core_riscof_tb.sv    # RISCOF compliance testbench
 │
@@ -121,6 +123,7 @@ Z-Core/
     ├── GPIO.md                # GPIO module documentation
     ├── UART.md                # UART module documentation
     ├── TIMER.md               # Timer module documentation
+    ├── CACHE.md               # Data Cache and Verification docs
     ├── Z_CORE_ARCHITECTURE.md # Architecture overview
     ├── PIPELINE.md            # Pipeline implementation details
     ├── VERIFICATION.md        # Verification details
@@ -189,15 +192,17 @@ make -f ../tb/Makefile run SIM=dsim debug=1
  ___________________________________________________________
 |                    TEST SUMMARY                           |
 |___________________________________________________________|
-|  Total Tests: 218                                         |
-|  Passed:      218                                         |
+|  Total Tests: 319                                         |
+|  Passed:      319                                         |
 |  Failed:        0                                         |
 |___________________________________________________________|
 |         ALL TESTS PASSED SUCCESSFULLY                     |
-|  Test Duration: 743825 ns                                 |
-|  Clock Cycles:  74382                                     |
-|  Instructions:  59801                                     |
-|  Writes=         81, Reads=         28                    |
+|  Test Duration: 1053545 ns                                |
+|  Clock Cycles:  105354                                    |
+|  Instructions:  88365                                     |
+|  I$ Hits:       89333                                     |
+|  D$ Hits:       193                                       |
+|  Writes=        332, Reads=        177                    |
 |___________________________________________________________|
 
 ```
@@ -235,6 +240,7 @@ The processor has been verified with a comprehensive system-level testbench (`tb
 | M Extension | MUL, DIV, REM, Forwarding Stress |
 | Stress Tests | RAW hazards, ALU coverage, Nested Loops, Mem Patterns |
 | I-Cache Stress | Locality loops + direct-mapped conflict-miss thrash |
+| D-Cache Stress | Write-back persistence, Way conflicts, Hit storms |
 | Timer | Timer overflow and underflow |
 | External Counter Timer | External counter timer mode |
 | CSR Read/Write (Zicsr) | CSRRW, CSRRS, CSRRC, CSRRWI, CSRRSI, CSRRCI |
@@ -255,7 +261,8 @@ The processor has been verified with a comprehensive system-level testbench (`tb
 | Register File | 32 x 32-bit |
 | Memory Interface | AXI4-Lite |
 | Memory Size | 64KB (configurable) |
-| Cache Size | 256 Entries (configurable) |
+| I-Cache Size | 256 Entries (configurable) |
+| D-Cache Size | 2-way associative, 1024 Entries (configurable) |
 
 ## Performance Monitoring
 
@@ -266,7 +273,7 @@ Z-Core includes a basic hardware performance-monitoring facility. The **mcycle**
 | mcycle | Clock Cycles |
 | minstret | Retired Instructions |
 | mhpmcountert3 | Instruction Cache Hits |
-| mhpmcountert4 | Data Cache Hits (Not implemented yet) |
+| mhpmcountert4 | Data Cache Hits |
 | mhpmcountert5 | Load Requests |
 | mhpmcountert6 | Store Requests |
 | mhpmcountert7 | Branch Misspredictions |
@@ -323,10 +330,9 @@ Detailed documentation is available in the `doc/` directory:
 - [x] **Interrupt support**
 - [x] **CSR Unit & Zicsr extension (CSR instructions)**
 - [x] **Exception / Trap Handling (Illegal Inst, ECALL, EBREAK)**
-- [ ] VGA Controller
-- [ ] Data Cache
-- [ ] RISC-V A extension (atomic instructions)
+- [x] **Data Cache**
 - [ ] RISC-V C extension (compressed instructions)
+- [ ] RISC-V A extension (atomic instructions)
 - [ ] Fix all lint warnings
 
 ## Contributing
