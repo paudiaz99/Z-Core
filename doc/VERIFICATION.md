@@ -393,7 +393,7 @@ A loop body contains an ECALL. The handler skips past the ECALL by writing mepc+
 | mem[256] | 5 |
 | mem[260] | 5 |
 
-## Test 35-40: Data Cache Stress Tests
+## Test 35-44: Data Cache Stress Tests
 **Purpose:** Comprehensive verification of the 2-way set-associative write-back data cache.
 
 | Test | Focus | Description |
@@ -404,6 +404,10 @@ A loop body contains an ECALL. The handler skips past the ECALL by writing mepc+
 | **38: Hot Loop (I$+D$)** | System Locality | Deep loop execution testing concurrent instruction cache and data cache hits without pipeline stalls. |
 | **39: Dirty-Eviction** | Writebacks | Write-allocates lines and then forces eviction, verifying that dirty victim data is successfully written to backing RAM. |
 | **40: RMW Hit Storm** | Hit sustained throughput | Rapid Load-Add-Store sequences at the same address, keeping the pipeline at high throughput (1 cycle load/store hits). |
+| **41: Load-Use LW→ADD** | Load-use + warm D$ | 2-iteration loop: iter 1 warms I$ and D$; iter 2 runs LW→ADD back-to-back with sentinel `x3=99`. Stall must fire or `x4`/`x5` read the sentinel instead of the loaded value (42 / 84). |
+| **42: Load-Use LB→ADDI** | Byte load-use | Same loop structure as Test 41 with sign-extending `LB`→`ADDI`. Sentinel `x4=5` makes a broken stall produce `x5=6` instead of 0 (`x4=-1` from `0xFF`). |
+| **43: Load-Use LW→SW** | Load-to-store | 2-iteration loop: `LW` loads 77, immediately followed by `SW` of the same register. On the warm iter, the store must use the forwarded load result or `mem[0x304]` stays 0. |
+| **44: Load-Use Dual D$ Hit** | Stale-data guard | 2-iteration loop with two back-to-back D$ hits per iter (`SW x7` then `LW`/`ADDI` twice). Alternating cached values (2 then 1) catch stale `data_cache_data_out` forwarding (`x4`/`x6` would be 12 instead of 11). |
 
 ## Instruction Coverage
 

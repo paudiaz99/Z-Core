@@ -208,6 +208,8 @@ reg [31:0] mem_wb_result;
 reg [4:0]  mem_wb_rd;
 reg        mem_wb_reg_write;
 reg        mem_wb_valid;
+reg [2:0]  mem_wb_funct3;
+reg [1:0]  mem_wb_alu_result_lo;
 
 // ##################################################
 //       INSTRUCTION CACHE (uses z_core_instr_cache)
@@ -264,7 +266,7 @@ wire data_cache_request_refill;
 assign data_cache_wen = ex_mem_is_store;
 assign data_cache_cs = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
                        && !mem_op_pending && !data_uncacheable_mem;
-assign data_cache_addr = ex_mem_alu_result & ~32'b11;
+assign data_cache_addr = ex_result & ~32'b11;
 assign data_cache_refill_complete = mem_op_pending && mem_ready && data_cache_request_refill
                                     && !data_cache_writeback_pending_r && !mem_op_is_uncached_r;
 
@@ -281,8 +283,9 @@ z_core_data_cache#(
     .addr(data_cache_addr),
     .data_in(data_cache_data_in),
     .strb(data_cache_strb),
+    .pipeline_enable((id_ex_valid && (id_ex_is_load || id_ex_is_store))),
     .data_out(data_cache_data_out),
-    .cache_hit(data_cache_cache_hit),
+    .cache_hit_comb(data_cache_cache_hit),
     .dirty_writeback_enabled(data_cache_dirty_writeback_enabled),
     .dirty_writeback_addr(data_cache_dirty_writeback_addr),
     .dirty_writeback_data(data_cache_dirty_writeback_data),
@@ -465,7 +468,7 @@ z_core_reg_file reg_file (
     .clk(clk),
     .reset(~rstn),
     .rd(mem_wb_rd),
-    .rd_in(mem_wb_result),
+    .rd_in(mem_wb_fwd_result),
     .write_enable(mem_wb_valid && mem_wb_reg_write && mem_wb_rd != 5'b0),
     .rs1(dec_rs1),
     .rs2(dec_rs2),
@@ -547,15 +550,45 @@ wire [31:0] ex_mem_fwd_value = ex_mem_load_completing ? mem_load_data : ex_mem_a
 wire ex_mem_fwd_ok = ex_mem_valid && ex_mem_reg_write && ex_mem_rd != 5'b0
                   && !ex_mem_load_in_flight;
 
+reg [31:0] cache_load_result;
+always @* begin
+    case (mem_wb_funct3)
+        3'b000: case (mem_wb_alu_result_lo)  // LB (signed)
+            2'b00: cache_load_result = {{24{data_cache_data_out[7]}},  data_cache_data_out[7:0]};
+            2'b01: cache_load_result = {{24{data_cache_data_out[15]}}, data_cache_data_out[15:8]};
+            2'b10: cache_load_result = {{24{data_cache_data_out[23]}}, data_cache_data_out[23:16]};
+            2'b11: cache_load_result = {{24{data_cache_data_out[31]}}, data_cache_data_out[31:24]};
+        endcase
+        3'b001: case (mem_wb_alu_result_lo[1])  // LH (signed)
+            1'b0: cache_load_result = {{16{data_cache_data_out[15]}}, data_cache_data_out[15:0]};
+            1'b1: cache_load_result = {{16{data_cache_data_out[31]}}, data_cache_data_out[31:16]};
+        endcase
+        3'b010: cache_load_result = data_cache_data_out;  // LW
+        3'b100: case (mem_wb_alu_result_lo)  // LBU (unsigned)
+            2'b00: cache_load_result = {24'b0, data_cache_data_out[7:0]};
+            2'b01: cache_load_result = {24'b0, data_cache_data_out[15:8]};
+            2'b10: cache_load_result = {24'b0, data_cache_data_out[23:16]};
+            2'b11: cache_load_result = {24'b0, data_cache_data_out[31:24]};
+        endcase
+        3'b101: case (mem_wb_alu_result_lo[1])  // LHU (unsigned)
+            1'b0: cache_load_result = {16'b0, data_cache_data_out[15:0]};
+            1'b1: cache_load_result = {16'b0, data_cache_data_out[31:16]};
+        endcase
+        default: cache_load_result = data_cache_data_out;
+    endcase
+end
+
+wire [31:0] mem_wb_fwd_result = data_cache_hit_q ? cache_load_result : mem_wb_result;
+
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
-assign fwd_rs1_data = 
+assign fwd_rs1_data =
     (ex_mem_fwd_ok && ex_mem_rd == id_ex_rs1_addr) ? ex_mem_fwd_value :
-    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs1_addr && mem_wb_rd != 5'b0) ? mem_wb_fwd_result :
     id_ex_rs1_data;
 
-assign fwd_rs2_data = 
+assign fwd_rs2_data =
     (ex_mem_fwd_ok && ex_mem_rd == id_ex_rs2_addr) ? ex_mem_fwd_value :
-    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2_addr && mem_wb_rd != 5'b0) ? mem_wb_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == id_ex_rs2_addr && mem_wb_rd != 5'b0) ? mem_wb_fwd_result :
     id_ex_rs2_data;
 
 // ##################################################
@@ -871,14 +904,14 @@ end
 // ##################################################
 
 // Forwarding for decode stage (into ID/EX)
-wire [31:0] dec_fwd_rs1 = 
+wire [31:0] dec_fwd_rs1 =
     (ex_mem_fwd_ok && ex_mem_rd == dec_rs1 && dec_rs1 != 5'b0) ? ex_mem_fwd_value :
-    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs1 && mem_wb_rd != 5'b0) ? mem_wb_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs1 && mem_wb_rd != 5'b0) ? mem_wb_fwd_result :
     rf_rs1_data;
 
-wire [31:0] dec_fwd_rs2 = 
+wire [31:0] dec_fwd_rs2 =
     (ex_mem_fwd_ok && ex_mem_rd == dec_rs2 && dec_rs2 != 5'b0) ? ex_mem_fwd_value :
-    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs2 && mem_wb_rd != 5'b0) ? mem_wb_result :
+    (mem_wb_valid && mem_wb_reg_write && mem_wb_rd == dec_rs2 && mem_wb_rd != 5'b0) ? mem_wb_fwd_result :
     rf_rs2_data;
 
 always @(posedge clk) begin
@@ -1024,27 +1057,27 @@ reg [31:0] mem_load_data;
 always @* begin
     case (ex_mem_funct3)
         3'b000: case (ex_mem_alu_result[1:0])  // LB (signed)
-            2'b00: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[7]}}, data_cache_data_out[7:0]} : {{24{mem_rdata[7]}}, mem_rdata[7:0]};
-            2'b01: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[15]}}, data_cache_data_out[15:8]} : {{24{mem_rdata[15]}}, mem_rdata[15:8]};
-            2'b10: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[23]}}, data_cache_data_out[23:16]} : {{24{mem_rdata[23]}}, mem_rdata[23:16]};
-            2'b11: mem_load_data = data_cache_cache_hit ? {{24{data_cache_data_out[31]}}, data_cache_data_out[31:24]} : {{24{mem_rdata[31]}}, mem_rdata[31:24]};
+            2'b00: mem_load_data = {{24{mem_rdata[7]}},  mem_rdata[7:0]};
+            2'b01: mem_load_data = {{24{mem_rdata[15]}}, mem_rdata[15:8]};
+            2'b10: mem_load_data = {{24{mem_rdata[23]}}, mem_rdata[23:16]};
+            2'b11: mem_load_data = {{24{mem_rdata[31]}}, mem_rdata[31:24]};
         endcase
         3'b001: case (ex_mem_alu_result[1])  // LH (signed)
-            1'b0: mem_load_data = data_cache_cache_hit ? {{16{data_cache_data_out[15]}}, data_cache_data_out[15:0]} : {{16{mem_rdata[15]}}, mem_rdata[15:0]};
-            1'b1: mem_load_data = data_cache_cache_hit ? {{16{data_cache_data_out[31]}}, data_cache_data_out[31:16]} : {{16{mem_rdata[31]}}, mem_rdata[31:16]};
+            1'b0: mem_load_data = {{16{mem_rdata[15]}}, mem_rdata[15:0]};
+            1'b1: mem_load_data = {{16{mem_rdata[31]}}, mem_rdata[31:16]};
         endcase
-        3'b010: mem_load_data = data_cache_cache_hit ? data_cache_data_out : mem_rdata;  // LW
+        3'b010: mem_load_data = mem_rdata;  // LW
         3'b100: case (ex_mem_alu_result[1:0])  // LBU (unsigned)
-            2'b00: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[7:0]} : {24'b0, mem_rdata[7:0]};
-            2'b01: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[15:8]} : {24'b0, mem_rdata[15:8]};
-            2'b10: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[23:16]} : {24'b0, mem_rdata[23:16]};
-            2'b11: mem_load_data = data_cache_cache_hit ? {24'b0, data_cache_data_out[31:24]} : {24'b0, mem_rdata[31:24]};
+            2'b00: mem_load_data = {24'b0, mem_rdata[7:0]};
+            2'b01: mem_load_data = {24'b0, mem_rdata[15:8]};
+            2'b10: mem_load_data = {24'b0, mem_rdata[23:16]};
+            2'b11: mem_load_data = {24'b0, mem_rdata[31:24]};
         endcase
         3'b101: case (ex_mem_alu_result[1])  // LHU (unsigned)
-            1'b0: mem_load_data = data_cache_cache_hit ? {16'b0, data_cache_data_out[15:0]} : {16'b0, mem_rdata[15:0]};
-            1'b1: mem_load_data = data_cache_cache_hit ? {16'b0, data_cache_data_out[31:16]} : {16'b0, mem_rdata[31:16]};
+            1'b0: mem_load_data = {16'b0, mem_rdata[15:0]};
+            1'b1: mem_load_data = {16'b0, mem_rdata[31:16]};
         endcase
-        default: mem_load_data = data_cache_cache_hit ? data_cache_data_out : mem_rdata;
+        default: mem_load_data = mem_rdata;
     endcase
 end
 
@@ -1073,6 +1106,7 @@ end
 
 wire data_cache_hit_comb = data_cache_cs && data_cache_cache_hit;
 wire data_cache_refill_comb = data_cache_cs && !data_cache_cache_hit && data_cache_request_refill;
+reg data_cache_hit_q;
 
 // PMA uncached path: an EX/MEM load/store to a non-cacheable address
 // requests a direct AXI transaction. Mirrors the cache-miss trigger
@@ -1100,28 +1134,35 @@ always @(posedge clk) begin
         mem_op_is_uncached_r <= 1'b0;
         mem_data_out_r <= 32'b0;
         mem_wstrb_r <= 4'b1111;
+        data_cache_hit_q <= 1'b0;
     end else begin
         if (data_cache_hit_comb) begin
-            // Cache Hit -> No operation
+            data_cache_hit_q <= 1'b1;
         end else if(data_cache_refill_comb && data_cache_dirty_writeback_enabled && !fetch_wait && !mem_busy) begin // Dirty Writeback Missed -> Writeback
             // For now, writeback will be done sequentially before refill,
             // Future work: Build Store Buffer to handle multiple writebacks in parallel.
+            data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b1;
             mem_data_out_r <= data_cache_dirty_writeback_data;
             mem_wstrb_r <= data_cache_dirty_writeback_strb;
             data_cache_writeback_pending_r <= 1'b1;
          end else if(((data_cache_refill_comb && !data_cache_dirty_writeback_enabled) || (data_cache_writeback_pending_r && mem_op_pending && mem_ready)) && !fetch_wait && !mem_busy) begin // Cache Missed / Writback Complete -> Refill
+            data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b1;
             data_cache_writeback_pending_r <= 1'b0;
         end else if (uncached_req) begin
             // PMA uncached: launch a direct AXI load/store. No cache fill on completion.
+            data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b1;
             mem_op_is_uncached_r <= 1'b1;
             mem_data_out_r <= uncached_store_data;
             mem_wstrb_r <= ex_mem_is_store ? data_cache_strb : 4'b1111;
         end else if (mem_op_pending && mem_ready) begin
+            data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b0;
             mem_op_is_uncached_r <= 1'b0;
+        end else begin
+            data_cache_hit_q <= 1'b0;
         end
     end
 end
@@ -1136,6 +1177,8 @@ always @(posedge clk) begin
         mem_wb_result <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
+        mem_wb_funct3 <= 3'b0;
+        mem_wb_alu_result_lo <= 2'b0;
     end else if ((!mem_stall && !ex_stall) || (mem_op_pending && mem_ready) || data_cache_hit_comb) begin
         // Advance MEM/WB pipeline register when:
         // 1. No stalls (neither memory nor EX stage stalled), OR
@@ -1143,11 +1186,11 @@ always @(posedge clk) begin
         mem_wb_rd <= ex_mem_rd;
         mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
         mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
+        mem_wb_funct3 <= ex_mem_funct3;
+        mem_wb_alu_result_lo <= ex_mem_alu_result[1:0];
 
-        if ((ex_mem_is_load && mem_op_pending && mem_ready) || data_cache_hit_comb) begin
+        if ((ex_mem_is_load && mem_op_pending && mem_ready)) begin
             mem_wb_result <= mem_load_data;
-        end else if(data_cache_hit_comb) begin
-            mem_wb_result <= data_cache_data_out;
         end else begin
             mem_wb_result <= ex_mem_alu_result;
         end
