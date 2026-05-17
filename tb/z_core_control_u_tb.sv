@@ -2093,7 +2093,7 @@ module z_core_control_u_tb;
         check_reg(10, 224, "x10 = 32 * 7 (accumulated)");
         check_reg(11, 0,   "x11 = 0 (loop counter drained)");
         check_mem(32'h1000, 7, "value at 0x1000 = 7 (preloaded)");
-        verify_counters(62, 32, 63, "Test 38");
+        verify_counters(1, 32, 32, "Test 38");
 
         // ==========================================
         // Test 39: Dirty-Eviction Persistence
@@ -2124,7 +2124,66 @@ module z_core_control_u_tb;
         check_reg(10, 50, "x10 = 50 (final RMW value)");
         check_reg(2,  50, "x2  = 50 (loop counter)");
         check_mem(32'h100, 50, "value at 0x100 = 50");
-        verify_counters(98, 98, 99, "Test 40");
+        verify_counters(50, 50, 99, "Test 40");
+
+        // ==========================================
+        // Test 41: Load-Use Hazard — LW→ADD (2-iter loop)
+        // ==========================================
+        load_test41_load_use_basic();
+        reset_cpu();
+        #5000;
+
+        $display("\n=== Test 41 Results: Load-Use Hazard LW->ADD ===");
+        // Iter 2 runs at full speed (I$ + D$ warm): stall must fire.
+        // If broken: ADD reads sentinel x3=99 instead of loaded 42.
+        check_reg(4, 42, "x4 = 42 (ADD x3,x0: load-use stall fires on warm iter)");
+        check_reg(5, 84, "x5 = 84 (ADD x3,x3)");
+        check_reg(7,  0, "x7 = 0  (loop counter drained)");
+        verify_counters(1, 2, 2, "Test 41");
+
+        // ==========================================
+        // Test 42: Load-Use Hazard — LB→ADDI (2-iter loop)
+        // ==========================================
+        load_test42_load_use_byte_half();
+        reset_cpu();
+        #5000;
+
+        $display("\n=== Test 42 Results: Load-Use Hazard LB->ADDI ===");
+        // If broken: ADDI reads sentinel x4=5 → x5=6 instead of 0.
+        check_reg(4, 32'hFFFFFFFF, "x4 = -1 (LB 0xFF sign-extended)");
+        check_reg(5, 0,            "x5 = 0  (ADDI x4+1 immediately after LB)");
+        check_reg(7, 0,            "x7 = 0  (loop counter drained)");
+        verify_counters(1, 2, 2, "Test 42");
+
+        // ==========================================
+        // Test 43: Load-Use Hazard — LW→SW (2-iter loop)
+        // ==========================================
+        load_test43_load_use_store();
+        reset_cpu();
+        #5000;
+
+        $display("\n=== Test 43 Results: Load-Use Hazard LW->SW ===");
+        // Iter 2 (warm): SW must use the LW result. If broken: stores 0.
+        check_reg(4, 77,    "x4 = 77 (loaded value)");
+        check_mem(32'h304, 77, "mem[0x304] = 77 (SW uses load-use forwarded value)");
+        verify_counters(3, 2, 3, "Test 43");
+
+        // ==========================================
+        // Test 44: Load-Use Hazard — Two D$ hits per iter (2-iter loop)
+        // ==========================================
+        load_test44_load_use_cache_hit();
+        reset_cpu();
+        #5000;
+
+        $display("\n=== Test 44 Results: Load-Use Hazard Alternating D$ Values ===");
+        // After iter 2: cache holds 1 (x7 written each iter).
+        // If stale data_cache_data_out forwarded from iter 1 (value=2): x4=12.
+        check_reg(3,  1, "x3 = 1  (iter2: LW loads x7=1 from cache)");
+        check_reg(4, 11, "x4 = 11 (ADDI x3+10: stale cache would give 12)");
+        check_reg(5,  1, "x5 = 1  (2nd D$ hit same value)");
+        check_reg(6, 11, "x6 = 11 (ADDI x5+10: load-use #2)");
+        check_reg(7,  0, "x7 = 0  (loop counter drained)");
+        verify_counters(2, 4, 5, "Test 44");
 
         // ==========================================
         // Final Summary
@@ -4444,8 +4503,8 @@ module z_core_control_u_tb;
             u_axil_ram.mem[6] = 32'h00e50533;
             // 0x1C: ADDI x11, x11, -1   — count--
             u_axil_ram.mem[7] = 32'hfff58593;
-            // 0x20: BNE  x11, x0, -16   — back to 0x14 while count != 0
-            u_axil_ram.mem[8] = 32'hfe0598e3;
+            // 0x20: BNE  x11, x0, -12   — back to 0x14 while count != 0
+            u_axil_ram.mem[8] = 32'hfe059ae3;
 
             // 0x24: JAL x0, 0           — halt
             u_axil_ram.mem[9] = 32'h0000006f;
@@ -4573,6 +4632,120 @@ module z_core_control_u_tb;
 
             // 0x20: JAL x0, 0
             u_axil_ram.mem[8] = 32'h0000006f;
+        end
+    endtask
+
+    // ==========================================
+    //   Test 41: Load-Use Hazard — Basic LW→USE
+    //
+    //   Stores 42 at 0x300, sets x3=99 as a sentinel wrong value,
+    //   then LW x3←mem[0x300]=42 immediately followed by instructions
+    //   that use x3. If the load-use stall is broken, x4/x5 get 99.
+    //
+    //   Expected: x4=42, x5=84, x6=43
+    // ==========================================
+    //   Test 41: Load-Use Hazard — LW→ADD (2-iter loop)
+    //
+    //   A 2-iteration loop. Iter 1 warms I$ and D$. Iter 2 runs fully
+    //   pipelined: LW and ADD are back-to-back with no natural stalls,
+    //   so the load-use hazard detection MUST fire.
+    // ==========================================
+    task load_test41_load_use_basic;
+        integer i;
+        begin
+            $display("\n--- Loading Test 41: Load-Use Hazard LW->ADD ---");
+            for (i = 0; i < 32; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            u_axil_ram.mem[0] = 32'h30000093; // ADDI x1,x0,0x300
+            u_axil_ram.mem[1] = 32'h02a00113; // ADDI x2,x0,42
+            u_axil_ram.mem[2] = 32'h0020a023; // SW x2,0(x1)
+            u_axil_ram.mem[3] = 32'h00200393; // ADDI x7,x0,2
+            u_axil_ram.mem[4] = 32'h06300193; // ADDI x3,x0,99   sentinel
+            u_axil_ram.mem[5] = 32'h0000a183; // LW x3,0(x1)
+            u_axil_ram.mem[6] = 32'h00018233; // ADD x4,x3,x0    load-use
+            u_axil_ram.mem[7] = 32'h003182b3; // ADD x5,x3,x3
+            u_axil_ram.mem[8] = 32'hfff38393; // ADDI x7,x7,-1
+            u_axil_ram.mem[9] = 32'hfe0396e3; // BNE x7,x0,-20   back to 0x10
+            u_axil_ram.mem[10] = 32'h0000006f; // JAL x0,0
+        end
+    endtask
+
+    // ==========================================
+    //   Test 42: Load-Use Hazard — LB→ADDI (2-iter loop)
+    //
+    //   Same loop structure as Test 41 but with a sign-extending byte
+    //   load. Sentinel x4=5 makes broken stall give x5=6 instead of 0.
+    // ==========================================
+    task load_test42_load_use_byte_half;
+        integer i;
+        begin
+            $display("\n--- Loading Test 42: Load-Use Hazard LB->ADDI ---");
+            for (i = 0; i < 32; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            u_axil_ram.mem[0] = 32'h20000093; // ADDI x1,x0,0x200
+            u_axil_ram.mem[1] = 32'h0ff00113; // ADDI x2,x0,0xFF
+            u_axil_ram.mem[2] = 32'h0020a023; // SW x2,0(x1)
+            u_axil_ram.mem[3] = 32'h00200393; // ADDI x7,x0,2
+            u_axil_ram.mem[4] = 32'h00500213; // ADDI x4,x0,5    sentinel
+            u_axil_ram.mem[5] = 32'h00008203; // LB x4,0(x1)
+            u_axil_ram.mem[6] = 32'h00120293; // ADDI x5,x4,1    load-use
+            u_axil_ram.mem[7] = 32'hfff38393; // ADDI x7,x7,-1
+            u_axil_ram.mem[8] = 32'hfe0398e3; // BNE x7,x0,-16   back to 0x10
+            u_axil_ram.mem[9] = 32'h0000006f; // JAL x0,0
+        end
+    endtask
+
+    // ==========================================
+    //   Test 43: Load-Use Hazard — LW→SW (2-iter loop)
+    //
+    //   Sentinel x4=0 is reset each iter. LW loads 77; the immediately
+    //   following SW stores x4. Iter 2 runs at full speed: SW must
+    //   forward the load result or mem[0x304] ends up 0 (broken).
+    // ==========================================
+    task load_test43_load_use_store;
+        integer i;
+        begin
+            $display("\n--- Loading Test 43: Load-Use Hazard LW->SW ---");
+            for (i = 0; i < 32; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            u_axil_ram.mem[0] = 32'h30000093; // ADDI x1,x0,0x300
+            u_axil_ram.mem[1] = 32'h04d00113; // ADDI x2,x0,77
+            u_axil_ram.mem[2] = 32'h0020a023; // SW x2,0(x1)
+            u_axil_ram.mem[3] = 32'h00200393; // ADDI x7,x0,2
+            u_axil_ram.mem[4] = 32'h00000213; // ADDI x4,x0,0    sentinel
+            u_axil_ram.mem[5] = 32'h0000a203; // LW x4,0(x1)
+            u_axil_ram.mem[6] = 32'h0040a223; // SW x4,4(x1)     load-use store
+            u_axil_ram.mem[7] = 32'hfff38393; // ADDI x7,x7,-1
+            u_axil_ram.mem[8] = 32'hfe0398e3; // BNE x7,x0,-16   back to 0x10
+            u_axil_ram.mem[9] = 32'h0000006f; // JAL x0,0
+        end
+    endtask
+
+    // ==========================================
+    //   Test 44: Load-Use Hazard — Alternating D$ values (2-iter loop)
+    //
+    //   Each iteration writes the loop counter (x7) to the cache address
+    //   before loading it: x7=2 on iter 1, x7=1 on iter 2.  After iter 2
+    //   the loaded value is 1 and x4=x6=11.
+    // ==========================================
+    task load_test44_load_use_cache_hit;
+        integer i;
+        begin
+            $display("\n--- Loading Test 44: Load-Use Hazard Alternating D$ Values ---");
+            for (i = 0; i < 16; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            u_axil_ram.mem[0]  = 32'h50000093; // ADDI x1,x0,0x500
+            u_axil_ram.mem[1]  = 32'h00200393; // ADDI x7,x0,2
+            u_axil_ram.mem[2]  = 32'h00000193; // ADDI x3,x0,0    sentinel #1
+            u_axil_ram.mem[3]  = 32'h0070a023; // SW x7,0(x1)     write x7 to cache
+            u_axil_ram.mem[4]  = 32'h0000a183; // LW x3,0(x1)     D$ hit #1; load-use
+            u_axil_ram.mem[5]  = 32'h00a18213; // ADDI x4,x3,10   x4=12(iter1) 11(iter2)
+            u_axil_ram.mem[6]  = 32'h00000293; // ADDI x5,x0,0    sentinel #2
+            u_axil_ram.mem[7]  = 32'h0000a283; // LW x5,0(x1)     D$ hit #2; load-use
+            u_axil_ram.mem[8]  = 32'h00a28313; // ADDI x6,x5,10   x6=12(iter1) 11(iter2)
+            u_axil_ram.mem[9]  = 32'hfff38393; // ADDI x7,x7,-1
+            u_axil_ram.mem[10] = 32'hfe0390e3; // BNE x7,x0,-32   back to 0x08
+            u_axil_ram.mem[11] = 32'h0000006f; // JAL x0,0
         end
     endtask
 

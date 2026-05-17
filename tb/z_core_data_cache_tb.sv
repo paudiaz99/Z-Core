@@ -20,9 +20,14 @@
 //    data_out, cache_hit, request_refill,
 //    dirty_writeback_enabled, dirty_writeback_addr, dirty_writeback_data
 //
-//  NOTE: cache_hit, data_out and other outputs are REGISTERED
-//  (1-cycle latency). Stimulus is applied, then sampled on the NEXT
-//  clock edge + #1.
+//  NOTE: cache_hit_comb is a COMBINATIONAL wire driven by pipeline
+//  registers (tag_0_q/valid_0_q etc). Those registers are clocked
+//  every posedge from the current index_addr. This creates a 2-cycle
+//  access model:
+//    Cycle 0 (cs=0): pipeline regs capture tags/valid for index_addr
+//    Cycle 1 (cs=1): cache_hit_comb valid pre-posedge; data_out updated
+//  This mirrors how the CPU uses the cache (addr from EX stage one cycle
+//  ahead of the MEM cs=1 cycle). data_out is valid after cycle-1 posedge.
 //
 //  Test cases:
 //    T1.01 - Reset clears all state
@@ -69,6 +74,8 @@ module z_core_data_cache_tb;
     reg  [ADDR_WIDTH-1:0]     addr;
     reg  [DATA_WIDTH-1:0]     data_in;
 
+    reg                       pipeline_enable;
+
     wire [DATA_WIDTH-1:0]     data_out;
     wire                      cache_hit;
     wire                      request_refill;
@@ -85,6 +92,9 @@ module z_core_data_cache_tb;
     reg [31:0] t21_old_line;
     reg [31:0] t21_store_data;
     reg [31:0] t21_expected;
+
+    // Scratch variables for T1.22
+    reg [31:0] t22_addr;
 
     // Test-ID marker — updated at the start of each test case so waveform
     // viewers can see which test is running. Encoded as decimal (e.g. 0x0102 = T1.02).
@@ -110,10 +120,11 @@ module z_core_data_cache_tb;
         .cs                      (cs),
         .strb                    (strb),
         .refill_complete         (refill_complete),
+        .pipeline_enable         (pipeline_enable),
         .addr                    (addr),
         .data_in                 (data_in),
         .data_out                (data_out),
-        .cache_hit               (cache_hit),
+        .cache_hit_comb          (cache_hit),
         .dirty_writeback_enabled (dirty_writeback_enabled),
         .dirty_writeback_addr    (dirty_writeback_addr),
         .dirty_writeback_data    (dirty_writeback_data),
@@ -160,21 +171,46 @@ module z_core_data_cache_tb;
         cs              = 1'b0;
         wen             = 1'b0;
         refill_complete = 1'b0;
+        pipeline_enable = 1'b0;
         @(posedge clk); #1;
     endtask
 
-    // Issue a read request (cs=1, wen=0). Outputs sampled after the edge.
+    // Issue a read request. Two-cycle protocol:
+    //   Cycle 0 (cs=0): warm pipeline registers at index_addr
+    //   Cycle 1 (cs=1): cache_hit_comb valid; data_out updated on posedge
     task automatic do_read;
         input [31:0] a;
         addr            = a;
         wen             = 1'b0;
-        cs              = 1'b1;
+        cs              = 1'b0;
         refill_complete = 1'b0;
+        pipeline_enable = 1'b1;
+        @(posedge clk); #1;
+        cs              = 1'b1;
+        pipeline_enable = 1'b0;
         @(posedge clk); #1;
         cs              = 1'b0;
     endtask
 
-    // Strb-aware write. For full-word writes pass strb_in=4'hF.
+    // Strb-aware read. Two-cycle protocol, strb applied to mask data_out.
+    task automatic do_read_strb;
+        input [31:0] a;
+        input [3:0]  strb_in;
+        strb            = strb_in;
+        addr            = a;
+        wen             = 1'b0;
+        cs              = 1'b0;
+        refill_complete = 1'b0;
+        pipeline_enable = 1'b1;
+        @(posedge clk); #1;
+        cs              = 1'b1;
+        pipeline_enable = 1'b0;
+        @(posedge clk); #1;
+        cs              = 1'b0;
+        strb            = 4'hF;
+    endtask
+
+    // Strb-aware write. Two-cycle protocol. For full-word writes pass strb_in=4'hF.
     task automatic do_write_strb;
         input [31:0] a;
         input [31:0] d;
@@ -183,8 +219,12 @@ module z_core_data_cache_tb;
         data_in         = d;
         strb            = strb_in;
         wen             = 1'b1;
-        cs              = 1'b1;
+        cs              = 1'b0;
         refill_complete = 1'b0;
+        pipeline_enable = 1'b1;
+        @(posedge clk); #1;
+        cs              = 1'b1;
+        pipeline_enable = 1'b0;
         @(posedge clk); #1;
         cs              = 1'b0;
         strb            = 4'hF;
@@ -211,6 +251,7 @@ module z_core_data_cache_tb;
         strb            = strb_in;
         cs              = 1'b0;
         wen             = 1'b0;
+        pipeline_enable = 1'b0;
         refill_complete = 1'b1;
         @(posedge clk); #1;
         refill_complete = 1'b0;
@@ -231,6 +272,7 @@ module z_core_data_cache_tb;
         strb            = strb_in;
         cs              = 1'b0;
         wen             = 1'b0;
+        pipeline_enable = 1'b0;
         refill_complete = 1'b1;
         @(posedge clk); #1;
         refill_complete = 1'b0;
@@ -282,6 +324,7 @@ module z_core_data_cache_tb;
         cs              = 1'b0;
         wen             = 1'b0;
         refill_complete = 1'b0;
+        pipeline_enable = 1'b0;
         strb            = 4'hF;   // default: full-word writes
         addr            = 32'b0;
         data_in         = 32'b0;
@@ -455,8 +498,12 @@ module z_core_data_cache_tb;
         addr            = make_addr(21'h32, 9'h90);
         data_in         = 32'hF003_0003;
         wen             = 1'b1;
-        cs              = 1'b1;
+        cs              = 1'b0;
         refill_complete = 1'b0;
+        pipeline_enable = 1'b1;
+        @(posedge clk); #1;
+        cs              = 1'b1;
+        pipeline_enable = 1'b0;
         @(posedge clk); #1;
         cs              = 1'b0;
         check  ("T1.10 request_refill asserted",            request_refill,           1'b1);
@@ -497,8 +544,12 @@ module z_core_data_cache_tb;
         addr            = make_addr(21'h42, 9'hA0);
         data_in         = 32'hABCD_EF01;
         wen             = 1'b1;
-        cs              = 1'b1;
+        cs              = 1'b0;
         refill_complete = 1'b0;
+        pipeline_enable = 1'b1;
+        @(posedge clk); #1;
+        cs              = 1'b1;
+        pipeline_enable = 1'b0;
         @(posedge clk); #1;
         cs              = 1'b0;
         check("T1.11 request_refill asserted",          request_refill,          1'b1);
@@ -622,8 +673,12 @@ module z_core_data_cache_tb;
         addr            = make_addr(21'h72, 9'hE0);
         data_in         = 32'hCCCC_0003;
         wen             = 1'b1;
-        cs              = 1'b1;
+        cs              = 1'b0;
         refill_complete = 1'b0;
+        pipeline_enable = 1'b1;
+        @(posedge clk); #1;
+        cs              = 1'b1;
+        pipeline_enable = 1'b0;
         @(posedge clk); #1;
         cs              = 1'b0;
         $display("T1.15 miss_addr            = 0x%08h", make_addr(21'h72, 9'hE0));
@@ -756,8 +811,9 @@ module z_core_data_cache_tb;
         idle_cycle();
         // Trigger dirty eviction
         addr = make_addr(21'h82, 9'h100); data_in = 32'hDEAD_0003;
-        wen  = 1'b1; cs = 1'b1; refill_complete = 1'b0;
-        @(posedge clk); #1; cs = 1'b0;
+        wen  = 1'b1; cs = 1'b0; refill_complete = 1'b0; pipeline_enable = 1'b1;
+        @(posedge clk); #1;
+        cs = 1'b1; pipeline_enable = 1'b0; @(posedge clk); #1; cs = 1'b0;
         check("T1.18 dirty_writeback_enabled=1 after dirty eviction",
               dirty_writeback_enabled, 1'b1);
         do_refill(make_addr(21'h82, 9'h100), 32'hDEAD_0003);
@@ -824,8 +880,9 @@ module z_core_data_cache_tb;
         // LSU misbehaves: issues a NEW write before completing refill
         addr    = make_addr(21'hB1, 9'h131);
         data_in = 32'hBADC_AFE0;
-        wen     = 1'b1; cs = 1'b1; refill_complete = 1'b0;
+        wen     = 1'b1; cs = 1'b0; refill_complete = 1'b0; pipeline_enable = 1'b1;
         @(posedge clk); #1;
+        cs = 1'b1; pipeline_enable = 1'b0; @(posedge clk); #1;
         cs = 1'b0;
         $display("T1.20 request_refill after rogue write = %0b", request_refill);
         // RTL has no interlock — expect refill_buffer to have been overwritten by the rogue write.
@@ -901,6 +958,123 @@ module z_core_data_cache_tb;
         do_read(t21_addr);
         check  ("T1.21 SW refill-merge: cache_hit=1", cache_hit, 1'b1);
         check32("T1.21 SW refill-merge: data_out",    data_out,  t21_expected);
+        idle_cycle();
+
+        // ============================================================
+        // T1.22  Sub-word Read (Zero-Extension via strb Mask)
+        // ============================================================
+        // RTL: data_out <= data[set][index] & mask
+        // The cache zero-extends sub-word reads. Sign extension for
+        // LB/LH is performed by the CPU (see system TB Test 13).
+        t22_addr = make_addr(21'h13, 9'h13);
+
+        // Write-allocate: miss -> refill -> cache holds 0xDEADBEEF
+        do_write_strb(t22_addr, 32'hDEAD_BEEF, 4'hF);
+        idle_cycle();
+        do_store_refill_with_old_data(t22_addr, 32'hDEAD_BEEF, 32'h0000_0000, 4'hF);
+        idle_cycle();
+
+        // Byte 0 (strb=4'h1): mask=0x000000FF -> 0x000000EF
+        do_read_strb(t22_addr, 4'h1);
+        check  ("T1.22 byte0: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.22 byte0: data_out",    data_out, 32'h0000_00EF);
+
+        // Byte 1 (strb=4'h2): mask=0x0000FF00 -> 0x0000BE00
+        do_read_strb(t22_addr, 4'h2);
+        check  ("T1.22 byte1: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.22 byte1: data_out",    data_out, 32'h0000_BE00);
+
+        // Halfword low (strb=4'h3): mask=0x0000FFFF -> 0x0000BEEF
+        do_read_strb(t22_addr, 4'h3);
+        check  ("T1.22 half-lo: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.22 half-lo: data_out",    data_out, 32'h0000_BEEF);
+
+        // Halfword high (strb=4'hC): mask=0xFFFF0000 -> 0xDEAD0000
+        do_read_strb(t22_addr, 4'hC);
+        check  ("T1.22 half-hi: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.22 half-hi: data_out",    data_out, 32'hDEAD_0000);
+
+        // Full word (strb=4'hF): no masking -> 0xDEADBEEF
+        do_read_strb(t22_addr, 4'hF);
+        check  ("T1.22 full-word: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.22 full-word: data_out",    data_out, 32'hDEAD_BEEF);
+
+        idle_cycle();
+
+        // ============================================================
+        // T1.23 — Back-to-back read hits (no idle_cycle between)
+        //   After two warm lines are resident, issue two consecutive
+        //   do_read calls without an intervening idle_cycle.
+        //   Both must hit and return the correct data.
+        // ============================================================
+        current_test = 16'h0123;
+        $display("\n--- T1.23: Back-to-Back Read Hits ---");
+        rstn = 1'b0; repeat(4) @(posedge clk); rstn = 1'b1; @(posedge clk); #1;
+
+        // Warm two distinct lines
+        write_allocate(make_addr(21'hC0, 9'h140), 32'hAA11_2233);
+        idle_cycle();
+        write_allocate(make_addr(21'hC1, 9'h141), 32'hBB44_5566);
+        idle_cycle();
+        // Complete refills so lines are resident
+        do_refill(make_addr(21'hC0, 9'h140), 32'hAA11_2233);
+        idle_cycle();
+        do_refill(make_addr(21'hC1, 9'h141), 32'hBB44_5566);
+        idle_cycle();
+
+        // Fill both ways via write-allocate refill sequence
+        // Re-warm to ensure both are present and data correct
+        rstn = 1'b0; repeat(4) @(posedge clk); rstn = 1'b1; @(posedge clk); #1;
+        do_write_strb(make_addr(21'hC0, 9'h140), 32'hAA11_2233, 4'hF);
+        idle_cycle();
+        do_store_refill_with_old_data(make_addr(21'hC0, 9'h140), 32'hAA11_2233, 32'h0, 4'hF);
+        idle_cycle();
+        do_write_strb(make_addr(21'hC1, 9'h141), 32'hBB44_5566, 4'hF);
+        idle_cycle();
+        do_store_refill_with_old_data(make_addr(21'hC1, 9'h141), 32'hBB44_5566, 32'h0, 4'hF);
+        idle_cycle();
+
+        // Back-to-back reads: no idle_cycle between them
+        do_read(make_addr(21'hC0, 9'h140));
+        check  ("T1.23 first read hits",        cache_hit, 1'b1);
+        check32("T1.23 first read data correct", data_out,  32'hAA11_2233);
+        do_read(make_addr(21'hC1, 9'h141));
+        check  ("T1.23 second read hits",        cache_hit, 1'b1);
+        check32("T1.23 second read data correct",data_out,  32'hBB44_5566);
+        idle_cycle();
+
+        // ============================================================
+        // T1.24 — Back-to-back write hits (no idle_cycle between)
+        //   After warming two lines, issue two consecutive do_write_strb
+        //   calls without an idle_cycle between. Then verify with reads
+        //   that both writes landed correctly.
+        // ============================================================
+        current_test = 16'h0124;
+        $display("\n--- T1.24: Back-to-Back Write Hits ---");
+        rstn = 1'b0; repeat(4) @(posedge clk); rstn = 1'b1; @(posedge clk); #1;
+
+        // Warm two lines using write-allocate refill
+        do_write_strb(make_addr(21'hD0, 9'h150), 32'h1111_1111, 4'hF);
+        idle_cycle();
+        do_store_refill_with_old_data(make_addr(21'hD0, 9'h150), 32'h1111_1111, 32'h0, 4'hF);
+        idle_cycle();
+        do_write_strb(make_addr(21'hD1, 9'h151), 32'h2222_2222, 4'hF);
+        idle_cycle();
+        do_store_refill_with_old_data(make_addr(21'hD1, 9'h151), 32'h2222_2222, 32'h0, 4'hF);
+        idle_cycle();
+
+        // Both lines now resident. Back-to-back writes (hits): no idle_cycle between.
+        do_write_strb(make_addr(21'hD0, 9'h150), 32'hDEAD_CAFE, 4'hF);
+        do_write_strb(make_addr(21'hD1, 9'h151), 32'hBEEF_1234, 4'hF);
+        idle_cycle();
+
+        // Verify both writes landed
+        do_read(make_addr(21'hD0, 9'h150));
+        check  ("T1.24 first write hit: cache_hit=1",  cache_hit, 1'b1);
+        check32("T1.24 first write hit: data correct",  data_out,  32'hDEAD_CAFE);
+        do_read(make_addr(21'hD1, 9'h151));
+        check  ("T1.24 second write hit: cache_hit=1", cache_hit, 1'b1);
+        check32("T1.24 second write hit: data correct", data_out,  32'hBEEF_1234);
         idle_cycle();
 
         // ============================================================
