@@ -4,7 +4,7 @@
 
 Z-Core includes two parameterizable, 1-cycle latency caches designed to decouple the processor pipeline from AXI-Lite memory latency:
 1. **Instruction Cache**: Direct-mapped, read-only cache integrated into the IF (Instruction Fetch) stage.
-2. **Data Cache**: 2-way set-associative, write-back, write-allocate cache integrated into the MEM (Memory) stage.
+2. **Data Cache**: Single cycle 2-way set-associative, write-back, write-allocate cache integrated into the MEM (Memory) stage. Uses LRU policy to avoid potential conflicts.
 
 ---
 
@@ -36,7 +36,7 @@ On a miss (`!valid_d`), the fetch stage stalls (`fetch_wait`), requests a 32-bit
 
 ## 2. Data Cache (`z_core_data_cache.v`)
 
-The Data Cache is a 2-way set-associative cache handling load/store memory operations. It significantly reduces stall cycles for memory-intensive workloads exhibiting data locality.
+The Data Cache is a 2-way set-associative cache handling load/store memory operations. It significantly reduces stall cycles for memory-intensive workloads exhibiting data locality. The cache is built in a pipelined manner so that it can achieve single cycle throughput while maintaining synchronous reads and writes, enabling the synthesis to BRAM in FPGAs.
 
 ### Architecture
 
@@ -47,7 +47,7 @@ The Data Cache is a 2-way set-associative cache handling load/store memory opera
 | Sets (`CACHE_DEPTH`) | 4096 (configurable) |
 | Line Size | 32 bits (1 word) |
 | Write Policy | Write-back, write-allocate |
-| Replacement | Pseudo-LRU (1-bit per set) |
+| Replacement | LRU (1-bit per way) |
 | Refill | External LSU (cache asserts `request_refill`, LSU drives `refill_complete`) |
 
 ### Port Summary
