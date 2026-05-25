@@ -341,12 +341,12 @@ module z_core_data_cache_tb;
         check  ("T1.01 request_refill=0",           request_refill,           1'b0);
         check  ("T1.01 dirty_writeback_enabled=0",  dirty_writeback_enabled,  1'b0);
         check32("T1.01 data_out=0",                 data_out,                 32'h0);
-        check  ("T1.01 valid_bits[0][0]=0",         uut.valid_bits[0][0],     1'b0);
-        check  ("T1.01 valid_bits[1][0]=0",         uut.valid_bits[1][0],     1'b0);
-        check  ("T1.01 valid_bits[0][255]=0",       uut.valid_bits[0][255],   1'b0);
-        check  ("T1.01 valid_bits[1][511]=0",       uut.valid_bits[1][511],   1'b0);
-        check  ("T1.01 dirty_bits[0][0]=0",         uut.dirty_bits[0][0],     1'b0);
-        check  ("T1.01 lru_bits[0][0]=0",           uut.lru_bits[0][0],       1'b0);
+        check  ("T1.01 valid_bits_0[0]=0",         uut.valid_bits_0[0],     1'b0);
+        check  ("T1.01 valid_bits_1[0]=0",         uut.valid_bits_1[0],     1'b0);
+        check  ("T1.01 valid_bits_0[255]=0",       uut.valid_bits_0[255],   1'b0);
+        check  ("T1.01 valid_bits_1[511]=0",       uut.valid_bits_1[511],   1'b0);
+        check  ("T1.01 dirty_bits_0[0]=0",         uut.dirty_bits_0[0],     1'b0);
+        check  ("T1.01 lru_bits_0[0]=0",           uut.lru_bits_0[0],       1'b0);
         rstn = 1'b1;
         @(posedge clk); #1;
 
@@ -365,8 +365,8 @@ module z_core_data_cache_tb;
         #1;
         check  ("T1.02 request_refill stays 0",         request_refill,           1'b0);
         check  ("T1.02 cache_hit stays 0",              cache_hit,                1'b0);
-        check  ("T1.02 valid_bits[0][1] still 0",       uut.valid_bits[0][9'h1],  1'b0);
-        check  ("T1.02 valid_bits[1][1] still 0",       uut.valid_bits[1][9'h1],  1'b0);
+        check  ("T1.02 valid_bits_0[1] still 0",       uut.valid_bits_0[9'h1],  1'b0);
+        check  ("T1.02 valid_bits_1[1] still 0",       uut.valid_bits_1[9'h1],  1'b0);
         idle_cycle();
 
         // ============================================================
@@ -476,8 +476,8 @@ module z_core_data_cache_tb;
         do_read(make_addr(21'h200, 9'h60));
         check  ("T1.09 way-1 hit",  cache_hit, 1'b1);
         check32("T1.09 way-1 data", data_out,  32'hBBBB_BBBB);
-        check  ("T1.09 valid_bits[0][0x60]=1", uut.valid_bits[0][9'h60], 1'b1);
-        check  ("T1.09 valid_bits[1][0x60]=1", uut.valid_bits[1][9'h60], 1'b1);
+        check  ("T1.09 valid_bits_0[0x60]=1", uut.valid_bits_0[9'h60], 1'b1);
+        check  ("T1.09 valid_bits_1[0x60]=1", uut.valid_bits_1[9'h60], 1'b1);
         idle_cycle();
 
         // ============================================================
@@ -644,7 +644,7 @@ module z_core_data_cache_tb;
         do_read(make_addr(21'h60, 9'hD0));
         do_refill(make_addr(21'h60, 9'hD0), 32'h1357_9BDF);
         // Determine which way got installed by reading dirty bits
-        if (uut.dirty_bits[0][9'hD0] === 1'b1 || uut.dirty_bits[1][9'hD0] === 1'b1) begin
+        if (uut.dirty_bits_0[9'hD0] === 1'b1 || uut.dirty_bits_1[9'hD0] === 1'b1) begin
             $display("[INFO] T1.14 read-fill leaves dirty=1 (RTL bug — should be 0)");
             pass_count++;
         end else begin
@@ -862,7 +862,7 @@ module z_core_data_cache_tb;
             pass_count++;
         end
         // Document where the line actually landed
-        if (uut.valid_bits[0][9'h121] === 1'b1 || uut.valid_bits[1][9'h121] === 1'b1) begin
+        if (uut.valid_bits_0[9'h121] === 1'b1 || uut.valid_bits_1[9'h121] === 1'b1) begin
             $display("       Line installed at index 0x121 (the live addr at refill_complete)");
         end
         idle_cycle();
