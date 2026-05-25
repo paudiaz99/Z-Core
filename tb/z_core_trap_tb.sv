@@ -403,13 +403,13 @@ module z_core_trap_tb;
             cache_index  = addr[14:2];
 
             // Check data cache first (2-way, DATA_CACHE_DEPTH=8192)
-            if (uut.data_cache.valid_bits[0][cache_index] &&
-                uut.data_cache.tags[0][cache_index] === expected_tag) begin
-                actual   = uut.data_cache.data[0][cache_index];
+            if (uut.data_cache.valid_bits_0[cache_index] &&
+                uut.data_cache.tags_0[cache_index] === expected_tag) begin
+                actual   = uut.data_cache.data_0[cache_index];
                 in_cache = 1'b1;
-            end else if (uut.data_cache.valid_bits[1][cache_index] &&
-                         uut.data_cache.tags[1][cache_index] === expected_tag) begin
-                actual   = uut.data_cache.data[1][cache_index];
+            end else if (uut.data_cache.valid_bits_1[cache_index] &&
+                         uut.data_cache.tags_1[cache_index] === expected_tag) begin
+                actual   = uut.data_cache.data_1[cache_index];
                 in_cache = 1'b1;
             end else begin
                 actual = u_axil_ram.mem[addr >> 2];

@@ -502,13 +502,13 @@ module z_core_control_u_tb;
 
             // RAM region: try the cache first
             if (addr < 32'h0400_0000) begin
-                if (uut.data_cache.valid_bits[0][cache_index] &&
-                    uut.data_cache.tags[0][cache_index] === expected_tag) begin
-                    actual   = uut.data_cache.data[0][cache_index];
+                if (uut.data_cache.valid_bits_0[cache_index] &&
+                    uut.data_cache.tags_0[cache_index] === expected_tag) begin
+                    actual   = uut.data_cache.data_0[cache_index];
                     in_cache = 1'b1;
-                end else if (uut.data_cache.valid_bits[1][cache_index] &&
-                             uut.data_cache.tags[1][cache_index] === expected_tag) begin
-                    actual   = uut.data_cache.data[1][cache_index];
+                end else if (uut.data_cache.valid_bits_1[cache_index] &&
+                             uut.data_cache.tags_1[cache_index] === expected_tag) begin
+                    actual   = uut.data_cache.data_1[cache_index];
                     in_cache = 1'b1;
                 end else begin
                     actual = u_axil_ram.mem[addr >> 2];
@@ -563,13 +563,13 @@ module z_core_control_u_tb;
             ftag = addr[31:10];
             fidx = addr[9:2];
             if (addr < 32'h0400_0000 &&
-                uut.data_cache.valid_bits[0][fidx] &&
-                uut.data_cache.tags[0][fidx] === ftag)
-                read_mem_or_cache = uut.data_cache.data[0][fidx];
+                uut.data_cache.valid_bits_0[fidx] &&
+                uut.data_cache.tags_0[fidx] === ftag)
+                read_mem_or_cache = uut.data_cache.data_0[fidx];
             else if (addr < 32'h0400_0000 &&
-                     uut.data_cache.valid_bits[1][fidx] &&
-                     uut.data_cache.tags[1][fidx] === ftag)
-                read_mem_or_cache = uut.data_cache.data[1][fidx];
+                     uut.data_cache.valid_bits_1[fidx] &&
+                     uut.data_cache.tags_1[fidx] === ftag)
+                read_mem_or_cache = uut.data_cache.data_1[fidx];
             else
                 read_mem_or_cache = u_axil_ram.mem[addr >> 2];
         end
@@ -2184,6 +2184,87 @@ module z_core_control_u_tb;
         check_reg(6, 11, "x6 = 11 (ADDI x5+10: load-use #2)");
         check_reg(7,  0, "x7 = 0  (loop counter drained)");
         verify_counters(2, 4, 5, "Test 44");
+
+        // ==========================================
+        // Test 45: Load-Use Hazard — LW→STORE, alternating values + strobes
+        // ==========================================
+        load_test45_load_use_store_strobes();
+        reset_cpu();
+        #10000;
+
+        $display("\n=== Test 45 Results: Load-Use LW->STORE strobes ===");
+        // Hot iters (I$+D$ warm): each SB/SH/SW must use its own LW result.
+        //  - Broken stall  -> stores sentinel 0xFF.. bytes (detect).
+        //  - Delayed fwd   -> stores the previous pair's value (detect, distinct V).
+        check_reg(4, 32'hAABBCCDD, "x4 = V0 (LW)");
+        check_reg(5, 32'h11223344, "x5 = V1 (LW)");
+        check_reg(6, 32'hCAFE5678, "x6 = V2 (LW)");
+        check_reg(3, 32'hDEAD9ABC, "x3 = V3 (LW)");
+        check_reg(8, 32'h13579BDF, "x8 = V4 (LW)");
+        check_reg(7, 0,            "x7 = 0  (loop drained)");
+        // dest packing: SB@0=0xDD, SB@1=0x44  -> 0x0000_44DD
+        check_mem(32'h200, 32'h000044DD, "mem[0x200]: SB byte0=DD, byte1=44 (load-use)");
+        // SH@4=0x5678 (V2 low half), SH@6=0x9ABC (V3 low half) -> 0x9ABC_5678
+        check_mem(32'h204, 32'h9ABC5678, "mem[0x204]: SH half0=5678, half1=9ABC (load-use)");
+        // SW@8 = V4 full word
+        check_mem(32'h208, 32'h13579BDF, "mem[0x208]: SW word=V4 (load-use)");
+        // D$ hits = 22: iters 2-3 fully warm (10 hits each = 20) + 2 in iter1
+        // (the 2nd SB to 0x200 and 2nd SH to 0x204 hit the line the 1st store
+        // to that word already write-allocated in the same iteration).
+        verify_counters(15, 15, 22, "Test 45");
+
+        // ==========================================
+        // Test 46: Load-use STORE-ADDRESS dependency under a secondary stall
+        //   Regression for the spurious 0x07 (store access fault) bug.
+        //   Pattern per hot iter:
+        //     ADDI x5,-16     ; sentinel = 0xFFFFFFF0 (aligned, INVALID region)
+        //     LW   x5,0(x10)  ; load a VALID pointer (0x340) -- D$ HIT on warm iters
+        //     SW   x9,0(x11)  ; MISS store (walks) -> asserts ex_stall, holds SW below in EX
+        //     SW   x7,0(x5)   ; rs1=x5; before the fix the lingering store used the
+        //                     ;   stale x5=0xFFFFFFF0 -> store access fault (0x07)
+        //   Correct: no trap (mcause=0), x5=0x340, mem[0x340]=0xAB.
+        // ==========================================
+        load_test46_load_use_store_addr();
+        reset_cpu();
+        #15000;
+
+        $display("\n=== Test 46 Results: load-use store-address under stall ===");
+        $display("  mcause=0x%08h mepc=0x%08h mtval=0x%08h",
+                 uut.u_csr_file.mcause_r, uut.u_csr_file.mepc_r, uut.u_csr_file.mtval_r);
+        test_count = test_count + 1;
+        if (uut.u_csr_file.mcause_r == 32'h0) begin
+            pass_count = pass_count + 1;
+            $display("  [PASS] Test 46: no spurious trap (mcause=0)");
+        end else begin
+            fail_count = fail_count + 1;
+            $display("  [FAIL] Test 46: spurious trap mcause=0x%08h mtval=0x%08h (load-use store-addr bug)",
+                     uut.u_csr_file.mcause_r, uut.u_csr_file.mtval_r);
+        end
+        check_reg(5, 32'h340,    "x5 = 0x340 (loaded pointer)");
+        check_mem(32'h340, 32'hAB, "mem[0x340] = 0xAB (store used loaded base addr)");
+
+        // ==========================================
+        // Test 47: Load-use STORE-DATA (rs2) dependency under a secondary stall
+        //   Same lingering mechanism via the store's data operand instead of base.
+        //     ADDI x7,-16     ; sentinel = 0xFFFFFFF0
+        //     LW   x7,0(x10)  ; load VALID data 0x55 -- D$ HIT on warm iters
+        //     SW   x9,0(x11)  ; MISS store -> ex_stall, holds SW below in EX
+        //     SW   x7,0(x12)  ; rs2=x7 (data); before the fix stored stale 0xFFFFFFF0
+        //   Correct: mem[0x380] = 0x55.
+        // ==========================================
+        load_test47_load_use_store_data();
+        reset_cpu();
+        #15000;
+
+        $display("\n=== Test 47 Results: load-use store-data under stall ===");
+        check_reg(7, 32'h55,       "x7 = 0x55 (loaded data)");
+        check_mem(32'h380, 32'h55, "mem[0x380] = 0x55 (store used forwarded load data)");
+        // Did each iteration's MISS-store (SW x9=0xCD -> 0x100/0x104/0x108) land?
+        // If a store is dropped (not just deferred) under fetch/refill contention,
+        // one of these will be wrong.
+        check_mem(32'h100, 32'hCD, "mem[0x100] = 0xCD (iter1 miss-store landed)");
+        check_mem(32'h104, 32'hCD, "mem[0x104] = 0xCD (iter2 miss-store landed)");
+        check_mem(32'h108, 32'hCD, "mem[0x108] = 0xCD (iter3 miss-store landed)");
 
         // ==========================================
         // Final Summary
@@ -4746,6 +4827,129 @@ module z_core_control_u_tb;
             u_axil_ram.mem[9]  = 32'hfff38393; // ADDI x7,x7,-1
             u_axil_ram.mem[10] = 32'hfe0390e3; // BNE x7,x0,-32   back to 0x08
             u_axil_ram.mem[11] = 32'h0000006f; // JAL x0,0
+        end
+    endtask
+
+    // ==========================================
+    //   Test 45: Load-Use Hazard — LW→STORE, alternating values + strobes
+    //
+    //   Goal: fully stress the load-use forward path into a STORE on the
+    //   cache-HIT path, defeating the two ways a delayed/broken forward can
+    //   hide:
+    //     (a) Broken stall (store reads stale register): each dest register
+    //         is reset to a sentinel (0xFFFFFFFF) right before its LW, so a
+    //         missed stall stores 0xFF.. instead of the loaded value.
+    //     (b) Delayed forward by 1 cycle (store grabs the previous load's
+    //         latched data_cache_data_out): the five LW→ST pairs in each
+    //         iteration load FIVE DISTINCT values, so a stale latch stores
+    //         pair[i-1]'s value ≠ pair[i]'s value.
+    //
+    // ==========================================
+    task load_test45_load_use_store_strobes;
+        integer i;
+        begin
+            $display("\n--- Loading Test 45: Load-Use Hazard LW->STORE strobes ---");
+            for (i = 0; i < 32; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // Source array @0x100..0x110 (5 distinct values, cache-resident)
+            u_axil_ram.mem[64] = 32'hAABBCCDD; // 0x100  V0  -> SB byte
+            u_axil_ram.mem[65] = 32'h11223344; // 0x104  V1  -> SB byte
+            u_axil_ram.mem[66] = 32'hCAFE5678; // 0x108  V2  -> SH half
+            u_axil_ram.mem[67] = 32'hDEAD9ABC; // 0x10C  V3  -> SH half
+            u_axil_ram.mem[68] = 32'h13579BDF; // 0x110  V4  -> SW word
+            // Dest words @0x200..0x208 cleared (unwritten bytes must read 0)
+            u_axil_ram.mem[128] = 32'h00000000; // 0x200
+            u_axil_ram.mem[129] = 32'h00000000; // 0x204
+            u_axil_ram.mem[130] = 32'h00000000; // 0x208
+
+            u_axil_ram.mem[0]  = 32'h10000093; // ADDI x1,x0,0x100   src base
+            u_axil_ram.mem[1]  = 32'h20000113; // ADDI x2,x0,0x200   dst base
+            u_axil_ram.mem[2]  = 32'h00300393; // ADDI x7,x0,3       loop count
+            // loop @0x0C
+            u_axil_ram.mem[3]  = 32'hfff00213; // ADDI x4,x0,-1      sentinel
+            u_axil_ram.mem[4]  = 32'h0000a203; // LW   x4,0(x1)      V0 (hit on warm iter)
+            u_axil_ram.mem[5]  = 32'h00410023; // SB   x4,0(x2)      load-use, strobe 0001
+            u_axil_ram.mem[6]  = 32'hfff00293; // ADDI x5,x0,-1      sentinel
+            u_axil_ram.mem[7]  = 32'h0040a283; // LW   x5,4(x1)      V1
+            u_axil_ram.mem[8]  = 32'h005100a3; // SB   x5,1(x2)      load-use, strobe 0010
+            u_axil_ram.mem[9]  = 32'hfff00313; // ADDI x6,x0,-1      sentinel
+            u_axil_ram.mem[10] = 32'h0080a303; // LW   x6,8(x1)      V2
+            u_axil_ram.mem[11] = 32'h00611223; // SH   x6,4(x2)      load-use, strobe 0011
+            u_axil_ram.mem[12] = 32'hfff00193; // ADDI x3,x0,-1      sentinel
+            u_axil_ram.mem[13] = 32'h00c0a183; // LW   x3,12(x1)     V3
+            u_axil_ram.mem[14] = 32'h00311323; // SH   x3,6(x2)      load-use, strobe 1100
+            u_axil_ram.mem[15] = 32'hfff00413; // ADDI x8,x0,-1      sentinel
+            u_axil_ram.mem[16] = 32'h0100a403; // LW   x8,16(x1)     V4
+            u_axil_ram.mem[17] = 32'h00812423; // SW   x8,8(x2)      load-use, strobe 1111
+            u_axil_ram.mem[18] = 32'hfff38393; // ADDI x7,x7,-1
+            u_axil_ram.mem[19] = 32'hfc0390e3; // BNE  x7,x0,-64     back to 0x0C
+            u_axil_ram.mem[20] = 32'h0000006f; // JAL  x0,0          halt
+        end
+    endtask
+
+    // ==========================================
+    //   Test 46: load-use STORE-ADDRESS dependency under a secondary stall
+    //   See invocation comment for the mechanism under test.
+    // ==========================================
+    task load_test46_load_use_store_addr;
+        integer i;
+        begin
+            $display("\n--- Loading Test 46: load-use store-address under stall ---");
+            for (i = 0; i < 32; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // Data: pointer at 0x300 -> 0x340 (valid, writable). dest cleared.
+            u_axil_ram.mem[192] = 32'h00000340; // [0x300] = pointer to 0x340
+            u_axil_ram.mem[208] = 32'h00000000; // [0x340] = dest, cleared
+
+            u_axil_ram.mem[0]  = 32'h30000513; // ADDI x10,x0,0x300   LW source (ptr slot)
+            u_axil_ram.mem[1]  = 32'h70000593; // ADDI x11,x0,0x700   miss-store walking base
+            u_axil_ram.mem[2]  = 32'h0ab00393; // ADDI x7,x0,0xAB     data for dependent store
+            u_axil_ram.mem[3]  = 32'h0cd00493; // ADDI x9,x0,0xCD     data for miss store
+            u_axil_ram.mem[4]  = 32'h00300313; // ADDI x6,x0,3        loop count
+            u_axil_ram.mem[5]  = 32'h03c00613; // ADDI x12,x0,0x3C    mtvec target (trap halt)
+            u_axil_ram.mem[6]  = 32'h30561073; // CSRRW x0,mtvec,x12  install trap halt vector
+            // loop @0x1C
+            u_axil_ram.mem[7]  = 32'hff000293; // ADDI x5,x0,-16      sentinel = 0xFFFFFFF0 (aligned, invalid)
+            u_axil_ram.mem[8]  = 32'h00052283; // LW   x5,0(x10)      load valid pointer (HIT on warm iter)
+            u_axil_ram.mem[9]  = 32'h0095a023; // SW   x9,0(x11)      MISS store -> ex_stall
+            u_axil_ram.mem[10] = 32'h0072a023; // SW   x7,0(x5)       rs1=x5: pre-fix used stale 0xFFFFFFF0 -> 0x07
+            u_axil_ram.mem[11] = 32'h00458593; // ADDI x11,x11,4      walk miss addr (stay cold)
+            u_axil_ram.mem[12] = 32'hfff30313; // ADDI x6,x6,-1
+            u_axil_ram.mem[13] = 32'hfe0314e3; // BNE  x6,x0,-24      back to 0x1C
+            u_axil_ram.mem[14] = 32'h0000006f; // JAL  x0,0           normal halt
+            u_axil_ram.mem[15] = 32'h0000006f; // JAL  x0,0           trap halt (mtvec=0x3C)
+        end
+    endtask
+
+    // ==========================================
+    //   Test 47: load-use STORE-DATA (rs2) dependency under a secondary stall
+    //   Same lingering mechanism via the store's data operand (rs2) instead of
+    //   the base (rs1). Pre-fix the dependent store wrote the stale sentinel.
+    // ==========================================
+    task load_test47_load_use_store_data;
+        integer i;
+        begin
+            $display("\n--- Loading Test 47: load-use store-data under stall ---");
+            for (i = 0; i < 32; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+
+            // Data: value 0x55 at 0x300 (loaded). dest 0x380 cleared.
+            u_axil_ram.mem[192] = 32'h00000055; // [0x300] = data 0x55
+            u_axil_ram.mem[224] = 32'h00000000; // [0x380] = dest, cleared
+
+            u_axil_ram.mem[0]  = 32'h30000513; // ADDI x10,x0,0x300   LW source (data slot)
+            u_axil_ram.mem[1]  = 32'h10000593; // ADDI x11,x0,0x100   miss-store walking base (<0x400 so check_mem peeks cache)
+            u_axil_ram.mem[2]  = 32'h38000613; // ADDI x12,x0,0x380   dependent-store dest (valid)
+            u_axil_ram.mem[3]  = 32'h0cd00493; // ADDI x9,x0,0xCD     data for miss store
+            u_axil_ram.mem[4]  = 32'h00300313; // ADDI x6,x0,3        loop count
+            // loop @0x14
+            u_axil_ram.mem[5]  = 32'hff000393; // ADDI x7,x0,-16      sentinel = 0xFFFFFFF0
+            u_axil_ram.mem[6]  = 32'h00052383; // LW   x7,0(x10)      load valid data 0x55 (HIT on warm iter)
+            u_axil_ram.mem[7]  = 32'h0095a023; // SW   x9,0(x11)      MISS store -> ex_stall
+            u_axil_ram.mem[8]  = 32'h00762023; // SW   x7,0(x12)      rs2=x7 (data): pre-fix stored stale sentinel
+            u_axil_ram.mem[9]  = 32'h00458593; // ADDI x11,x11,4      walk miss addr (stay cold)
+            u_axil_ram.mem[10] = 32'hfff30313; // ADDI x6,x6,-1
+            u_axil_ram.mem[11] = 32'hfe0314e3; // BNE  x6,x0,-24      back to 0x14
+            u_axil_ram.mem[12] = 32'h0000006f; // JAL  x0,0           halt
         end
     endtask
 
