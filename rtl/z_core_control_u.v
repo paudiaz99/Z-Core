@@ -283,7 +283,7 @@ z_core_data_cache#(
     .addr(data_cache_addr),
     .data_in(data_cache_data_in),
     .strb(data_cache_strb),
-    .pipeline_enable((id_ex_valid && (id_ex_is_load || id_ex_is_store))),
+    .pipeline_enable((id_ex_valid && (id_ex_is_load || id_ex_is_store) && !ex_stall)),
     .data_out(data_cache_data_out),
     .cache_hit_comb(data_cache_cache_hit),
     .dirty_writeback_enabled(data_cache_dirty_writeback_enabled),
@@ -1006,6 +1006,9 @@ always @(posedge clk) begin
         id_ex_valid <= 1'b1;
     end else if (!stall) begin
         id_ex_valid <= 1'b0;
+    end else if (ex_stall && id_ex_valid) begin
+        id_ex_rs1_data <= fwd_rs1_data;
+        id_ex_rs2_data <= fwd_rs2_data;
     end
 end
 
