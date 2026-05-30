@@ -7,9 +7,9 @@ Z-Core is a 32-bit RISC-V processor implementing the **RV32IM** base integer ins
 ## Z-Core Architecture Diagram
 
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/c02b2a54-ae7c-4070-adcd-875faa8720d2" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/5d1e0237-2ab6-4d9c-bd10-bd1ab6458d75" alt="centered image">
   <br>
-  <sup>Z-Core RV32IM Architecture Diagram.</sup>
+  <sup>Z-Core RV32IM Architecture Datapath Diagram.</sup>
 </div>
 
 ## 1. Z-Core Processor (Control Unit) (`z_core_control_u`)
