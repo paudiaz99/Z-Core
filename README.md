@@ -44,13 +44,10 @@
 
 ## Z-Core RV32IM Architecture
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/4634f470-e526-4054-b2ef-d4ed0da07c22" alt="centered image">
+  <img src="https://github.com/user-attachments/assets/5d1e0237-2ab6-4d9c-bd10-bd1ab6458d75" alt="centered image">
   <br>
-  <sup>Z-Core RV32IM Architecture Diagram.</sup>
+  <sup>Z-Core RV32IM Architecture Datapath Diagram.</sup>
 </div>
-
-> [!WARNING]
-> The Core diagram does not include neither the Branch Predictor and Data Cache. Updated diagram is WiP.
 
 > [!NOTE]
 > For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
