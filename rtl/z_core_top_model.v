@@ -190,6 +190,8 @@ axil_interconnect #(
 //                Control Unit (Master 0)
 // **************************************************
 
+wire timer_irq;
+
 z_core_control_u #(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(ADDR_WIDTH),
@@ -376,7 +378,5 @@ axil_timer #(
     // Timer compare-match interrupt -> wired to core mtip
     .timer_irq_o(timer_irq)
 );
-
-wire timer_irq;
 
 endmodule
