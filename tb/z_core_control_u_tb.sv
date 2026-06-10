@@ -210,6 +210,10 @@ module z_core_control_u_tb;
         $finish;
     end
 
+    reg timer_ext_event = 0;
+
+    wire timer_irq_wire;
+
     // Instantiate Control Unit (AXI-Lite Master)
 
     
@@ -390,12 +394,6 @@ module z_core_control_u_tb;
         .ext_event_i(timer_ext_event),
         .timer_irq_o(timer_irq_wire)
     );
-
-    // Timer External Event Signal for Counter Mode (driven by testbench)
-    reg timer_ext_event = 0;
-
-    // Timer compare-match IRQ output -> wired to control unit mtip
-    wire timer_irq_wire;
 
     // Clock generation (100MHz)
     always #5 clk = ~clk;

@@ -211,6 +211,25 @@ reg        mem_wb_valid;
 reg [2:0]  mem_wb_funct3;
 reg [1:0]  mem_wb_alu_result_lo;
 
+wire        data_uncacheable_mem;
+wire [31:0] alu_out;
+wire [31:0] ex_result;
+wire        ex_stall;
+wire        stall;
+wire        dec_is_ecall;
+wire        dec_is_ebreak;
+wire [31:0] mem_wb_fwd_result;
+wire [31:0] branch_target;
+wire [31:0] jump_target;
+wire        prediction_flush;
+wire        flush;
+wire        cache_miss_q;
+wire        consume_inst;
+wire        data_cache_hit_comb;
+reg         trap_enter_r;
+reg         data_cache_hit_q;
+reg  [31:0] mem_load_data;
+
 // ##################################################
 //       INSTRUCTION CACHE (uses z_core_instr_cache)
 // ##################################################
@@ -375,7 +394,7 @@ z_core_pma #(.ADDR_WIDTH(ADDR_WIDTH)) pma_data_mem (
     .access_fault(pma_data_mem_unused_af)
 );
 
-wire data_uncacheable_mem = ~pma_data_mem_cacheable;
+assign data_uncacheable_mem = ~pma_data_mem_cacheable;
 
 
 // ##################################################
@@ -492,7 +511,6 @@ wire [31:0] alu_in2 = (id_ex_is_load | id_ex_is_store | id_ex_is_lui |
                       id_ex_is_branch ? fwd_rs2_data :
                       fwd_rs2_data;  // R-type
 
-wire [31:0] alu_out;
 wire        alu_branch;
 
 z_core_alu alu (
@@ -578,7 +596,7 @@ always @* begin
     endcase
 end
 
-wire [31:0] mem_wb_fwd_result = data_cache_hit_q ? cache_load_result : mem_wb_result;
+assign mem_wb_fwd_result = data_cache_hit_q ? cache_load_result : mem_wb_result;
 
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
 assign fwd_rs1_data =
@@ -604,8 +622,8 @@ wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
 wire mem_stall = mem_op_pending && !mem_ready;
 
 // System Instruction Detection
-wire dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h000);
-wire dec_is_ebreak = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
+assign dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h000);
+assign dec_is_ebreak = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h001);
 
 // ##################################################
 //       MISALIGNMENT EXCEPTION DETECTION
@@ -653,7 +671,6 @@ always @(*) begin
     endcase
 end
 
-reg  trap_enter_r;
 reg  [31:0] trap_mepc_r;
 reg  [31:0] trap_mcause_r;
 reg  [31:0] trap_mtval_r;
@@ -740,7 +757,7 @@ z_core_csr_file #(
 // 4. Division instruction in EX stage and division not complete yet
 wire div_stall = id_ex_valid && id_ex_is_div && !div_complete;
 
-wire ex_stall = mem_stall || 
+assign ex_stall = mem_stall ||
                 (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
                 (!data_cache_hit_comb) &&
                 (!mem_op_pending || mem_busy)) ||
@@ -748,7 +765,7 @@ wire ex_stall = mem_stall ||
                 div_stall;
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
-wire stall = load_use_hazard || ex_stall;
+assign stall = load_use_hazard || ex_stall;
 
 // ##################################################
 //              BRANCH/JUMP CONTROL
@@ -783,16 +800,16 @@ assign branch_target_misspredict = is_branch ? (id_ex_branch_target_pred != bran
 
 wire jump_misspredict = (id_ex_branch_taken_pred_valid ^ is_jump);
 wire branch_misspredict = (branch_taken ^ id_ex_branch_taken_pred_valid);
-wire prediction_flush = (branch_taken & branch_target_misspredict) || (is_jump ? (jump_misspredict || branch_target_misspredict) : branch_misspredict);
-wire flush = prediction_flush || trap_enter_r || mret_in_ex;
+assign prediction_flush = (branch_taken & branch_target_misspredict) || (is_jump ? (jump_misspredict || branch_target_misspredict) : branch_misspredict);
+assign flush = prediction_flush || trap_enter_r || mret_in_ex;
 
 // Track if we need to squash the NEXT instruction entering id_ex
 wire if_id_is_jump = if_id_valid && (dec_is_jal || dec_is_jalr);
 wire if_id_is_branch = if_id_valid && dec_is_branch;
 
-wire [31:0] branch_target = id_ex_pc + id_ex_imm;
-wire [31:0] jalr_target   = (fwd_rs1_data + id_ex_imm) & ~32'b1;
-wire [31:0] jump_target   = id_ex_is_jalr ? jalr_target : branch_target;
+assign branch_target = id_ex_pc + id_ex_imm;
+wire [31:0] jalr_target = (fwd_rs1_data + id_ex_imm) & ~32'b1;
+assign jump_target = id_ex_is_jalr ? jalr_target : branch_target;
 
 // ##################################################
 //              PIPELINE STAGE: FETCH
@@ -805,7 +822,7 @@ wire [31:0] flush_target = trap_enter_r           ? csr_mtvec :
                                                     branch_target;
 
 wire cache_hit_q  = pc_q_valid && instr_cache_cache_hit;
-wire cache_miss_q = pc_q_valid && instr_cache_cache_miss;
+assign cache_miss_q = pc_q_valid && instr_cache_cache_miss;
 
 
 wire [31:0] next_target = branch_taken_pred ? branch_target_pred : (PC + 32'd4);
@@ -814,7 +831,7 @@ wire [31:0] next_target = branch_taken_pred ? branch_target_pred : (PC + 32'd4);
 wire deliver_direct     = fetch_wait && mem_ready && !stall && !flush;
 
 wire deliver_from_cache = cache_hit_q && !stall && !fetch_wait && !flush;
-wire consume_inst       = deliver_direct || deliver_from_cache;
+assign consume_inst     = deliver_direct || deliver_from_cache;
 
 assign instr_cache_wen     = fetch_wait && mem_ready && !flush && pma_fetch_pc_cacheable;
 assign instr_cache_data_in = mem_rdata;
@@ -1016,7 +1033,7 @@ end
 //              PIPELINE STAGE: EXECUTE
 // ##################################################
 
-wire [31:0] ex_result = id_ex_is_csr   ? csr_read_data :    // CSR read (old value -> rd)
+assign ex_result = id_ex_is_csr   ? csr_read_data :    // CSR read (old value -> rd)
                         id_ex_is_lui   ? id_ex_imm :
                         id_ex_is_auipc ? (id_ex_pc + id_ex_imm) :
                         (id_ex_is_jal || id_ex_is_jalr) ? (id_ex_pc + 4) :
@@ -1056,7 +1073,6 @@ end
 // ##################################################
 
 // Acts as a LSU (Load Store Unit)
-reg [31:0] mem_load_data;
 always @* begin
     case (ex_mem_funct3)
         3'b000: case (ex_mem_alu_result[1:0])  // LB (signed)
@@ -1107,9 +1123,8 @@ always @* begin
     endcase
 end
 
-wire data_cache_hit_comb = data_cache_cs && data_cache_cache_hit;
+assign data_cache_hit_comb = data_cache_cs && data_cache_cache_hit;
 wire data_cache_refill_comb = data_cache_cs && !data_cache_cache_hit && data_cache_request_refill;
-reg data_cache_hit_q;
 
 // PMA uncached path: an EX/MEM load/store to a non-cacheable address
 // requests a direct AXI transaction. Mirrors the cache-miss trigger
