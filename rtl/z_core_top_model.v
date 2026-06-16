@@ -37,7 +37,7 @@ module z_core_top #(
     parameter MEM_ADDR_WIDTH = 16,      // 64KB memory
     parameter INST_CACHE_DEPTH = 4096,
     parameter DATA_CACHE_DEPTH = 4096,
-    parameter N_GPIO = 32,
+    parameter N_GPIO = 64,
     parameter PIPELINE_OUTPUT = 0
 )(
     input wire clk,
