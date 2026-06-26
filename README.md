@@ -50,7 +50,7 @@
 </div>
 
 > [!NOTE]
-> For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**
+> For a more detailed description of the Z-Core architecture, see the **[Z-Core Architecture Document](doc/Z_CORE_ARCHITECTURE.md)**, or the following website, where I dive into the details of the processor: https://paudiazcuesta.com/work/z-core/.
 
 ## Supported Instructions
 
@@ -263,7 +263,7 @@ The processor has been verified with a comprehensive system-level testbench (`tb
 
 ## Performance Monitoring
 
-Z-Core includes a basic hardware performance-monitoring facility. The **mcycle** CSR counts the number of clock cycles executed by the processor core on which the hart is running. The **minstret** CSR counts the number of instructions the hart has retired. Additionally, Z-Core has eight additional performance counters accessible through **mhpmcountert3–mhpmcounter10**. 
+Z-Core includes a basic hardware performance-monitoring facility. The **mcycle** CSR counts the number of clock cycles executed by the processor core on which the hart is running. The **minstret** CSR counts the number of instructions the hart has retired. Additionally, Z-Core has eight additional performance counters accessible through **mhpmcountert3–mhpmcounter10**. For a deep performance analysis of the Z-Core, you can visit the following post on my website: https://paudiazcuesta.com/posts/z-core-performance/. I dive into the performance of the Z-Core design using DOOM, STREAM and CoreMark/MHz as main benchmarks.
 
 | Counter Name | Event |
 |--------------|-------|
