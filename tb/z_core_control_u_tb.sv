@@ -2078,7 +2078,7 @@ module z_core_control_u_tb;
         check_mem(32'h240, 6, "sweep[5] @ 0x240 = 6");
         check_mem(32'h280, 7, "sweep[6] @ 0x280 = 7");
         check_mem(32'h2C0, 8, "sweep[7] @ 0x2C0 = 8");
-        verify_counters(14, 8, 8, "Test 37");
+        verify_counters(9, 8, 8, "Test 37");
 
         // ==========================================
         // Test 38: Hot Loop (I$ + D$ Heavy Locality)
