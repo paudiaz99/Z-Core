@@ -162,6 +162,7 @@ reg [31:0] if_id_ir;
 reg        if_id_valid;
 reg        if_id_branch_taken_pred;
 reg [31:0] if_id_branch_target_pred;
+reg [4:0]  if_id_ghr_snapshot;
 
 // --- ID/EX Pipeline Register ---
 reg [31:0] id_ex_pc;
@@ -180,6 +181,7 @@ reg        id_ex_reg_write;
 reg        id_ex_valid;
 reg        id_ex_branch_taken_pred;
 reg [31:0] id_ex_branch_target_pred;
+reg [4:0]  id_ex_ghr_snapshot;
 
 // --- ID/EX CSR Pipeline Fields (Zicsr) ---
 reg        id_ex_is_csr;
@@ -779,6 +781,7 @@ wire id_ex_branch_taken_pred_valid = id_ex_branch_taken_pred & id_ex_valid;
 wire [31:0] branch_target_pred;
 wire is_branch = id_ex_is_branch & id_ex_valid;
 wire branch_target_misspredict;
+wire [4:0] ghr_out;
 
 wire [31:0] branch_predictor_target = is_branch ? branch_target : (is_jump ? jump_target : 32'b0);
 
@@ -786,12 +789,15 @@ z_core_branch_pred branch_predictor(
     .clk(clk),
     .rstn(rstn),
     .branch_taken(branch_taken || is_jump),
-    .is_branch(is_branch || is_jump),
+    .is_branch(is_branch),
+    .is_jump(is_jump),
     .inst_addr_wr(id_ex_pc),
     .branch_target_wr(branch_predictor_target),
     .inst_addr_rd(PC),
+    .ghr_snapshot(id_ex_ghr_snapshot),
     .branch_taken_pred(branch_taken_pred),
-    .branch_target_pred(branch_target_pred)
+    .branch_target_pred(branch_target_pred),
+    .ghr_out(ghr_out)
 );
 
 
@@ -815,11 +821,11 @@ assign jump_target = id_ex_is_jalr ? jalr_target : branch_target;
 //              PIPELINE STAGE: FETCH
 // ##################################################
 
-wire [31:0] flush_target = trap_enter_r           ? csr_mtvec :
-                           mret_in_ex             ? csr_mepc :
-                           is_jump                ? jump_target :
-                           id_ex_branch_taken_pred ? (id_ex_pc + 4) :
-                                                    branch_target;
+wire [31:0] flush_target = trap_enter_r  ? csr_mtvec :
+                           mret_in_ex    ? csr_mepc :
+                           is_jump       ? jump_target :
+                           branch_taken  ? branch_target :
+                                           (id_ex_pc + 4);
 
 wire cache_hit_q  = pc_q_valid && instr_cache_cache_hit;
 assign cache_miss_q = pc_q_valid && instr_cache_cache_miss;
@@ -859,6 +865,7 @@ always @(posedge clk) begin
         if_id_valid              <= 1'b0;
         if_id_branch_taken_pred  <= 1'b0;
         if_id_branch_target_pred <= 32'b0;
+        if_id_ghr_snapshot       <= 5'b0;
     end else begin
         // Invalidate consumed IF/ID
         if (!stall && if_id_valid && !consume_inst)
@@ -879,6 +886,7 @@ always @(posedge clk) begin
                     if_id_valid              <= 1'b1;
                     if_id_branch_taken_pred  <= branch_taken_pred;
                     if_id_branch_target_pred <= branch_target_pred;
+                    if_id_ghr_snapshot       <= ghr_out;
                     PC                       <= next_target;
                     pc_q_valid               <= 1'b1;
                 end else begin
@@ -899,6 +907,7 @@ always @(posedge clk) begin
             if_id_valid              <= 1'b1;
             if_id_branch_taken_pred  <= branch_taken_pred;
             if_id_branch_target_pred <= branch_target_pred;
+            if_id_ghr_snapshot       <= ghr_out;
             PC                       <= next_target;
             pc_q_valid               <= 1'b1;
         end else if (cache_miss_q) begin
@@ -955,6 +964,7 @@ always @(posedge clk) begin
         id_ex_reg_write <= 1'b0;
         id_ex_branch_taken_pred <= 1'b0;
         id_ex_branch_target_pred <= 32'b0;
+        id_ex_ghr_snapshot <= 5'b0;
         id_ex_is_csr <= 1'b0;
         id_ex_is_mret <= 1'b0;
         id_ex_csr_addr <= 12'b0;
@@ -1020,6 +1030,7 @@ always @(posedge clk) begin
         id_ex_reg_write <= dec_reg_write;
         id_ex_branch_taken_pred <= if_id_branch_taken_pred;
         id_ex_branch_target_pred <= if_id_branch_target_pred;
+        id_ex_ghr_snapshot       <= if_id_ghr_snapshot;
         id_ex_valid <= 1'b1;
     end else if (!stall) begin
         id_ex_valid <= 1'b0;
