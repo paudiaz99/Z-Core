@@ -129,33 +129,50 @@ module z_core_csr_file #(
     localparam ADDR_MIMPID     = 12'hF13;
     localparam ADDR_MHARTID    = 12'hF14;
 
-    // Machine Counter/Timer (Read-Only from M-mode for now)
+    // Machine Counter/Timer (MRW)
     localparam ADDR_MCYCLE     = 12'hB00;
     localparam ADDR_MCYCLEH    = 12'hB80;
     localparam ADDR_MINSTRET   = 12'hB02;
     localparam ADDR_MINSTRETH  = 12'hB82;
+    localparam ADDR_MHPMCOUNTER3 = 12'hB03;
+    localparam ADDR_MHPMCOUNTER3H = 12'hB83;
+    localparam ADDR_MHPMCOUNTER4 = 12'hB04;
+    localparam ADDR_MHPMCOUNTER4H = 12'hB84;
+    localparam ADDR_MHPMCOUNTER5 = 12'hB05;
+    localparam ADDR_MHPMCOUNTER5H = 12'hB85;
+    localparam ADDR_MHPMCOUNTER6 = 12'hB06;
+    localparam ADDR_MHPMCOUNTER6H = 12'hB86;
+    localparam ADDR_MHPMCOUNTER7 = 12'hB07;
+    localparam ADDR_MHPMCOUNTER7H = 12'hB87;
+    localparam ADDR_MHPMCOUNTER8 = 12'hB08;
+    localparam ADDR_MHPMCOUNTER8H = 12'hB88;
+    localparam ADDR_MHPMCOUNTER9 = 12'hB09;
+    localparam ADDR_MHPMCOUNTER9H = 12'hB89;
+    localparam ADDR_MHPMCOUNTER10 = 12'hB0A;
+    localparam ADDR_MHPMCOUNTER10H = 12'hB8A;
 
     // User-visible counter aliases (Read-Only)
     localparam ADDR_CYCLE      = 12'hC00;
     localparam ADDR_CYCLEH     = 12'hC80;
     localparam ADDR_INSTRET    = 12'hC02;
     localparam ADDR_INSTRETH   = 12'hC82;
-    localparam ADDR_MHPMCOUNTER3 = 12'hC03;
-    localparam ADDR_MHPMCOUNTER3H = 12'hC83;
-    localparam ADDR_MHPMCOUNTER4 = 12'hC04;
-    localparam ADDR_MHPMCOUNTER4H = 12'hC84;
-    localparam ADDR_MHPMCOUNTER5 = 12'hC05;
-    localparam ADDR_MHPMCOUNTER5H = 12'hC85;
-    localparam ADDR_MHPMCOUNTER6 = 12'hC06;
-    localparam ADDR_MHPMCOUNTER6H = 12'hC86;
-    localparam ADDR_MHPMCOUNTER7 = 12'hC07;
-    localparam ADDR_MHPMCOUNTER7H = 12'hC87;
-    localparam ADDR_MHPMCOUNTER8 = 12'hC08;
-    localparam ADDR_MHPMCOUNTER8H = 12'hC88;
-    localparam ADDR_MHPMCOUNTER9 = 12'hC09;
-    localparam ADDR_MHPMCOUNTER9H = 12'hC89;
-    localparam ADDR_MHPMCOUNTER10 = 12'hC0A;
-    localparam ADDR_MHPMCOUNTER10H = 12'hC8A;
+    localparam ADDR_HPMCOUNTER3 = 12'hC03;
+    localparam ADDR_HPMCOUNTER3H = 12'hC83;
+    localparam ADDR_HPMCOUNTER4 = 12'hC04;
+    localparam ADDR_HPMCOUNTER4H = 12'hC84;
+    localparam ADDR_HPMCOUNTER5 = 12'hC05;
+    localparam ADDR_HPMCOUNTER5H = 12'hC85;
+    localparam ADDR_HPMCOUNTER6 = 12'hC06;
+    localparam ADDR_HPMCOUNTER6H = 12'hC86;
+    localparam ADDR_HPMCOUNTER7 = 12'hC07;
+    localparam ADDR_HPMCOUNTER7H = 12'hC87;
+    localparam ADDR_HPMCOUNTER8 = 12'hC08;
+    localparam ADDR_HPMCOUNTER8H = 12'hC88;
+    localparam ADDR_HPMCOUNTER9 = 12'hC09;
+    localparam ADDR_HPMCOUNTER9H = 12'hC89;
+    localparam ADDR_HPMCOUNTER10 = 12'hC0A;
+    localparam ADDR_HPMCOUNTER10H = 12'hC8A;
+
 
     // =========================================================================
     //  CSR Registers
@@ -304,22 +321,38 @@ module z_core_csr_file #(
             ADDR_INSTRET:   csr_read_data = minstret_r[31:0];
             ADDR_MINSTRETH,
             ADDR_INSTRETH:  csr_read_data = minstret_r[63:32];
-            ADDR_MHPMCOUNTER3: csr_read_data = mhpmcounter3_r[31:0];
-            ADDR_MHPMCOUNTER3H: csr_read_data = mhpmcounter3_r[63:32];
-            ADDR_MHPMCOUNTER4: csr_read_data = mhpmcounter4_r[31:0];
-            ADDR_MHPMCOUNTER4H: csr_read_data = mhpmcounter4_r[63:32];
-            ADDR_MHPMCOUNTER5: csr_read_data = mhpmcounter5_r[31:0];
-            ADDR_MHPMCOUNTER5H: csr_read_data = mhpmcounter5_r[63:32];
-            ADDR_MHPMCOUNTER6: csr_read_data = mhpmcounter6_r[31:0];
-            ADDR_MHPMCOUNTER6H: csr_read_data = mhpmcounter6_r[63:32];
-            ADDR_MHPMCOUNTER7: csr_read_data = mhpmcounter7_r[31:0];
-            ADDR_MHPMCOUNTER7H: csr_read_data = mhpmcounter7_r[63:32];
-            ADDR_MHPMCOUNTER8: csr_read_data = mhpmcounter8_r[31:0];
-            ADDR_MHPMCOUNTER8H: csr_read_data = mhpmcounter8_r[63:32];
-            ADDR_MHPMCOUNTER9: csr_read_data = mhpmcounter9_r[31:0];
-            ADDR_MHPMCOUNTER9H: csr_read_data = mhpmcounter9_r[63:32];
-            ADDR_MHPMCOUNTER10: csr_read_data = mhpmcounter10_r[31:0];
-            ADDR_MHPMCOUNTER10H: csr_read_data = mhpmcounter10_r[63:32];
+            ADDR_MHPMCOUNTER3,
+            ADDR_HPMCOUNTER3:   csr_read_data = mhpmcounter3_r[31:0];
+            ADDR_MHPMCOUNTER3H,
+            ADDR_HPMCOUNTER3H:  csr_read_data = mhpmcounter3_r[63:32];
+            ADDR_MHPMCOUNTER4,
+            ADDR_HPMCOUNTER4:   csr_read_data = mhpmcounter4_r[31:0];
+            ADDR_MHPMCOUNTER4H,
+            ADDR_HPMCOUNTER4H:  csr_read_data = mhpmcounter4_r[63:32];
+            ADDR_MHPMCOUNTER5,
+            ADDR_HPMCOUNTER5:   csr_read_data = mhpmcounter5_r[31:0];
+            ADDR_MHPMCOUNTER5H,
+            ADDR_HPMCOUNTER5H:  csr_read_data = mhpmcounter5_r[63:32];
+            ADDR_MHPMCOUNTER6,
+            ADDR_HPMCOUNTER6:   csr_read_data = mhpmcounter6_r[31:0];
+            ADDR_MHPMCOUNTER6H,
+            ADDR_HPMCOUNTER6H:  csr_read_data = mhpmcounter6_r[63:32];
+            ADDR_MHPMCOUNTER7,
+            ADDR_HPMCOUNTER7:   csr_read_data = mhpmcounter7_r[31:0];
+            ADDR_MHPMCOUNTER7H,
+            ADDR_HPMCOUNTER7H:  csr_read_data = mhpmcounter7_r[63:32];
+            ADDR_MHPMCOUNTER8,
+            ADDR_HPMCOUNTER8:   csr_read_data = mhpmcounter8_r[31:0];
+            ADDR_MHPMCOUNTER8H,
+            ADDR_HPMCOUNTER8H:  csr_read_data = mhpmcounter8_r[63:32];
+            ADDR_MHPMCOUNTER9,
+            ADDR_HPMCOUNTER9:   csr_read_data = mhpmcounter9_r[31:0];
+            ADDR_MHPMCOUNTER9H,
+            ADDR_HPMCOUNTER9H:  csr_read_data = mhpmcounter9_r[63:32];
+            ADDR_MHPMCOUNTER10,
+            ADDR_HPMCOUNTER10:  csr_read_data = mhpmcounter10_r[31:0];
+            ADDR_MHPMCOUNTER10H,
+            ADDR_HPMCOUNTER10H: csr_read_data = mhpmcounter10_r[63:32];
 
             default:        csr_read_data = 32'h0;
         endcase

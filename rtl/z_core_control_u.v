@@ -204,12 +204,14 @@ reg [2:0]  ex_mem_funct3;
 reg        ex_mem_is_load, ex_mem_is_store;
 reg        ex_mem_reg_write;
 reg        ex_mem_valid;
+reg        ex_mem_retire;
 
 // --- MEM/WB Pipeline Register ---
 reg [31:0] mem_wb_result;
 reg [4:0]  mem_wb_rd;
 reg        mem_wb_reg_write;
 reg        mem_wb_valid;
+reg        mem_wb_retire;
 reg [2:0]  mem_wb_funct3;
 reg [1:0]  mem_wb_alu_result_lo;
 
@@ -733,7 +735,7 @@ z_core_csr_file #(
     .meip(meip),
     .mtip(mtip),
     .msip(msip),
-    .instret_pulse(mem_wb_valid),
+    .instret_pulse(mem_wb_retire),
     .inst_cache_hit_pulse(consume_inst),  // 1-cycle pulse per consumed I-cache hit
     .data_cache_hit_pulse(data_cache_hit_comb),
     .mem_read_pulse(load_pulse),
@@ -1061,6 +1063,7 @@ always @(posedge clk) begin
         ex_mem_is_load <= 1'b0;
         ex_mem_is_store <= 1'b0;
         ex_mem_reg_write <= 1'b0;
+        ex_mem_retire <= 1'b0;
     end else if (!mem_stall && !ex_stall) begin
         ex_mem_alu_result <= ex_result;
         ex_mem_rs2_data <= fwd_rs2_data;
@@ -1073,6 +1076,10 @@ always @(posedge clk) begin
                            && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
                            && !load_access_fault && !store_access_fault;
         ex_mem_valid <= id_ex_valid && !id_ex_is_branch && !id_ex_is_mret
+                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !id_ex_is_iaf && !trap_enter_r
+                        && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
+                        && !load_access_fault && !store_access_fault;
+        ex_mem_retire <= id_ex_valid
                         && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !id_ex_is_iaf && !trap_enter_r
                         && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
                         && !load_access_fault && !store_access_fault;
@@ -1206,6 +1213,7 @@ always @(posedge clk) begin
         mem_wb_result <= 32'b0;
         mem_wb_rd <= 5'b0;
         mem_wb_reg_write <= 1'b0;
+        mem_wb_retire <= 1'b0;
         mem_wb_funct3 <= 3'b0;
         mem_wb_alu_result_lo <= 2'b0;
     end else if ((!mem_stall && !ex_stall) || (mem_op_pending && mem_ready) || data_cache_hit_comb) begin
@@ -1214,6 +1222,7 @@ always @(posedge clk) begin
         // 2. A memory operation just completed (even if stalled, we take the result)
         mem_wb_rd <= ex_mem_rd;
         mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
+        mem_wb_retire <= ex_mem_retire;
         mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
         mem_wb_funct3 <= ex_mem_funct3;
         mem_wb_alu_result_lo <= ex_mem_alu_result[1:0];
@@ -1226,6 +1235,7 @@ always @(posedge clk) begin
     end else begin
         // Stalled - insert bubble (don't retire any instruction)
         mem_wb_valid <= 1'b0;
+        mem_wb_retire <= 1'b0;
         mem_wb_reg_write <= 1'b0;
         mem_wb_rd <= 5'b0;
     end
