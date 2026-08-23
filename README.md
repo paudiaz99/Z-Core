@@ -339,9 +339,15 @@ Detailed documentation is available in the `doc/` directory:
 - [x] **CSR Unit & Zicsr extension (CSR instructions)**
 - [x] **Exception / Trap Handling (Illegal Inst, ECALL, EBREAK)**
 - [x] **Data Cache**
-- [ ] RISC-V C extension (compressed instructions)
+- [x] **Hybrid GShare branch predictor (Similar to Tournament)**
+- [ ] Write Buffer
 - [ ] RISC-V A extension (atomic instructions)
-- [ ] Fix all lint warnings
+- [ ] Boot Linux on Z-Core
+- [ ] RISC-V C extension (compressed instructions)
+- [ ] RISC-V V extension (vector instructions)
+- [ ] Tightly coupled MMU for AI acceleration
+- [ ] RISC-V F extension (single-precision floating-point instructions)
+- [ ] RISC-V D extension (double-precision floating-point instructions)
 
 ## Contributing
 
