@@ -1516,7 +1516,7 @@ module z_core_control_u_tb;
             fail_count = fail_count + 1;
             $display("  [FAIL] JAL/JALR skip path violated (x15 = 0xBAD)");
         end
-        verify_counters(6, 1, 1, "Test 19");
+        verify_counters(5, 1, 1, "Test 19");
 
         // ==========================================
         // Test 20: Multiplication Operations (M Extension)
@@ -1948,7 +1948,7 @@ module z_core_control_u_tb;
 
         // Trap handler does 3 stores per exception × 3 exceptions = 9 stores
         // No loads in the program
-        verify_counters(15, 0, -1, "Test 30");
+        verify_counters(9, 0, -1, "Test 30");
 
         // ==========================================
         // Test 31: Timer Compare-Match Interrupt
@@ -2004,7 +2004,7 @@ module z_core_control_u_tb;
         check_mem(32'h218, 32'd2,         "Illegal insn mcause (2)");
         check_mem(32'h21C, 32'h6C,        "Illegal insn mepc+4 (0x68+4=0x6C)");
         check_mem(32'h220, 32'hFFFFFFFF,  "Illegal insn mtval (0xFFFFFFFF)");
-        verify_counters(15, 0, -1, "Test 33");
+        verify_counters(9, 0, -1, "Test 33");
 
         // ==========================================
         // Test 34: MRET Into Branch With Predictor State
@@ -2078,7 +2078,7 @@ module z_core_control_u_tb;
         check_mem(32'h240, 6, "sweep[5] @ 0x240 = 6");
         check_mem(32'h280, 7, "sweep[6] @ 0x280 = 7");
         check_mem(32'h2C0, 8, "sweep[7] @ 0x2C0 = 8");
-        verify_counters(9, 8, 8, "Test 37");
+        verify_counters(8, 8, 8, "Test 37");
 
         // ==========================================
         // Test 38: Hot Loop (I$ + D$ Heavy Locality)

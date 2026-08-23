@@ -263,7 +263,7 @@ The processor has been verified with a comprehensive system-level testbench (`tb
 
 ## Performance Monitoring
 
-Z-Core includes a basic hardware performance-monitoring facility. The **mcycle** CSR counts the number of clock cycles executed by the processor core on which the hart is running. The **minstret** CSR counts the number of instructions the hart has retired. Additionally, Z-Core has eight additional performance counters accessible through **mhpmcountert3–mhpmcounter10**. For a deep performance analysis of the Z-Core, you can visit the following post on my website: https://paudiazcuesta.com/posts/z-core-performance/. I dive into the performance of the Z-Core design using DOOM, STREAM and CoreMark/MHz as main benchmarks.
+Z-Core includes a basic hardware performance-monitoring facility. The **mcycle** CSR counts the number of clock cycles executed by the processor core on which the hart is running. The **minstret** CSR counts the number of instructions the hart has retired. Additionally, Z-Core has nine additional performance counters accessible through **mhpmcountert3–mhpmcounter11**. For a deep performance analysis of the Z-Core, you can visit the following post on my website: https://paudiazcuesta.com/posts/z-core-performance/. I dive into the performance of the Z-Core design using DOOM, STREAM and CoreMark/MHz as main benchmarks.
 
 | Counter Name | Event |
 |--------------|-------|
@@ -271,12 +271,23 @@ Z-Core includes a basic hardware performance-monitoring facility. The **mcycle**
 | minstret | Retired Instructions |
 | mhpmcountert3 | Instruction Cache Hits |
 | mhpmcountert4 | Data Cache Hits |
-| mhpmcountert5 | Load Requests |
-| mhpmcountert6 | Store Requests |
+| mhpmcountert5 | Load Requests (every load, cache hit or miss, cached or uncached) |
+| mhpmcountert6 | Store Requests (every store, cache hit or miss, cached or uncached) |
 | mhpmcountert7 | Branch Misspredictions |
 | mhpmcountert8 | Pipeline flushes |
 | mhpmcountert9 | Instruction Cache Misses |
 | mhpmcountert10 | Memory Instruction Fetches |
+| mhpmcountert11 | Uncached Data Accesses |
+
+Data cache rates are derived from these counters. Every load and store contributes exactly
+one event to `mhpmcounter5` or `mhpmcounter6`, and `mhpmcounter4` counts hits for loads and
+stores alike, so:
+
+```
+cacheable accesses = mhpmcounter5 + mhpmcounter6 - mhpmcounter11
+D$ hit rate        = mhpmcounter4 / cacheable accesses
+D$ miss rate       = 1 - D$ hit rate
+```
 
 > [!NOTE]
 > For additional information regarding performance monitoring, refer to the RISC-V Privileged Specification Version 1.12.
