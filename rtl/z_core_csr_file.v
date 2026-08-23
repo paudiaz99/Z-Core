@@ -87,6 +87,7 @@ module z_core_csr_file #(
     input  wire                 mem_read_pulse,   // Pulse when memory read
     input  wire                 mem_write_pulse,  // Pulse when memory write
     input  wire                 mem_inst_fetch_pulse,  // Pulse when memory instruction fetch
+    input  wire                 mem_uncached_pulse,    // Pulse when the access bypassed the D-cache (PMA non-cacheable)
 
     // ============================================
     //           Branch Misprediction Counters
@@ -150,6 +151,8 @@ module z_core_csr_file #(
     localparam ADDR_MHPMCOUNTER9H = 12'hB89;
     localparam ADDR_MHPMCOUNTER10 = 12'hB0A;
     localparam ADDR_MHPMCOUNTER10H = 12'hB8A;
+    localparam ADDR_MHPMCOUNTER11 = 12'hB0B;
+    localparam ADDR_MHPMCOUNTER11H = 12'hB8B;
 
     // User-visible counter aliases (Read-Only)
     localparam ADDR_CYCLE      = 12'hC00;
@@ -172,6 +175,8 @@ module z_core_csr_file #(
     localparam ADDR_HPMCOUNTER9H = 12'hC89;
     localparam ADDR_HPMCOUNTER10 = 12'hC0A;
     localparam ADDR_HPMCOUNTER10H = 12'hC8A;
+    localparam ADDR_HPMCOUNTER11 = 12'hC0B;
+    localparam ADDR_HPMCOUNTER11H = 12'hC8B;
 
 
     // =========================================================================
@@ -265,12 +270,13 @@ module z_core_csr_file #(
     reg [63:0] minstret_r;
     reg [63:0] mhpmcounter3_r; // I-Cache Hits
     reg [63:0] mhpmcounter4_r; // D-Cache Hits
-    reg [63:0] mhpmcounter5_r; // Load Requests 
+    reg [63:0] mhpmcounter5_r; // Load Requests
     reg [63:0] mhpmcounter6_r; // Store Requests
     reg [63:0] mhpmcounter7_r; // Branch Mispredictions
     reg [63:0] mhpmcounter8_r; // Pipeline Flushes
     reg [63:0] mhpmcounter9_r; // I-Cache Misses 
     reg [63:0] mhpmcounter10_r; // Memory Instruction Fetches
+    reg [63:0] mhpmcounter11_r; // Uncached Data Accesses (subset of counters 5 and 6)
 
     // =========================================================================
     //  Output Assignments
@@ -353,6 +359,10 @@ module z_core_csr_file #(
             ADDR_HPMCOUNTER10:  csr_read_data = mhpmcounter10_r[31:0];
             ADDR_MHPMCOUNTER10H,
             ADDR_HPMCOUNTER10H: csr_read_data = mhpmcounter10_r[63:32];
+            ADDR_MHPMCOUNTER11,
+            ADDR_HPMCOUNTER11:  csr_read_data = mhpmcounter11_r[31:0];
+            ADDR_MHPMCOUNTER11H,
+            ADDR_HPMCOUNTER11H: csr_read_data = mhpmcounter11_r[63:32];
 
             default:        csr_read_data = 32'h0;
         endcase
@@ -385,6 +395,7 @@ module z_core_csr_file #(
             mhpmcounter8_r <= 64'h0;
             mhpmcounter9_r <= 64'h0;
             mhpmcounter10_r <= 64'h0;
+            mhpmcounter11_r <= 64'h0;
         end else begin
 
             // --- Always-running counters ---
@@ -407,6 +418,8 @@ module z_core_csr_file #(
                 mhpmcounter10_r <= mhpmcounter10_r + 1;
             if (inst_cache_miss_pulse)
                 mhpmcounter9_r <= mhpmcounter9_r + 1;
+            if (mem_uncached_pulse)
+                mhpmcounter11_r <= mhpmcounter11_r + 1;
 
             // --- Trap Entry (highest priority over CSR writes) ---
             // Per Privileged Spec §3.1.6.1:
@@ -524,6 +537,12 @@ module z_core_csr_file #(
                     end
                     ADDR_MHPMCOUNTER10H: begin
                         mhpmcounter10_r[63:32] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER11: begin
+                        mhpmcounter11_r[31:0] <= csr_write_data;
+                    end
+                    ADDR_MHPMCOUNTER11H: begin
+                        mhpmcounter11_r[63:32] <= csr_write_data;
                     end
                     // default: ignore writes to unknown/read-only CSRs
                 endcase

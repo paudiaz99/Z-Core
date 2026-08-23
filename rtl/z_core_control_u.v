@@ -691,19 +691,25 @@ wire        csr_mie_msie;
 // Pulse generators for performance counters
 wire load_pulse;
 wire write_pulse;
+wire mem_uncached_pulse;
 wire inst_fetch_pulse;
 wire inst_cache_miss_pulse;
 
-// AXI bus is granted to the EX/MEM load/store this cycle.
-wire perf_axi_grant_dmem = ex_mem_valid
-                        && (ex_mem_is_load || ex_mem_is_store)
-                        && !mem_op_pending
-                        && !mem_busy
-                        && !fetch_wait;
-assign load_pulse  = (perf_axi_grant_dmem && ex_mem_is_load)
-                   || (data_cache_hit_comb && ex_mem_is_load);
-assign write_pulse = (perf_axi_grant_dmem && ex_mem_is_store)
-                   || (data_cache_hit_comb && ex_mem_is_store);
+wire perf_mem_access = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store);
+reg  perf_mem_access_counted;
+always @(posedge clk) begin
+    if (~rstn)
+        perf_mem_access_counted <= 1'b0;
+    else if (!mem_stall && !ex_stall)
+        perf_mem_access_counted <= 1'b0;
+    else if (perf_mem_access)
+        perf_mem_access_counted <= 1'b1;
+end
+
+wire perf_mem_access_first = perf_mem_access && !perf_mem_access_counted; // Pulse
+assign load_pulse         = perf_mem_access_first && ex_mem_is_load;
+assign write_pulse        = perf_mem_access_first && ex_mem_is_store;
+assign mem_uncached_pulse = perf_mem_access_first && data_uncacheable_mem;
 
 
 assign inst_fetch_pulse = fetch_wait && mem_ready && !flush;
@@ -741,6 +747,7 @@ z_core_csr_file #(
     .mem_read_pulse(load_pulse),
     .mem_write_pulse(write_pulse),
     .mem_inst_fetch_pulse(inst_fetch_pulse),
+    .mem_uncached_pulse(mem_uncached_pulse),
     .branch_misprediction_pulse(prediction_flush), // No need pulse: Always single cycle
     .pipeline_flush_pulse(flush),
     .inst_cache_miss_pulse(inst_cache_miss_pulse),
