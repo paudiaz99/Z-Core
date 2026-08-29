@@ -27,6 +27,7 @@ module z_core_write_buffer#(
 
     output reg [DATA_WIDTH-1:0] load_forward_out,
     output reg load_forward_valid_out,
+    output reg [ADDR_WIDTH-1:0] load_forward_addr_out,
     output reg [3:0] load_forward_strb_out
 
 );
@@ -43,14 +44,14 @@ module z_core_write_buffer#(
     wire empty = elem_count == {$clog2(ENTRIES){1'b0}};
     wire full = elem_count == ENTRIES;
 
-    wire write_accepted = write_enable && (!full || read_enable || merge_write);
-
     integer i, j, k;
 
     wire merge_write = write_buffer_address[tail_pointer] == write_back_addr && write_buffer_valid[tail_pointer];
     wire pop = read_enable && !empty;
     wire tail_being_popped = pop && (elem_count == 1);
     wire do_merge = merge_write && !tail_being_popped;
+
+    wire write_accepted = write_enable && (!full || read_enable || merge_write);
 
     always @(posedge clk) begin
         if (~rstn) begin
@@ -109,6 +110,7 @@ module z_core_write_buffer#(
     // Forwarding: This is what makes write buffer expensive
     always @(*) begin
         load_forward_out = {DATA_WIDTH{1'b0}};
+        load_forward_addr_out = {ADDR_WIDTH{1'b0}};
         load_forward_valid_out = 1'b0;
         load_forward_strb_out = 4'b0000;
 
@@ -119,12 +121,14 @@ module z_core_write_buffer#(
                     write_buffer_valid[j] &&
                     write_buffer_address[j] == load_address) begin
                     load_forward_out = write_buffer_data[j];
+                    load_forward_addr_out = write_buffer_address[j];
                     load_forward_strb_out = 4'b1111;
                     load_forward_valid_out = 1'b1;
                 end
             end
             if (write_accepted && write_back_addr == load_address) begin
                 load_forward_out = write_back_data;
+                load_forward_addr_out = write_back_addr;
                 load_forward_strb_out = 4'b1111;
                 load_forward_valid_out = 1'b1;
             end
