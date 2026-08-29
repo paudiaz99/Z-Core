@@ -22,3 +22,4 @@ axil_timer.v
 z_core_branch_pred.v
 z_core_data_cache.v
 z_core_pma.v
+z_core_write_buffer.v

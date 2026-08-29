@@ -286,12 +286,20 @@ wire [DATA_WIDTH-1:0] data_cache_dirty_writeback_data;
 wire [3:0] data_cache_dirty_writeback_strb;
 wire data_cache_request_refill;
 
-assign data_cache_wen = ex_mem_is_store;
+wire [DATA_WIDTH-1:0] load_forward_out;
+wire [ADDR_WIDTH-1:0] load_forward_addr_out;
+wire load_forward_valid_out;
+wire [STRB_WIDTH-1:0] load_forward_strb_out;
+wire full_out;
+wire empty_out;
+wire load_forward_use = load_forward_valid_out && !data_cache_cache_hit && !full_out;
+
+assign data_cache_wen = ex_mem_is_store || load_forward_use;
 assign data_cache_cs = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
                        && !mem_op_pending && !data_uncacheable_mem;
 assign data_cache_addr = ex_result & ~32'b11;
-assign data_cache_refill_complete = mem_op_pending && mem_ready && data_cache_request_refill
-                                    && !data_cache_writeback_pending_r && !mem_op_is_uncached_r;
+assign data_cache_refill_complete = (mem_op_pending && mem_ready && data_cache_request_refill
+                                    /* && !data_cache_writeback_pending_r && !mem_op_is_uncached_r*/);
 
 z_core_data_cache#(
     .ADDR_WIDTH(ADDR_WIDTH),
@@ -304,9 +312,11 @@ z_core_data_cache#(
     .cs(data_cache_cs),
     .refill_complete(data_cache_refill_complete),
     .addr(data_cache_addr),
-    .data_in(data_cache_data_in),
-    .strb(data_cache_strb),
+    .data_in(load_forward_use ? load_forward_out : data_cache_data_in),
+    .strb(load_forward_use ? load_forward_strb_out : data_cache_strb),
     .pipeline_enable((id_ex_valid && (id_ex_is_load || id_ex_is_store) && !ex_stall)),
+    .write_buffer_forward(load_forward_use),
+    .write_buffer_full(full_out),
     .data_out(data_cache_data_out),
     .cache_hit_comb(data_cache_cache_hit),
     .dirty_writeback_enabled(data_cache_dirty_writeback_enabled),
@@ -314,7 +324,6 @@ z_core_data_cache#(
     .dirty_writeback_data(data_cache_dirty_writeback_data),
     .dirty_writeback_strb(data_cache_dirty_writeback_strb),
     .request_refill(data_cache_request_refill)
-
 );
 
 // ##################################################
@@ -600,7 +609,7 @@ always @* begin
     endcase
 end
 
-assign mem_wb_fwd_result = data_cache_hit_q ? cache_load_result : mem_wb_result;
+assign mem_wb_fwd_result = data_cache_hit_q ? cache_load_result : (load_forward_use ? load_forward_out : mem_wb_result);
 
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
 assign fwd_rs1_data =
@@ -770,9 +779,9 @@ wire div_stall = id_ex_valid && id_ex_is_div && !div_complete;
 
 assign ex_stall = mem_stall ||
                 (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
-                (!data_cache_hit_comb) &&
+                (!data_cache_hit_comb && !load_forward_use) &&
                 (!mem_op_pending || mem_busy)) ||
-                ((mem_op_pending && mem_ready && data_cache_writeback_pending_r)) || 
+                // ((mem_op_pending && mem_ready && data_cache_writeback_pending_r)) || 
                 div_stall;
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
@@ -825,6 +834,39 @@ wire if_id_is_branch = if_id_valid && dec_is_branch;
 assign branch_target = id_ex_pc + id_ex_imm;
 wire [31:0] jalr_target = (fwd_rs1_data + id_ex_imm) & ~32'b1;
 assign jump_target = id_ex_is_jalr ? jalr_target : branch_target;
+
+
+// ##################################################
+//                  WRITE BUFFER
+// ##################################################
+
+wire [DATA_WIDTH-1:0] wb_out_data;
+wire [ADDR_WIDTH-1:0] wb_out_address;
+wire [STRB_WIDTH-1:0] wb_out_strb;
+wire wb_out_valid;
+
+z_core_write_buffer write_buffer_inst(
+    .clk(clk),
+    .rstn(rstn),
+    .write_back_data(data_cache_dirty_writeback_data),
+    .write_back_addr(data_cache_dirty_writeback_addr),
+    .write_back_strb(data_cache_dirty_writeback_strb),
+    .write_enable(data_cache_dirty_writeback_enabled),
+    .read_enable(1'b0),
+    .load_address(ex_mem_alu_result),
+    .load_check(~mem_op_pending && (!mem_ready || fetch_wait) && ~mem_op_is_uncached_r && ex_mem_is_load),
+    .wb_out_data(wb_out_data),
+    .wb_out_address(wb_out_address),
+    .wb_out_strb(wb_out_strb),
+    .wb_out_valid(wb_out_valid),
+    .full_out(full_out),
+    .empty_out(empty_out),
+    .load_forward_out(load_forward_out),
+    .load_forward_valid_out(load_forward_valid_out),
+    .load_forward_addr_out(load_forward_addr_out),
+    .load_forward_strb_out(load_forward_strb_out)
+);
+
 
 // ##################################################
 //              PIPELINE STAGE: FETCH
@@ -1149,7 +1191,7 @@ always @* begin
 end
 
 assign data_cache_hit_comb = data_cache_cs && data_cache_cache_hit;
-wire data_cache_refill_comb = data_cache_cs && !data_cache_cache_hit && data_cache_request_refill;
+wire data_cache_refill_comb = (data_cache_cs && !data_cache_cache_hit && data_cache_request_refill) && ~load_forward_use;
 
 // PMA uncached path: an EX/MEM load/store to a non-cacheable address
 // requests a direct AXI transaction. Mirrors the cache-miss trigger
@@ -1181,15 +1223,17 @@ always @(posedge clk) begin
     end else begin
         if (data_cache_hit_comb) begin
             data_cache_hit_q <= 1'b1;
-        end else if(data_cache_refill_comb && data_cache_dirty_writeback_enabled && !fetch_wait && !mem_busy) begin // Dirty Writeback Missed -> Writeback
-            // For now, writeback will be done sequentially before refill,
-            // Future work: Build Store Buffer to handle multiple writebacks in parallel.
+        end else if(load_forward_use) begin
             data_cache_hit_q <= 1'b0;
-            mem_op_pending <= 1'b1;
-            mem_data_out_r <= data_cache_dirty_writeback_data;
-            mem_wstrb_r <= data_cache_dirty_writeback_strb;
-            data_cache_writeback_pending_r <= 1'b1;
-         end else if(((data_cache_refill_comb && !data_cache_dirty_writeback_enabled) || (data_cache_writeback_pending_r && mem_op_pending && mem_ready)) && !fetch_wait && !mem_busy) begin // Cache Missed / Writback Complete -> Refill
+        // end else if(data_cache_refill_comb && data_cache_dirty_writeback_enabled && !fetch_wait && !mem_busy) begin // Dirty Writeback Missed -> Writeback
+        //     // For now, writeback will be done sequentially before refill,
+        //     // Future work: Build Store Buffer to handle multiple writebacks in parallel.
+        //     data_cache_hit_q <= 1'b0;
+        //     mem_op_pending <= 1'b1;
+        //     mem_data_out_r <= data_cache_dirty_writeback_data;
+        //     mem_wstrb_r <= data_cache_dirty_writeback_strb;
+        //     data_cache_writeback_pending_r <= 1'b1;
+         end else if(((data_cache_refill_comb) || (data_cache_writeback_pending_r && mem_op_pending && mem_ready)) && !fetch_wait && !mem_busy) begin // Cache Missed / Writback Complete -> Refill
             data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b1;
             data_cache_writeback_pending_r <= 1'b0;

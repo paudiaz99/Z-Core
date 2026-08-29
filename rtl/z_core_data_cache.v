@@ -15,6 +15,8 @@ module z_core_data_cache #(
     input wire [3:0] strb,
     input wire refill_complete,
     input wire pipeline_enable,
+    input wire write_buffer_forward,
+    input wire write_buffer_full,
 
     input wire [ADDR_WIDTH-1:0] addr,
     input wire [DATA_WIDTH-1:0] data_in,
@@ -115,6 +117,7 @@ always @(posedge clk) begin
         refill_index_q <= {CACHE_ADDR_WIDTH{1'b0}};
         refill_tag_q   <= {CACHE_TAG_WIDTH{1'b0}};
     end else if(refill_complete) begin
+        dirty_writeback_enabled <= 1'b0;
         request_refill <= 1'b0;
         if(!refill_buffer_set) begin
             data_0[refill_index_q] <= (refill_wen ? data_in & ~mask | refill_buffer_data & mask : data_in & mask);
@@ -135,6 +138,7 @@ always @(posedge clk) begin
         dirty_writeback_enabled <= dirty_writeback_enabled ? 1'b0 : dirty_writeback_enabled;
     end else if(cs && wen) begin
         if(cache_hit_comb) begin
+            dirty_writeback_enabled <= 1'b0;
             if(!set_to_write_on_hit) begin
                 data_0[index_addr_q] <= data_0[index_addr_q] & ~mask | data_in & mask;
                 tags_0[index_addr_q] <= tag_addr_q;
@@ -150,32 +154,73 @@ always @(posedge clk) begin
                 lru_bits_1[index_addr_q] <= 1'b0;
                 lru_bits_0[index_addr_q] <= 1'b1;
             end
-        end else if(!request_refill) begin
-            refill_index_q <= index_addr_q;
-            refill_tag_q   <= tag_addr_q;
+        end else if(!request_refill && !write_buffer_full) begin
             dirty_writeback_enabled <= set_to_write_on_miss ? (dirty_bits_1[index_addr_q]) : (dirty_bits_0[index_addr_q]);
             dirty_writeback_addr <= {set_to_write_on_miss ? (tags_1[index_addr_q]) : (tags_0[index_addr_q]), index_addr_q, 2'b00};
             dirty_writeback_data <= set_to_write_on_miss ? (data_1[index_addr_q]) : (data_0[index_addr_q]);
             dirty_writeback_strb <= 4'b1111;
-            refill_buffer_data <= data_in & mask;
-            refill_buffer_set <= set_to_write_on_miss;
-            refill_wen <= 1'b1;
-            request_refill <= 1'b1;
+            if(write_buffer_forward) begin
+                if(!set_to_write_on_miss) begin
+                    data_0[index_addr_q] <= (data_0[index_addr_q] & ~mask) | (data_in & mask);
+                    tags_0[index_addr_q] <= tag_addr_q;
+                    valid_bits_0[index_addr_q] <= 1'b1;
+                    dirty_bits_0[index_addr_q] <= 1'b0;
+                    lru_bits_0[index_addr_q] <= 1'b0;
+                    lru_bits_1[index_addr_q] <= 1'b1;
+                end else begin
+                    data_1[index_addr_q] <= (data_1[index_addr_q] & ~mask) | (data_in & mask);
+                    tags_1[index_addr_q] <= tag_addr_q;
+                    valid_bits_1[index_addr_q] <= 1'b1;
+                    dirty_bits_1[index_addr_q] <= 1'b0;
+                    lru_bits_1[index_addr_q] <= 1'b0;
+                    lru_bits_0[index_addr_q] <= 1'b1;
+                end
+            end else begin
+                refill_index_q <= index_addr_q;
+                refill_tag_q   <= tag_addr_q;
+                refill_buffer_data <= data_in & mask;
+                refill_buffer_set <= set_to_write_on_miss;
+                refill_wen <= 1'b1;
+                request_refill <= 1'b1;
+            end
+        end else begin
+            dirty_writeback_enabled <= 1'b0;
         end
     end else if(cs && !wen) begin
         if(cache_hit_comb) begin
+            dirty_writeback_enabled <= 1'b0;
             data_out <= set_to_write_on_hit ? (data_1[index_addr_q] & mask) : (data_0[index_addr_q] & mask);
-        end else if(!request_refill) begin
-            refill_index_q <= index_addr_q;
-            refill_tag_q   <= tag_addr_q;
+        end else if(!request_refill && !write_buffer_full) begin
             dirty_writeback_enabled <= set_to_write_on_miss ? (dirty_bits_1[index_addr_q]) : (dirty_bits_0[index_addr_q]);
             dirty_writeback_addr <= {set_to_write_on_miss ? (tags_1[index_addr_q]) : (tags_0[index_addr_q]), index_addr_q, 2'b00};
             dirty_writeback_data <= set_to_write_on_miss ? (data_1[index_addr_q]) : (data_0[index_addr_q]);
             dirty_writeback_strb <= 4'b1111;
-            request_refill <= 1'b1;
-            refill_buffer_set <= set_to_write_on_miss;
-            refill_wen <= 1'b0;
-            data_out <= 32'b0;
+            if(write_buffer_forward) begin
+                if(!set_to_write_on_miss) begin
+                    data_0[index_addr_q] <= (data_in & ~mask);
+                    tags_0[index_addr_q] <= tag_addr_q;
+                    valid_bits_0[index_addr_q] <= 1'b1;
+                    dirty_bits_0[index_addr_q] <= 1'b0;
+                    lru_bits_0[index_addr_q] <= 1'b0;
+                    lru_bits_1[index_addr_q] <= 1'b1;
+                end else begin
+                    data_1[index_addr_q] <= (data_in & ~mask);
+                    tags_1[index_addr_q] <= tag_addr_q;
+                    valid_bits_1[index_addr_q] <= 1'b1;
+                    dirty_bits_1[index_addr_q] <= 1'b0;
+                    lru_bits_1[index_addr_q] <= 1'b0;
+                    lru_bits_0[index_addr_q] <= 1'b1;
+                end
+            end else begin
+                refill_index_q <= index_addr_q;
+                refill_tag_q   <= tag_addr_q;
+                request_refill <= 1'b1;
+                refill_buffer_set <= set_to_write_on_miss;
+                refill_wen <= 1'b0;
+                data_out <= 32'b0;
+            end
+        end else begin
+            dirty_writeback_enabled <= 1'b0;
         end
     end
 end

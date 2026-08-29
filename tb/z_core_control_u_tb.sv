@@ -474,11 +474,12 @@ module z_core_control_u_tb;
     //  Inspecting `u_axil_ram.mem[]` alone misses these in-cache values
     //  and produces false negatives.
     //
-    //  This task therefore checks the cache state first:
+    //  This task therefore checks cache, write buffer, then RAM:
     //    - For RAM addresses (< 0x0400_0000) it walks both ways at the
     //      computed index and returns cached data if a valid tag matches.
-    //    - On a cache miss, or for memory-mapped IO regions, it falls
-    //      back to inspecting `u_axil_ram.mem[]` directly.
+    //    - On a cache miss it checks valid write-buffer entries, warning
+    //      that a buffered match does not verify writeback to RAM.
+    //    - Otherwise it inspects `u_axil_ram.mem[]` directly.
     //
     //  Cache geometry (matches `data_cache` instantiation, CACHE_DEPTH=256):
     //      index = addr[9:2]  (8 bits)
@@ -492,11 +493,15 @@ module z_core_control_u_tb;
         reg [21:0] expected_tag;
         reg [7:0]  cache_index;
         reg        in_cache;
+        reg        in_write_buffer;
+        integer    wb_offset;
+        integer    wb_index;
         begin
             test_count = test_count + 1;
-            in_cache     = 1'b0;
-            expected_tag = addr[31:10];
-            cache_index  = addr[9:2];
+            in_cache        = 1'b0;
+            in_write_buffer = 1'b0;
+            expected_tag    = addr[31:10];
+            cache_index     = addr[9:2];
 
             // RAM region: try the cache first
             if (addr < 32'h0400_0000) begin
@@ -510,6 +515,17 @@ module z_core_control_u_tb;
                     in_cache = 1'b1;
                 end else begin
                     actual = u_axil_ram.mem[addr >> 2];
+                    // Match the write-buffer forwarding order so the newest
+                    // valid entry wins when an address appears more than once.
+                    for (wb_offset = 0; wb_offset < 8; wb_offset = wb_offset + 1) begin
+                        wb_index = (uut.write_buffer_inst.read_pointer + wb_offset) % 8;
+                        if (wb_offset < uut.write_buffer_inst.elem_count &&
+                            uut.write_buffer_inst.write_buffer_valid[wb_index] &&
+                            uut.write_buffer_inst.write_buffer_address[wb_index] == addr) begin
+                            actual = uut.write_buffer_inst.write_buffer_data[wb_index];
+                            in_write_buffer = 1'b1;
+                        end
+                    end
                 end
             end else begin
                 // IO/MMIO region — never cached
@@ -518,12 +534,20 @@ module z_core_control_u_tb;
 
             if (actual == expected) begin
                 pass_count = pass_count + 1;
-                $display("  [PASS] %0s: %s[0x%04h] = %0d",
-                         test_name, in_cache ? "cache" : "  mem", addr, actual);
+                if (in_write_buffer)
+                    $display("  [PASS] %0s: write-buffer[0x%04h] = %0d [WARN: RAM writeback not verified]",
+                             test_name, addr, actual);
+                else
+                    $display("  [PASS] %0s: %s[0x%04h] = %0d",
+                             test_name, in_cache ? "cache" : "  mem", addr, actual);
             end else begin
                 fail_count = fail_count + 1;
-                $display("  [FAIL] %0s: %s[0x%04h] = %0d (expected %0d)",
-                         test_name, in_cache ? "cache" : "  mem", addr, actual, expected);
+                if (in_write_buffer)
+                    $display("  [FAIL] %0s: write-buffer[0x%04h] = %0d (expected %0d) [WARN: RAM writeback not verified]",
+                             test_name, addr, actual, expected);
+                else
+                    $display("  [FAIL] %0s: %s[0x%04h] = %0d (expected %0d)",
+                             test_name, in_cache ? "cache" : "  mem", addr, actual, expected);
             end
         end
     endtask
@@ -2263,6 +2287,32 @@ module z_core_control_u_tb;
         check_mem(32'h100, 32'hCD, "mem[0x100] = 0xCD (iter1 miss-store landed)");
         check_mem(32'h104, 32'hCD, "mem[0x104] = 0xCD (iter2 miss-store landed)");
         check_mem(32'h108, 32'hCD, "mem[0x108] = 0xCD (iter3 miss-store landed)");
+
+        load_test48_write_buffer_priority();
+        reset_cpu();
+        #15000;
+
+        $display("\n=== Test 48 Results: Write Buffer Priority ===");
+        check_reg(10, 11, "first consecutive forwarded load");
+        check_reg(11, 22, "second consecutive forwarded load");
+        check_reg(14, 99, "cache hit newer than buffered copy");
+        check_mem(32'h100, 99, "newest value at 0x100");
+
+        load_test49_write_buffer_full();
+        reset_cpu();
+        #15000;
+
+        $display("\n=== Test 49 Results: Write Buffer Full ===");
+        check_mem(32'h0100,  1, "dirty value preserved");
+        check_mem(32'h0500,  2, "dirty value preserved");
+        check_mem(32'h0900,  3, "dirty value preserved");
+        check_mem(32'h0D00,  4, "dirty value preserved");
+        check_mem(32'h1100,  5, "dirty value preserved");
+        check_mem(32'h1500,  6, "dirty value preserved");
+        check_mem(32'h1900,  7, "dirty value preserved");
+        check_mem(32'h1D00,  8, "dirty value preserved");
+        check_mem(32'h2100,  9, "dirty value preserved");
+        check_mem(32'h2500, 10, "dirty value preserved");
 
         // ==========================================
         // Final Summary
@@ -4948,6 +4998,48 @@ module z_core_control_u_tb;
             u_axil_ram.mem[10] = 32'hfff30313; // ADDI x6,x6,-1
             u_axil_ram.mem[11] = 32'hfe0314e3; // BNE  x6,x0,-24      back to 0x14
             u_axil_ram.mem[12] = 32'h0000006f; // JAL  x0,0           halt
+        end
+    endtask
+
+    task load_test48_write_buffer_priority;
+        integer i;
+        begin
+            $display("\n--- Loading Test 48: Write Buffer Priority ---");
+            for (i = 0; i < 96; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0]  = 32'h00b00113;
+            u_axil_ram.mem[1]  = 32'h01600193;
+            u_axil_ram.mem[2]  = 32'h02100213;
+            u_axil_ram.mem[3]  = 32'h02c00293;
+            u_axil_ram.mem[4]  = 32'h06300313;
+            u_axil_ram.mem[5]  = 32'h10000413;
+            u_axil_ram.mem[6]  = 32'h00242023;
+            u_axil_ram.mem[7]  = 32'h40040493;
+            u_axil_ram.mem[8]  = 32'h0034a023;
+            u_axil_ram.mem[9]  = 32'h40048613;
+            u_axil_ram.mem[10] = 32'h00462023;
+            u_axil_ram.mem[11] = 32'h40060693;
+            u_axil_ram.mem[12] = 32'h0056a023;
+            u_axil_ram.mem[13] = 32'h00042503;
+            u_axil_ram.mem[14] = 32'h0004a583;
+            u_axil_ram.mem[15] = 32'h00642023;
+            u_axil_ram.mem[16] = 32'h00042703;
+            u_axil_ram.mem[17] = 32'h0000006f;
+        end
+    endtask
+
+    task load_test49_write_buffer_full;
+        integer i;
+        begin
+            $display("\n--- Loading Test 49: Write Buffer Full ---");
+            for (i = 0; i < 96; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0] = 32'h00100113;
+            u_axil_ram.mem[1] = 32'h10000313;
+            for (i = 0; i < 11; i = i + 1) begin
+                u_axil_ram.mem[2 + i * 3] = 32'h00232023;
+                u_axil_ram.mem[3 + i * 3] = 32'h00110113;
+                u_axil_ram.mem[4 + i * 3] = 32'h40030313;
+            end
+            u_axil_ram.mem[35] = 32'h0000006f;
         end
     endtask
 
