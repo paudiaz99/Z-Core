@@ -223,6 +223,7 @@ wire [31:0] alu_out;
 wire [31:0] ex_result;
 wire        ex_stall;
 wire        stall;
+wire        fence_stall;
 wire        dec_is_ecall;
 wire        dec_is_ebreak;
 wire [31:0] mem_wb_fwd_result;
@@ -800,7 +801,7 @@ assign ex_stall = mem_stall ||
                 div_stall;
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
-assign stall = load_use_hazard || ex_stall;
+assign stall = load_use_hazard || fence_stall || ex_stall;
 
 // ##################################################
 //              BRANCH/JUMP CONTROL
@@ -880,7 +881,7 @@ end
 
 wire drain_prediction = instruction_hit_pred[2];
 wire mem_can_issue = !mem_op_pending && !mem_busy && !mem_ready;
-wire drain_wb = (div_stall || full_out || drain_prediction) && !empty_out
+wire drain_wb = (div_stall || full_out || drain_prediction || fence_stall) && !empty_out
                 && !mem_op_pending && !fetch_wait && !mem_ready && !wb_out_valid
                 && !wb_issue_valid && !mem_busy && !flush;
 
@@ -906,6 +907,13 @@ z_core_write_buffer write_buffer_inst(
     .load_forward_addr_out(load_forward_addr_out),
     .load_forward_strb_out(load_forward_strb_out)
 );
+
+assign fence_stall = if_id_valid && dec_is_fence &&
+                     ((id_ex_valid  && (id_ex_is_load  || id_ex_is_store))  ||
+                      (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)) ||
+                      data_cache_dirty_writeback_enabled ||
+                      !empty_out || wb_out_valid || wb_issue_valid ||
+                      (mem_op_pending && mem_op_is_write_buffer_r));
 
 
 // ##################################################
@@ -1064,7 +1072,7 @@ always @(posedge clk) begin
         id_ex_is_illegal <= 1'b0;
         id_ex_is_iaf <= 1'b0;
         id_ex_ir <= 32'b0;
-    end else if (trap_enter_r || mret_in_ex || ((prediction_flush || load_use_hazard) && !ex_stall)) begin
+    end else if (trap_enter_r || mret_in_ex || ((prediction_flush || load_use_hazard || fence_stall) && !ex_stall)) begin
         // Insert bubble on flush or load-use hazard.
         // prediction_flush is gated by !ex_stall: if the EX stage is stalled,
         // the jump/branch result hasn't been latched into EX/MEM yet, so we
