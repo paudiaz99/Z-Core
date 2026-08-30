@@ -151,6 +151,9 @@ reg fetch_wait;
 reg [31:0] fetch_pc;  // PC of the cache fill in progress
 reg mem_op_pending;
 reg mem_op_is_uncached_r;
+reg mem_op_is_write_buffer_r;
+reg wb_issue_valid;
+reg [ADDR_WIDTH-1:0] write_buffer_addr_r;
 
 // ##################################################
 //              PIPELINE REGISTERS
@@ -276,7 +279,6 @@ wire [ADDR_WIDTH-1:0] data_cache_addr;
 reg [DATA_WIDTH-1:0] data_cache_data_in;
 reg [3:0] data_cache_strb;
 wire data_cache_refill_complete;
-reg data_cache_writeback_pending_r;
 
 wire [DATA_WIDTH-1:0] data_cache_data_out;
 wire data_cache_cache_hit;
@@ -298,8 +300,8 @@ assign data_cache_wen = ex_mem_is_store || load_forward_use;
 assign data_cache_cs = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
                        && !mem_op_pending && !data_uncacheable_mem;
 assign data_cache_addr = ex_result & ~32'b11;
-assign data_cache_refill_complete = (mem_op_pending && mem_ready && data_cache_request_refill
-                                    /* && !data_cache_writeback_pending_r && !mem_op_is_uncached_r*/);
+assign data_cache_refill_complete = mem_op_pending && mem_ready && data_cache_request_refill
+                                    && !mem_op_is_write_buffer_r && !mem_op_is_uncached_r;
 
 z_core_data_cache#(
     .ADDR_WIDTH(ADDR_WIDTH),
@@ -733,6 +735,18 @@ assign inst_cache_miss_pulse = !flush
                             && !(ex_mem_valid &&
                                  (ex_mem_is_load || ex_mem_is_store));
 
+reg instr_cache_cache_hit_r;
+
+always @(posedge clk) begin
+    if(~rstn) begin
+        instr_cache_cache_hit_r <= 1'b0;
+    end else begin
+        instr_cache_cache_hit_r <= instr_cache_cache_hit;
+    end
+end
+
+wire inst_cache_hit_pulse = instr_cache_cache_hit && ~instr_cache_cache_hit_r;
+
 z_core_csr_file #(
     .DATA_WIDTH(DATA_WIDTH)
 ) u_csr_file (
@@ -751,7 +765,7 @@ z_core_csr_file #(
     .mtip(mtip),
     .msip(msip),
     .instret_pulse(mem_wb_retire),
-    .inst_cache_hit_pulse(consume_inst),  // 1-cycle pulse per consumed I-cache hit
+    .inst_cache_hit_pulse(inst_cache_hit_pulse),  // 1-cycle pulse per consumed I-cache hit
     .data_cache_hit_pulse(data_cache_hit_comb),
     .mem_read_pulse(load_pulse),
     .mem_write_pulse(write_pulse),
@@ -780,8 +794,7 @@ wire div_stall = id_ex_valid && id_ex_is_div && !div_complete;
 assign ex_stall = mem_stall ||
                 (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
                 (!data_cache_hit_comb && !load_forward_use) &&
-                (!mem_op_pending || mem_busy)) ||
-                // ((mem_op_pending && mem_ready && data_cache_writeback_pending_r)) || 
+                (!mem_op_pending || mem_busy || mem_op_is_write_buffer_r)) ||
                 div_stall;
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
@@ -845,6 +858,31 @@ wire [ADDR_WIDTH-1:0] wb_out_address;
 wire [STRB_WIDTH-1:0] wb_out_strb;
 wire wb_out_valid;
 
+// Write Buffer drain logic
+reg [2:0] instruction_hit_pred;
+wire inst_cache_hit_consume = consume_inst && cache_hit_q && !flush;
+
+always @(posedge clk) begin
+    if(~rstn) begin
+        instruction_hit_pred <= 3'd0;
+    end else begin
+        if(inst_cache_hit_consume) begin
+            instruction_hit_pred <= (instruction_hit_pred == 3'd7) ? 3'd7 : instruction_hit_pred + 1;
+        end else if(inst_cache_miss_pulse) begin
+            instruction_hit_pred <= (instruction_hit_pred == 3'd0) ? 3'd0 : instruction_hit_pred - 1;
+        end else begin
+            instruction_hit_pred <= instruction_hit_pred;
+        end
+    end
+end
+
+wire drain_prediction = instruction_hit_pred[2];
+wire mem_can_issue = !mem_op_pending && !mem_busy && !mem_ready;
+wire drain_wb = (div_stall || full_out || drain_prediction) && !empty_out
+                && !mem_op_pending && !fetch_wait && !mem_ready && !wb_out_valid
+                && !wb_issue_valid && !mem_busy && !flush;
+
+
 z_core_write_buffer write_buffer_inst(
     .clk(clk),
     .rstn(rstn),
@@ -852,9 +890,9 @@ z_core_write_buffer write_buffer_inst(
     .write_back_addr(data_cache_dirty_writeback_addr),
     .write_back_strb(data_cache_dirty_writeback_strb),
     .write_enable(data_cache_dirty_writeback_enabled),
-    .read_enable(1'b0),
+    .read_enable(drain_wb),
     .load_address(ex_mem_alu_result),
-    .load_check(~mem_op_pending && (!mem_ready || fetch_wait) && ~mem_op_is_uncached_r && ex_mem_is_load),
+    .load_check(~mem_op_pending && ~mem_op_is_uncached_r && ex_mem_is_load),
     .wb_out_data(wb_out_data),
     .wb_out_address(wb_out_address),
     .wb_out_strb(wb_out_strb),
@@ -1217,37 +1255,53 @@ always @(posedge clk) begin
     if (~rstn) begin
         mem_op_pending <= 1'b0;
         mem_op_is_uncached_r <= 1'b0;
+        mem_op_is_write_buffer_r <= 1'b0;
+        wb_issue_valid <= 1'b0;
+        write_buffer_addr_r <= {ADDR_WIDTH{1'b0}};
         mem_data_out_r <= 32'b0;
         mem_wstrb_r <= 4'b1111;
         data_cache_hit_q <= 1'b0;
     end else begin
-        if (data_cache_hit_comb) begin
+        if (wb_out_valid) begin
+            mem_data_out_r <= wb_out_data;
+            mem_wstrb_r <= wb_out_strb;
+            write_buffer_addr_r <= wb_out_address;
+            data_cache_hit_q <= 1'b0;
+            if (mem_can_issue) begin
+                mem_op_pending <= 1'b1;
+                mem_op_is_write_buffer_r <= 1'b1;
+                wb_issue_valid <= 1'b0;
+            end else begin
+                wb_issue_valid <= 1'b1;
+            end
+        end else if (wb_issue_valid && mem_can_issue) begin
+            mem_op_pending <= 1'b1;
+            mem_op_is_write_buffer_r <= 1'b1;
+            wb_issue_valid <= 1'b0;
+            data_cache_hit_q <= 1'b0;
+        end else if (data_cache_hit_comb) begin
             data_cache_hit_q <= 1'b1;
         end else if(load_forward_use) begin
             data_cache_hit_q <= 1'b0;
-        // end else if(data_cache_refill_comb && data_cache_dirty_writeback_enabled && !fetch_wait && !mem_busy) begin // Dirty Writeback Missed -> Writeback
-        //     // For now, writeback will be done sequentially before refill,
-        //     // Future work: Build Store Buffer to handle multiple writebacks in parallel.
-        //     data_cache_hit_q <= 1'b0;
-        //     mem_op_pending <= 1'b1;
-        //     mem_data_out_r <= data_cache_dirty_writeback_data;
-        //     mem_wstrb_r <= data_cache_dirty_writeback_strb;
-        //     data_cache_writeback_pending_r <= 1'b1;
-         end else if(((data_cache_refill_comb) || (data_cache_writeback_pending_r && mem_op_pending && mem_ready)) && !fetch_wait && !mem_busy) begin // Cache Missed / Writback Complete -> Refill
+        end else if(drain_wb) begin
+            data_cache_hit_q <= 1'b0;
+        end else if(data_cache_refill_comb && !fetch_wait && !mem_busy && !wb_issue_valid) begin // Cache Missed / Writback   Complete -> Refill
             data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b1;
-            data_cache_writeback_pending_r <= 1'b0;
+            mem_op_is_write_buffer_r <= 1'b0;
         end else if (uncached_req) begin
             // PMA uncached: launch a direct AXI load/store. No cache fill on completion.
             data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b1;
             mem_op_is_uncached_r <= 1'b1;
+            mem_op_is_write_buffer_r <= 1'b0;
             mem_data_out_r <= uncached_store_data;
             mem_wstrb_r <= ex_mem_is_store ? data_cache_strb : 4'b1111;
         end else if (mem_op_pending && mem_ready) begin
             data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b0;
             mem_op_is_uncached_r <= 1'b0;
+            mem_op_is_write_buffer_r <= 1'b0;
         end else begin
             data_cache_hit_q <= 1'b0;
         end
@@ -1409,9 +1463,12 @@ always @* begin
             // PMA uncached load/store: route directly to AXI.
             mem_wen_comb = ex_mem_is_store;
             mem_addr = ex_mem_alu_result & ~32'b11;
+        end else if (mem_op_is_write_buffer_r) begin
+            mem_wen_comb = 1'b1;
+            mem_addr = write_buffer_addr_r;
         end else begin
-            mem_wen_comb = data_cache_dirty_writeback_enabled;
-            mem_addr = data_cache_dirty_writeback_enabled ? data_cache_dirty_writeback_addr : ex_mem_alu_result;
+            mem_wen_comb = 1'b0;
+            mem_addr = ex_mem_alu_result;
         end
     end else if (fetch_wait && !mem_ready) begin
         mem_req_comb = 1'b1;
