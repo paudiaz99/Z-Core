@@ -251,6 +251,8 @@ wire instr_cache_valid;
 wire instr_cache_cache_hit;
 wire instr_cache_cache_miss;
 
+wire cache_hit_q  = pc_q_valid && instr_cache_cache_hit;
+
 z_core_instr_cache#(
     .DATA_WIDTH(DATA_WIDTH),
     .ADDR_WIDTH(ADDR_WIDTH),
@@ -916,7 +918,6 @@ wire [31:0] flush_target = trap_enter_r  ? csr_mtvec :
                            branch_taken  ? branch_target :
                                            (id_ex_pc + 4);
 
-wire cache_hit_q  = pc_q_valid && instr_cache_cache_hit;
 assign cache_miss_q = pc_q_valid && instr_cache_cache_miss;
 
 
