@@ -75,6 +75,12 @@ module z_core_control_u_tb;
     integer wb_max_occupancy = 0;
     reg     wb_mon_clear = 1'b0;
 
+    // FENCE monitors (Tests 59+)
+    localparam [31:0] FENCE_MARKER_IR = 32'h05a00a13; // ADDI x20, x0, 0x5A
+    integer fence_stall_cycles = 0;
+    integer fence_marker_wb_count = -1;
+    reg     fence_marker_seen = 1'b0;
+
 
     // Interconnect Parameters
     // Interconnect Parameters
@@ -428,7 +434,16 @@ module z_core_control_u_tb;
             drain_during_pred_count <= 0;
             wb_axi_complete_count <= 0;
             wb_max_occupancy <= 0;
+            fence_stall_cycles <= 0;
+            fence_marker_wb_count <= -1;
+            fence_marker_seen <= 1'b0;
         end else begin
+            if (uut.fence_stall)
+                fence_stall_cycles <= fence_stall_cycles + 1;
+            if (uut.id_ex_valid && uut.id_ex_ir == FENCE_MARKER_IR && !fence_marker_seen) begin
+                fence_marker_seen <= 1'b1;
+                fence_marker_wb_count <= uut.write_buffer_inst.elem_count;
+            end
             if (uut.write_buffer_inst.elem_count > wb_max_occupancy)
                 wb_max_occupancy <= uut.write_buffer_inst.elem_count;
             if (uut.drain_wb) begin
@@ -2617,6 +2632,38 @@ module z_core_control_u_tb;
         dump_wb_state("Test 58");
         check_mem_range_conflict(6, "values preserved across fetch misses");
         check_wb_count_at_most(4, "no extra evictions from the jump");
+
+        // ==========================================
+        // Test 59: FENCE ordering - 10 conflict stores fill the WB, then a
+        // FENCE. The instruction right after it must not enter EX until the
+        // buffer has fully drained to memory.
+        // ==========================================
+        load_test59_fence_drains_wb();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 59 Results: FENCE Drains Write Buffer ===");
+        dump_wb_state("Test 59");
+        check_int(fence_marker_seen, 1, "instruction after FENCE reached EX");
+        check_int(fence_marker_wb_count, 0, "WB empty when FENCE retires");
+        check_int((fence_stall_cycles > 0), 1, "FENCE stalled to drain");
+        check_wb_count(0, "WB drained");
+        check_mem_range_conflict(10, "all 10 stores preserved");
+
+        // ==========================================
+        // Test 60: FENCE with an empty write buffer costs nothing
+        // ==========================================
+        load_test60_fence_empty_no_stall();
+        reset_cpu();
+        reset_wb_monitors();
+        #8000;
+
+        $display("\n=== Test 60 Results: FENCE With Empty WB ===");
+        dump_wb_state("Test 60");
+        check_int(fence_stall_cycles, 0, "FENCE did not stall (single cycle)");
+        check_reg(10, 7, "ADDI before FENCE");
+        check_reg(11, 10, "ADDI after FENCE (no hang)");
 
         // ==========================================
         // Final Summary
@@ -5505,6 +5552,33 @@ module z_core_control_u_tb;
             for (i = 128; i < 140; i = i + 1)
                 u_axil_ram.mem[i] = 32'h00000013;
             u_axil_ram.mem[128] = 32'h0000006f; // halt at 0x200
+        end
+    endtask
+
+    // Test 59: 10 conflict stores (fills WB) then FENCE + marker
+    task load_test59_fence_drains_wb;
+        integer next;
+        begin
+            $display("\n--- Loading Test 59: FENCE drains write buffer ---");
+            load_conflict_stores(10);
+            next = 2 + 10 * 3;
+            u_axil_ram.mem[next]     = 32'h0ff0000f;        // FENCE iorw, iorw
+            u_axil_ram.mem[next + 1] = FENCE_MARKER_IR;     // ADDI x20, x0, 0x5A
+            u_axil_ram.mem[next + 2] = 32'h0000006f;        // JAL x0, 0
+        end
+    endtask
+
+    // Test 60: FENCE with an empty write buffer must not stall
+    task load_test60_fence_empty_no_stall;
+        integer i;
+        begin
+            $display("\n--- Loading Test 60: FENCE with empty WB ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0] = 32'h00700513; // ADDI x10, x0, 7
+            u_axil_ram.mem[1] = 32'h0ff0000f; // FENCE iorw, iorw
+            u_axil_ram.mem[2] = 32'h00350593; // ADDI x11, x10, 3
+            u_axil_ram.mem[3] = 32'h0000006f; // JAL x0, 0
         end
     endtask
 
