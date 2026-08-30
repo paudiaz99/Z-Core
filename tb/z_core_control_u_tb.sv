@@ -65,6 +65,16 @@ module z_core_control_u_tb;
     reg [63:0] total_internal_memory_writes = 0;
     reg [63:0] total_internal_memory_reads = 0;
 
+    // Write-buffer drain monitors (Tests 50+)
+    integer drain_fire_count = 0;
+    integer drain_during_flush_count = 0;
+    integer drain_during_div_count = 0;
+    integer drain_during_full_count = 0;
+    integer drain_during_pred_count = 0;
+    integer wb_axi_complete_count = 0;
+    integer wb_max_occupancy = 0;
+    reg     wb_mon_clear = 1'b0;
+
 
     // Interconnect Parameters
     // Interconnect Parameters
@@ -409,6 +419,34 @@ module z_core_control_u_tb;
         end
     end
 
+    always @(posedge clk) begin
+        if (!rstn || wb_mon_clear) begin
+            drain_fire_count <= 0;
+            drain_during_flush_count <= 0;
+            drain_during_div_count <= 0;
+            drain_during_full_count <= 0;
+            drain_during_pred_count <= 0;
+            wb_axi_complete_count <= 0;
+            wb_max_occupancy <= 0;
+        end else begin
+            if (uut.write_buffer_inst.elem_count > wb_max_occupancy)
+                wb_max_occupancy <= uut.write_buffer_inst.elem_count;
+            if (uut.drain_wb) begin
+                drain_fire_count <= drain_fire_count + 1;
+                if (uut.prediction_flush)
+                    drain_during_flush_count <= drain_during_flush_count + 1;
+                if (uut.div_stall)
+                    drain_during_div_count <= drain_during_div_count + 1;
+                if (uut.full_out)
+                    drain_during_full_count <= drain_during_full_count + 1;
+                if (uut.drain_prediction && !uut.div_stall && !uut.full_out)
+                    drain_during_pred_count <= drain_during_pred_count + 1;
+            end
+            if (uut.mem_op_is_write_buffer_r && uut.mem_op_pending && uut.mem_ready)
+                wb_axi_complete_count <= wb_axi_complete_count + 1;
+        end
+    end
+
     // ==========================================
     //              Test Tasks
     // ==========================================
@@ -570,6 +608,109 @@ module z_core_control_u_tb;
                 $display("  [FAIL] %0s: ram[0x%04h] = %0d (expected %0d)",
                          test_name, addr, actual, expected);
             end
+        end
+    endtask
+
+    task reset_wb_monitors;
+        begin
+            wb_mon_clear = 1'b1;
+            @(posedge clk);
+            wb_mon_clear = 1'b0;
+        end
+    endtask
+
+    task dump_wb_state;
+        input [255:0] tag;
+        integer k;
+        integer idx;
+        begin
+            $display("  [WB-DUMP] %0s: count=%0d full=%0b empty=%0b hit_pred=%0d drain_pred=%0b div_stall=%0b drain_wb=%0b",
+                     tag,
+                     uut.write_buffer_inst.elem_count,
+                     uut.full_out,
+                     uut.empty_out,
+                     uut.instruction_hit_pred,
+                     uut.drain_prediction,
+                     uut.div_stall,
+                     uut.drain_wb);
+            $display("  [WB-DUMP] drain_fire=%0d during_full=%0d during_div=%0d during_pred=%0d during_flush=%0d axi_wb_wr=%0d max_occ=%0d",
+                     drain_fire_count,
+                     drain_during_full_count,
+                     drain_during_div_count,
+                     drain_during_pred_count,
+                     drain_during_flush_count,
+                     wb_axi_complete_count,
+                     wb_max_occupancy);
+            for (k = 0; k < 8; k = k + 1) begin
+                idx = (uut.write_buffer_inst.read_pointer + k) % 8;
+                if (k < uut.write_buffer_inst.elem_count)
+                    $display("    slot[%0d] addr=0x%08h data=%0d valid=%0b",
+                             k,
+                             uut.write_buffer_inst.write_buffer_address[idx],
+                             uut.write_buffer_inst.write_buffer_data[idx],
+                             uut.write_buffer_inst.write_buffer_valid[idx]);
+            end
+        end
+    endtask
+
+    task check_int;
+        input integer actual;
+        input integer expected;
+        input [255:0] test_name;
+        begin
+            test_count = test_count + 1;
+            if (actual == expected) begin
+                pass_count = pass_count + 1;
+                $display("  [PASS] %0s: %0d", test_name, actual);
+            end else begin
+                fail_count = fail_count + 1;
+                $display("  [FAIL] %0s: %0d (expected %0d)", test_name, actual, expected);
+            end
+        end
+    endtask
+
+    task check_wb_count;
+        input integer expected;
+        input [255:0] test_name;
+        begin
+            check_int(uut.write_buffer_inst.elem_count, expected, test_name);
+        end
+    endtask
+
+    task check_wb_count_at_most;
+        input integer max_allowed;
+        input [255:0] test_name;
+        begin
+            test_count = test_count + 1;
+            if (uut.write_buffer_inst.elem_count <= max_allowed) begin
+                pass_count = pass_count + 1;
+                $display("  [PASS] %0s: count=%0d (<= %0d)",
+                         test_name, uut.write_buffer_inst.elem_count, max_allowed);
+            end else begin
+                fail_count = fail_count + 1;
+                $display("  [FAIL] %0s: count=%0d (expected <= %0d)",
+                         test_name, uut.write_buffer_inst.elem_count, max_allowed);
+            end
+        end
+    endtask
+
+    task check_ram_range_conflict;
+        input integer n_vals;
+        input [255:0] test_name;
+        integer i;
+        begin
+            for (i = 0; i < n_vals; i = i + 1)
+                check_ram(32'h0100 + (i * 32'h400), i + 1, test_name);
+        end
+    endtask
+
+    task check_mem_range_conflict;
+        input integer n_vals;
+        input [255:0] test_name;
+        integer i;
+        begin
+            for (i = 0; i < n_vals; i = i + 1)
+                check_mem(32'h0100 + (i * 32'h400), i + 1, test_name);
         end
     endtask
 
@@ -2300,9 +2441,10 @@ module z_core_control_u_tb;
 
         load_test49_write_buffer_full();
         reset_cpu();
-        #15000;
+        #25000;
 
         $display("\n=== Test 49 Results: Write Buffer Full ===");
+        dump_wb_state("Test 49");
         check_mem(32'h0100,  1, "dirty value preserved");
         check_mem(32'h0500,  2, "dirty value preserved");
         check_mem(32'h0900,  3, "dirty value preserved");
@@ -2313,6 +2455,168 @@ module z_core_control_u_tb;
         check_mem(32'h1D00,  8, "dirty value preserved");
         check_mem(32'h2100,  9, "dirty value preserved");
         check_mem(32'h2500, 10, "dirty value preserved");
+
+        // ==========================================
+        // Test 50: Full buffer -> completely drain
+        // 10 conflict stores fill 8 WB entries + 2 cache lines, then JAL 0
+        // (I$ hit spin). After full_out drains the first entry the rest
+        // must follow via drain_prediction / idle bus.
+        // ==========================================
+        load_test50_wb_full_complete_drain();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 50 Results: Full Buffer -> Complete Drain ===");
+        dump_wb_state("Test 50");
+        check_wb_count(0, "WB empty after complete drain");
+        check_int(wb_max_occupancy, 8, "WB peaked at 8");
+        check_ram(32'h0100, 1, "first full-drain reached RAM");
+        check_mem(32'h0500, 2, "remaining dirty 0x500");
+        check_mem(32'h0900, 3, "remaining dirty 0x900");
+        check_mem(32'h0D00, 4, "remaining dirty 0xD00");
+        check_mem(32'h1100, 5, "remaining dirty 0x1100");
+        check_mem(32'h1500, 6, "remaining dirty 0x1500");
+        check_mem(32'h1900, 7, "remaining dirty 0x1900");
+        check_mem(32'h1D00, 8, "remaining dirty 0x1D00");
+        check_mem(32'h2100, 9, "newest stay in cache");
+        check_mem(32'h2500, 10, "newest stay in cache");
+
+        // ==========================================
+        // Test 51: Drain on division stall (best-case window)
+        // 6 conflict stores -> 4 in WB (not full), then DIVU. ~67-cycle
+        // div_stall with no new D$ misses should drain the buffer.
+        // ==========================================
+        load_test51_wb_drain_on_div();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 51 Results: Drain on Division Stall ===");
+        dump_wb_state("Test 51");
+        check_wb_count(0, "WB empty after DIV stall drain");
+        check_int((drain_during_div_count > 0), 1, "at least one drain during div_stall");
+        check_ram(32'h0100, 1, "DIV-window drain 0x100");
+        check_ram(32'h0500, 2, "DIV-window drain 0x500");
+        check_ram(32'h0900, 3, "DIV-window drain 0x900");
+        check_ram(32'h0D00, 4, "DIV-window drain 0xD00");
+        check_mem(32'h1100, 5, "still cached 0x1100");
+        check_mem(32'h1500, 6, "still cached 0x1500");
+        check_reg(12, 14, "DIVU 100/7 = 14");
+
+        // ==========================================
+        // Test 52: Drain on mispredict I$ hit must NOT fire
+        // 6 conflict stores (4 in WB, not full), then a taken loop that
+        // trains the predictor and exits: last BNE is not-taken while
+        // predicted taken, so wrong-path is the loop body (I$ hit).
+        // ==========================================
+        load_test52_wb_no_drain_on_mispredict();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 52 Results: No Drain on Mispredict I$ Hit ===");
+        dump_wb_state("Test 52");
+        check_int(drain_during_flush_count, 0, "drain must not fire on prediction_flush");
+        check_ram(32'h0100, 1, "if drained, 0x100 must reach RAM");
+        check_mem_range_conflict(6, "values preserved");
+
+        // ==========================================
+        // Test 53: Complete drain in a tight I$ hit loop (ideal)
+        // 6 conflict stores (4 in WB, not full so full_out cannot help),
+        // then a 200-iter ADD loop that stays I$ resident.
+        // ==========================================
+        load_test53_wb_drain_hit_loop();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 53 Results: Drain in Tight I$ Hit Loop ===");
+        dump_wb_state("Test 53");
+        check_wb_count(0, "WB empty after I$ hit-loop drain");
+        check_int((drain_during_pred_count > 0), 1, "drain_prediction fired in hit loop");
+        check_ram(32'h0100, 1, "hit-loop drain 0x100");
+        check_ram(32'h0500, 2, "hit-loop drain 0x500");
+        check_ram(32'h0900, 3, "hit-loop drain 0x900");
+        check_ram(32'h0D00, 4, "hit-loop drain 0xD00");
+        check_mem(32'h1100, 5, "still cached 0x1100");
+        check_mem(32'h1500, 6, "still cached 0x1500");
+
+        // ==========================================
+        // Test 54: Stress Full->Drain->Add->Full->Drain
+        // 24 conflict stores in a software loop. Occupancy must stay
+        // <= 8 and every store value must still be findable.
+        // ==========================================
+        load_test54_wb_stress_full_drain_add();
+        reset_cpu();
+        reset_wb_monitors();
+        #40000;
+
+        $display("\n=== Test 54 Results: Stress Full-Drain-Add ===");
+        dump_wb_state("Test 54");
+        check_int((wb_max_occupancy <= 8), 1, "occupancy never exceeded 8");
+        check_int((wb_axi_complete_count > 0), 1, "at least one WB AXI write completed");
+        check_mem_range_conflict(24, "all 24 stores preserved");
+
+        // ==========================================
+        // Test 55: Full WB in a loop of memory ops (WB prio vs refill)
+        // Conflict stores interleaved with cold loads. When WB is full
+        // drain must win the bus over the next miss refill.
+        // ==========================================
+        load_test55_wb_prio_over_memops();
+        reset_cpu();
+        reset_wb_monitors();
+        #40000;
+
+        $display("\n=== Test 55 Results: WB Priority vs Memory Ops ===");
+        dump_wb_state("Test 55");
+        check_int((wb_max_occupancy <= 8), 1, "occupancy never exceeded 8");
+        check_int((drain_during_full_count > 0) || (drain_during_pred_count > 0), 1, "drained amid mem ops (full or pred)");
+        check_mem_range_conflict(12, "all 12 stores preserved");
+
+        // ==========================================
+        // Test 56: Empty WB + DIV must not hang (drain gated by empty)
+        // ==========================================
+        load_test56_wb_empty_div_nohang();
+        reset_cpu();
+        reset_wb_monitors();
+        #8000;
+
+        $display("\n=== Test 56 Results: Empty WB + DIV ===");
+        dump_wb_state("Test 56");
+        check_wb_count(0, "WB stayed empty");
+        check_int(drain_fire_count, 0, "no drain while empty");
+        check_reg(12, 14, "DIVU 100/7 = 14 (no hang)");
+
+        // ==========================================
+        // Test 57: Load after fill — forward from WB / cache
+        // 10 conflict stores then LW of oldest (WB or RAM) and newest (cache)
+        // ==========================================
+        load_test57_wb_load_after_fill();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 57 Results: Load After Fill ===");
+        dump_wb_state("Test 57");
+        check_reg(10, 1, "LW oldest evicted line (forward or RAM)");
+        check_reg(11, 10, "LW newest cached line");
+        check_mem_range_conflict(10, "all 10 stores preserved");
+
+        // ==========================================
+        // Test 58: Jump to cold I$ after fill — fetch_wait vs drain
+        // 6 stores (4 in WB), JAL to 0x200. I$ misses steal the bus;
+        // drain is allowed only in gaps. Values must not be lost.
+        // ==========================================
+        load_test58_wb_drain_vs_fetch_miss();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 58 Results: Drain vs Fetch Miss ===");
+        dump_wb_state("Test 58");
+        check_mem_range_conflict(6, "values preserved across fetch misses");
+        check_wb_count_at_most(4, "no extra evictions from the jump");
 
         // ==========================================
         // Final Summary
@@ -5029,17 +5333,178 @@ module z_core_control_u_tb;
 
     task load_test49_write_buffer_full;
         integer i;
+        integer next;
         begin
             $display("\n--- Loading Test 49: Write Buffer Full ---");
-            for (i = 0; i < 96; i = i + 1) u_axil_ram.mem[i] = 32'h00000013;
-            u_axil_ram.mem[0] = 32'h00100113;
-            u_axil_ram.mem[1] = 32'h10000313;
-            for (i = 0; i < 11; i = i + 1) begin
-                u_axil_ram.mem[2 + i * 3] = 32'h00232023;
-                u_axil_ram.mem[3 + i * 3] = 32'h00110113;
-                u_axil_ram.mem[4 + i * 3] = 32'h40030313;
+            load_conflict_stores(11);
+            for (i = 0; i < 16; i = i + 1)
+                u_axil_ram.mem[(32'h0100 + (i * 32'h400)) >> 2] = 32'h0;
+            next = 2 + 11 * 3;
+            u_axil_ram.mem[next]     = 32'h00000013;
+            u_axil_ram.mem[next + 1] = 32'h00000013;
+            u_axil_ram.mem[next + 2] = 32'h00000013;
+            u_axil_ram.mem[next + 3] = 32'h00000013;
+            u_axil_ram.mem[next + 4] = 32'h0000006f;
+        end
+    endtask
+
+    task load_conflict_stores;
+        input integer n_stores;
+        integer i;
+        begin
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0] = 32'h00100113; // ADDI x2, x0, 1
+            u_axil_ram.mem[1] = 32'h10000313; // ADDI x6, x0, 0x100
+            for (i = 0; i < n_stores; i = i + 1) begin
+                u_axil_ram.mem[2 + i * 3] = 32'h00232023; // SW x2, 0(x6)
+                u_axil_ram.mem[3 + i * 3] = 32'h00110113; // ADDI x2, x2, 1
+                u_axil_ram.mem[4 + i * 3] = 32'h40030313; // ADDI x6, x6, 0x400
             end
-            u_axil_ram.mem[35] = 32'h0000006f;
+        end
+    endtask
+
+    // Test 50: 10 conflict stores (WB full) then JAL 0 spin
+    task load_test50_wb_full_complete_drain;
+        integer next;
+        begin
+            $display("\n--- Loading Test 50: Full buffer -> complete drain ---");
+            load_conflict_stores(10);
+            next = 2 + 10 * 3;
+            u_axil_ram.mem[next]     = 32'h00000013;
+            u_axil_ram.mem[next + 1] = 32'h00000013;
+            u_axil_ram.mem[next + 2] = 32'h00000013;
+            u_axil_ram.mem[next + 3] = 32'h00000013;
+            u_axil_ram.mem[next + 4] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 51: 6 conflict stores then DIVU 100/7
+    task load_test51_wb_drain_on_div;
+        integer next;
+        begin
+            $display("\n--- Loading Test 51: Drain on division stall ---");
+            load_conflict_stores(6);
+            next = 2 + 6 * 3;
+            u_axil_ram.mem[next]     = 32'h06400513; // ADDI x10, x0, 100
+            u_axil_ram.mem[next + 1] = 32'h00700593; // ADDI x11, x0, 7
+            u_axil_ram.mem[next + 2] = 32'h02b55633; // DIVU x12, x10, x11
+            u_axil_ram.mem[next + 3] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 52: 6 stores then a countdown loop (last iter mispredicts into I$ hits)
+    task load_test52_wb_no_drain_on_mispredict;
+        integer next;
+        begin
+            $display("\n--- Loading Test 52: No drain on mispredict I$ hit ---");
+            load_conflict_stores(6);
+            next = 2 + 6 * 3;
+            u_axil_ram.mem[next]     = 32'h00800a13; // ADDI x20, x0, 8
+            u_axil_ram.mem[next + 1] = 32'hfffa0a13; // ADDI x20, x20, -1   loop
+            u_axil_ram.mem[next + 2] = 32'hfe0a1ce3; // BNE  x20, x0, -8
+            u_axil_ram.mem[next + 3] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 53: 6 stores then a 200-iter I$ hit loop
+    task load_test53_wb_drain_hit_loop;
+        integer next;
+        begin
+            $display("\n--- Loading Test 53: Drain in tight I$ hit loop ---");
+            load_conflict_stores(6);
+            next = 2 + 6 * 3;
+            u_axil_ram.mem[next]     = 32'h0c800193; // ADDI x3, x0, 200
+            u_axil_ram.mem[next + 1] = 32'h00120213; // ADDI x4, x4, 1     loop
+            u_axil_ram.mem[next + 2] = 32'hfff18193; // ADDI x3, x3, -1
+            u_axil_ram.mem[next + 3] = 32'hfe019ce3; // BNE  x3, x0, -8
+            u_axil_ram.mem[next + 4] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 54: 24 conflict stores in a software loop
+    task load_test54_wb_stress_full_drain_add;
+        integer i;
+        begin
+            $display("\n--- Loading Test 54: Stress Full-Drain-Add ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0] = 32'h00100113; // ADDI x2, x0, 1
+            u_axil_ram.mem[1] = 32'h10000313; // ADDI x6, x0, 0x100
+            u_axil_ram.mem[2] = 32'h01800393; // ADDI x7, x0, 24
+            u_axil_ram.mem[3] = 32'h00232023; // SW   x2, 0(x6)
+            u_axil_ram.mem[4] = 32'h00110113; // ADDI x2, x2, 1
+            u_axil_ram.mem[5] = 32'h40030313; // ADDI x6, x6, 0x400
+            u_axil_ram.mem[6] = 32'hfff38393; // ADDI x7, x7, -1
+            u_axil_ram.mem[7] = 32'hfe0398e3; // BNE  x7, x0, -16
+            u_axil_ram.mem[8] = 32'h0000006f; // JAL  x0, 0
+        end
+    endtask
+
+    // Test 55: store miss + load miss loop (12 iters)
+    task load_test55_wb_prio_over_memops;
+        integer i;
+        begin
+            $display("\n--- Loading Test 55: WB priority vs memory ops ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0] = 32'h00100113; // ADDI x2, x0, 1
+            u_axil_ram.mem[1] = 32'h10000313; // ADDI x6, x0, 0x100
+            u_axil_ram.mem[2] = 32'h20400413; // ADDI x8, x0, 0x204  cold load base
+            u_axil_ram.mem[3] = 32'h00c00393; // ADDI x7, x0, 12
+            u_axil_ram.mem[4] = 32'h00232023; // SW   x2, 0(x6)
+            u_axil_ram.mem[5] = 32'h00042583; // LW   x11, 0(x8)
+            u_axil_ram.mem[6] = 32'h00110113; // ADDI x2, x2, 1
+            u_axil_ram.mem[7] = 32'h40030313; // ADDI x6, x6, 0x400
+            u_axil_ram.mem[8] = 32'h00440413; // ADDI x8, x8, 4
+            u_axil_ram.mem[9] = 32'hfff38393; // ADDI x7, x7, -1
+            u_axil_ram.mem[10] = 32'hfe0394e3; // BNE  x7, x0, -24
+            u_axil_ram.mem[11] = 32'h0000006f; // JAL  x0, 0
+        end
+    endtask
+
+    // Test 56: DIV with empty write buffer
+    task load_test56_wb_empty_div_nohang;
+        integer i;
+        begin
+            $display("\n--- Loading Test 56: Empty WB + DIV ---");
+            for (i = 0; i < 32; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0] = 32'h06400513; // ADDI x10, x0, 100
+            u_axil_ram.mem[1] = 32'h00700593; // ADDI x11, x0, 7
+            u_axil_ram.mem[2] = 32'h02b55633; // DIVU x12, x10, x11
+            u_axil_ram.mem[3] = 32'h0000006f; // JAL  x0, 0
+        end
+    endtask
+
+    // Test 57: 10 conflict stores then LW oldest + newest
+    task load_test57_wb_load_after_fill;
+        integer next;
+        begin
+            $display("\n--- Loading Test 57: Load after fill ---");
+            load_conflict_stores(10);
+            next = 2 + 10 * 3;
+            u_axil_ram.mem[next]     = 32'h10000413; // ADDI x8, x0, 0x100
+            u_axil_ram.mem[next + 1] = 32'h00042503; // LW   x10, 0(x8)
+            u_axil_ram.mem[next + 2] = 32'h000027b7; // LUI  x15, 2
+            u_axil_ram.mem[next + 3] = 32'h50078793; // ADDI x15, x15, 0x500  -> 0x2500
+            u_axil_ram.mem[next + 4] = 32'h0007a583; // LW   x11, 0(x15)
+            u_axil_ram.mem[next + 5] = 32'h0000006f; // JAL  x0, 0
+        end
+    endtask
+
+    // Test 58: 6 stores then JAL to cold I$ at 0x200
+    task load_test58_wb_drain_vs_fetch_miss;
+        integer next;
+        integer i;
+        begin
+            $display("\n--- Loading Test 58: Drain vs fetch miss ---");
+            load_conflict_stores(6);
+            next = 2 + 6 * 3; // 20, PC = 0x50
+            u_axil_ram.mem[next] = 32'h1b00006f; // JAL x0, +0x1B0 -> 0x200
+            for (i = 128; i < 140; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[128] = 32'h0000006f; // halt at 0x200
         end
     endtask
 

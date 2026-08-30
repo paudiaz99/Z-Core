@@ -164,14 +164,14 @@ always @(posedge clk) begin
                     data_0[index_addr_q] <= (data_0[index_addr_q] & ~mask) | (data_in & mask);
                     tags_0[index_addr_q] <= tag_addr_q;
                     valid_bits_0[index_addr_q] <= 1'b1;
-                    dirty_bits_0[index_addr_q] <= 1'b0;
+                    dirty_bits_0[index_addr_q] <= 1'b1;
                     lru_bits_0[index_addr_q] <= 1'b0;
                     lru_bits_1[index_addr_q] <= 1'b1;
                 end else begin
                     data_1[index_addr_q] <= (data_1[index_addr_q] & ~mask) | (data_in & mask);
                     tags_1[index_addr_q] <= tag_addr_q;
                     valid_bits_1[index_addr_q] <= 1'b1;
-                    dirty_bits_1[index_addr_q] <= 1'b0;
+                    dirty_bits_1[index_addr_q] <= 1'b1;
                     lru_bits_1[index_addr_q] <= 1'b0;
                     lru_bits_0[index_addr_q] <= 1'b1;
                 end
@@ -197,17 +197,17 @@ always @(posedge clk) begin
             dirty_writeback_strb <= 4'b1111;
             if(write_buffer_forward) begin
                 if(!set_to_write_on_miss) begin
-                    data_0[index_addr_q] <= (data_in & ~mask);
+                    data_0[index_addr_q] <= (data_0[index_addr_q] & ~mask) | (data_in & mask);
                     tags_0[index_addr_q] <= tag_addr_q;
                     valid_bits_0[index_addr_q] <= 1'b1;
-                    dirty_bits_0[index_addr_q] <= 1'b0;
+                    dirty_bits_0[index_addr_q] <= 1'b1;
                     lru_bits_0[index_addr_q] <= 1'b0;
                     lru_bits_1[index_addr_q] <= 1'b1;
                 end else begin
-                    data_1[index_addr_q] <= (data_in & ~mask);
+                    data_1[index_addr_q] <= (data_1[index_addr_q] & ~mask) | (data_in & mask);
                     tags_1[index_addr_q] <= tag_addr_q;
                     valid_bits_1[index_addr_q] <= 1'b1;
-                    dirty_bits_1[index_addr_q] <= 1'b0;
+                    dirty_bits_1[index_addr_q] <= 1'b1;
                     lru_bits_1[index_addr_q] <= 1'b0;
                     lru_bits_0[index_addr_q] <= 1'b1;
                 end
