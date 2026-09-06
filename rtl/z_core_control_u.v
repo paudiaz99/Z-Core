@@ -297,11 +297,13 @@ wire load_forward_valid_out;
 wire [STRB_WIDTH-1:0] load_forward_strb_out;
 wire full_out;
 wire empty_out;
-wire load_forward_use = load_forward_valid_out && !data_cache_cache_hit && !full_out;
+wire buffer_address_pending;
+wire load_forward_use = ex_mem_is_load && load_forward_valid_out && !data_cache_cache_hit && !full_out;
+wire store_buffer_hazard = ex_mem_is_store && buffer_address_pending && !data_cache_cache_hit;
 
 assign data_cache_wen = ex_mem_is_store || load_forward_use;
 assign data_cache_cs = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
-                       && !mem_op_pending && !data_uncacheable_mem;
+                       && (!mem_op_pending || mem_op_is_write_buffer_r) && !data_uncacheable_mem;
 assign data_cache_addr = ex_result & ~32'b11;
 assign data_cache_refill_complete = mem_op_pending && mem_ready && data_cache_request_refill
                                     && !mem_op_is_write_buffer_r && !mem_op_is_uncached_r;
@@ -318,7 +320,12 @@ z_core_data_cache#(
     .refill_complete(data_cache_refill_complete),
     .addr(data_cache_addr),
     .data_in(load_forward_use ? load_forward_out : data_cache_data_in),
-    .strb(load_forward_use ? load_forward_strb_out : data_cache_strb),
+    // Loads must refill the whole word: data_cache_strb carries the access
+    // width, and masking a refill with it would leave the untouched bytes
+    // of the line zeroed. The load result is byte-selected downstream, so
+    // the cache never needs a narrowed strobe for reads.
+    .strb(load_forward_use ? load_forward_strb_out
+                           : (ex_mem_is_store ? data_cache_strb : 4'b1111)),
     .pipeline_enable((id_ex_valid && (id_ex_is_load || id_ex_is_store) && !ex_stall)),
     .write_buffer_forward(load_forward_use),
     .write_buffer_full(full_out),
@@ -580,7 +587,8 @@ z_core_div_unit div_unit (
 //              DATA FORWARDING
 // ##################################################
 
-wire ex_mem_load_completing = ex_mem_is_load && mem_op_pending && mem_ready;
+wire cpu_mem_complete = mem_op_pending && mem_ready && !mem_op_is_write_buffer_r;
+wire ex_mem_load_completing = ex_mem_valid && ex_mem_is_load && cpu_mem_complete;
 wire ex_mem_load_in_flight  = ex_mem_is_load && !ex_mem_load_completing;
 wire [31:0] ex_mem_fwd_value = ex_mem_load_completing ? mem_load_data : ex_mem_alu_result;
 wire ex_mem_fwd_ok = ex_mem_valid && ex_mem_reg_write && ex_mem_rd != 5'b0
@@ -614,7 +622,19 @@ always @* begin
     endcase
 end
 
-assign mem_wb_fwd_result = data_cache_hit_q ? cache_load_result : (load_forward_use ? load_forward_out : mem_wb_result);
+wire [31:0] load_forward_shifted = load_forward_out >> {ex_mem_alu_result[1:0], 3'b000};
+reg [31:0] load_forward_result;
+always @* begin
+    case (ex_mem_funct3)
+        3'b000: load_forward_result = {{24{load_forward_shifted[7]}}, load_forward_shifted[7:0]};
+        3'b001: load_forward_result = {{16{load_forward_shifted[15]}}, load_forward_shifted[15:0]};
+        3'b100: load_forward_result = {24'b0, load_forward_shifted[7:0]};
+        3'b101: load_forward_result = {16'b0, load_forward_shifted[15:0]};
+        default: load_forward_result = load_forward_out;
+    endcase
+end
+
+assign mem_wb_fwd_result = data_cache_hit_q ? cache_load_result : mem_wb_result;
 
 // Forward from EX/MEM or MEM/WB to resolve RAW hazards
 assign fwd_rs1_data =
@@ -637,7 +657,7 @@ wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
      (id_ex_rd == dec_rs2 && dec_rs2 != 5'b0 && (dec_is_r_type || dec_is_store || dec_is_branch)));
 
 // Memory operation in progress - stall whole pipeline  
-wire mem_stall = mem_op_pending && !mem_ready;
+wire mem_stall = mem_op_pending && !mem_op_is_write_buffer_r && !mem_ready;
 
 // System Instruction Detection
 assign dec_is_ecall  = (dec_op == SYSTEM_INST) && (dec_funct3 == 3'b000) && (if_id_ir[31:20] == 12'h000);
@@ -733,10 +753,7 @@ assign inst_cache_miss_pulse = !flush
                             && !fetch_wait
                             && !stall
                             && cache_miss_q
-                            && !mem_busy
-                            && !mem_op_pending
-                            && !(ex_mem_valid &&
-                                 (ex_mem_is_load || ex_mem_is_store));
+                            && inst_fetch_can_issue;
 
 reg instr_cache_cache_hit_r;
 
@@ -880,10 +897,13 @@ always @(posedge clk) begin
 end
 
 wire drain_prediction = instruction_hit_pred[2];
-wire mem_can_issue = !mem_op_pending && !mem_busy && !mem_ready;
-wire drain_wb = (div_stall || full_out || drain_prediction || fence_stall) && !empty_out
+wire mem_can_issue = !mem_op_pending && !fetch_wait && !mem_busy && !mem_ready;
+wire drain_wb = (div_stall || full_out || drain_prediction || fence_stall || store_buffer_hazard) && !empty_out
                 && !mem_op_pending && !fetch_wait && !mem_ready && !wb_out_valid
                 && !wb_issue_valid && !mem_busy && !flush;
+wire inst_fetch_can_issue = !mem_busy && !mem_op_pending && !mem_ready
+                            && !drain_wb && !wb_out_valid && !wb_issue_valid
+                            && !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store));
 
 
 z_core_write_buffer write_buffer_inst(
@@ -894,8 +914,8 @@ z_core_write_buffer write_buffer_inst(
     .write_back_strb(data_cache_dirty_writeback_strb),
     .write_enable(data_cache_dirty_writeback_enabled),
     .read_enable(drain_wb),
-    .load_address(ex_mem_alu_result),
-    .load_check(~mem_op_pending && ~mem_op_is_uncached_r && ex_mem_is_load),
+    .load_address(ex_mem_alu_result & ~32'b11),
+    .load_check(data_cache_cs),
     .wb_out_data(wb_out_data),
     .wb_out_address(wb_out_address),
     .wb_out_strb(wb_out_strb),
@@ -905,7 +925,8 @@ z_core_write_buffer write_buffer_inst(
     .load_forward_out(load_forward_out),
     .load_forward_valid_out(load_forward_valid_out),
     .load_forward_addr_out(load_forward_addr_out),
-    .load_forward_strb_out(load_forward_strb_out)
+    .load_forward_strb_out(load_forward_strb_out),
+    .address_pending_out(buffer_address_pending)
 );
 
 assign fence_stall = if_id_valid && dec_is_fence &&
@@ -1010,8 +1031,7 @@ always @(posedge clk) begin
             pc_q_valid               <= 1'b1;
         end else if (cache_miss_q) begin
             // Miss
-            if (!mem_busy && !mem_op_pending &&
-                !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store))) begin
+            if (inst_fetch_can_issue) begin
                 fetch_wait            <= 1'b1;
                 fetch_pc              <= PC;
                 pc_q_valid            <= 1'b0;
@@ -1238,7 +1258,15 @@ always @* begin
 end
 
 assign data_cache_hit_comb = data_cache_cs && data_cache_cache_hit;
-wire data_cache_refill_comb = (data_cache_cs && !data_cache_cache_hit && data_cache_request_refill) && ~load_forward_use;
+wire data_cache_refill_comb = (data_cache_cs && !data_cache_cache_hit && data_cache_request_refill)
+                             && !load_forward_use && !store_buffer_hazard;
+
+always @(posedge clk) begin
+    if (~rstn)
+        data_cache_hit_q <= 1'b0;
+    else
+        data_cache_hit_q <= data_cache_hit_comb && ex_mem_is_load;
+end
 
 // PMA uncached path: an EX/MEM load/store to a non-cacheable address
 // requests a direct AXI transaction. Mirrors the cache-miss trigger
@@ -1246,7 +1274,7 @@ wire data_cache_refill_comb = (data_cache_cs && !data_cache_cache_hit && data_ca
 // already pending) so the cycle budget matches a current cache miss.
 wire uncached_req = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
                     && data_uncacheable_mem
-                    && !mem_op_pending && !mem_busy && !fetch_wait;
+                    && mem_can_issue;
 
 
 reg [31:0] uncached_store_data;
@@ -1269,13 +1297,11 @@ always @(posedge clk) begin
         write_buffer_addr_r <= {ADDR_WIDTH{1'b0}};
         mem_data_out_r <= 32'b0;
         mem_wstrb_r <= 4'b1111;
-        data_cache_hit_q <= 1'b0;
     end else begin
         if (wb_out_valid) begin
             mem_data_out_r <= wb_out_data;
             mem_wstrb_r <= wb_out_strb;
             write_buffer_addr_r <= wb_out_address;
-            data_cache_hit_q <= 1'b0;
             if (mem_can_issue) begin
                 mem_op_pending <= 1'b1;
                 mem_op_is_write_buffer_r <= 1'b1;
@@ -1287,32 +1313,20 @@ always @(posedge clk) begin
             mem_op_pending <= 1'b1;
             mem_op_is_write_buffer_r <= 1'b1;
             wb_issue_valid <= 1'b0;
-            data_cache_hit_q <= 1'b0;
-        end else if (data_cache_hit_comb) begin
-            data_cache_hit_q <= 1'b1;
-        end else if(load_forward_use) begin
-            data_cache_hit_q <= 1'b0;
-        end else if(drain_wb) begin
-            data_cache_hit_q <= 1'b0;
-        end else if(data_cache_refill_comb && !fetch_wait && !mem_busy && !wb_issue_valid) begin // Cache Missed / Writback   Complete -> Refill
-            data_cache_hit_q <= 1'b0;
+        end else if(data_cache_refill_comb && mem_can_issue && !wb_issue_valid && !drain_wb) begin // Cache Missed / Writback   Complete -> Refill
             mem_op_pending <= 1'b1;
             mem_op_is_write_buffer_r <= 1'b0;
-        end else if (uncached_req) begin
+        end else if (uncached_req && !drain_wb) begin
             // PMA uncached: launch a direct AXI load/store. No cache fill on completion.
-            data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b1;
             mem_op_is_uncached_r <= 1'b1;
             mem_op_is_write_buffer_r <= 1'b0;
             mem_data_out_r <= uncached_store_data;
             mem_wstrb_r <= ex_mem_is_store ? data_cache_strb : 4'b1111;
         end else if (mem_op_pending && mem_ready) begin
-            data_cache_hit_q <= 1'b0;
             mem_op_pending <= 1'b0;
             mem_op_is_uncached_r <= 1'b0;
             mem_op_is_write_buffer_r <= 1'b0;
-        end else begin
-            data_cache_hit_q <= 1'b0;
         end
     end
 end
@@ -1330,7 +1344,7 @@ always @(posedge clk) begin
         mem_wb_retire <= 1'b0;
         mem_wb_funct3 <= 3'b0;
         mem_wb_alu_result_lo <= 2'b0;
-    end else if ((!mem_stall && !ex_stall) || (mem_op_pending && mem_ready) || data_cache_hit_comb) begin
+    end else if ((!mem_stall && !ex_stall) || cpu_mem_complete || data_cache_hit_comb) begin
         // Advance MEM/WB pipeline register when:
         // 1. No stalls (neither memory nor EX stage stalled), OR
         // 2. A memory operation just completed (even if stalled, we take the result)
@@ -1341,7 +1355,9 @@ always @(posedge clk) begin
         mem_wb_funct3 <= ex_mem_funct3;
         mem_wb_alu_result_lo <= ex_mem_alu_result[1:0];
 
-        if ((ex_mem_is_load && mem_op_pending && mem_ready)) begin
+        if (ex_mem_is_load && load_forward_use) begin
+            mem_wb_result <= load_forward_result;
+        end else if (ex_mem_load_completing) begin
             mem_wb_result <= mem_load_data;
         end else begin
             mem_wb_result <= ex_mem_alu_result;

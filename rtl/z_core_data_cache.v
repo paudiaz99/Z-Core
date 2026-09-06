@@ -97,6 +97,7 @@ wire [DATA_WIDTH-1:0] mask = {8{strb[0]}} << 0 | {8{strb[1]}} << 8 | {8{strb[2]}
 
 // Write
 always @(posedge clk) begin
+    dirty_writeback_enabled <= 1'b0;
     if (!rstn) begin
         // Reset logic
         for(int j = 0; j < CACHE_DEPTH; j++) begin
@@ -123,14 +124,14 @@ always @(posedge clk) begin
             data_0[refill_index_q] <= (refill_wen ? data_in & ~mask | refill_buffer_data & mask : data_in & mask);
             tags_0[refill_index_q] <= refill_tag_q;
             valid_bits_0[refill_index_q] <= 1'b1;
-            dirty_bits_0[refill_index_q] <= 1'b1;
+            dirty_bits_0[refill_index_q] <= refill_wen;
             lru_bits_0[refill_index_q] <= 1'b0;
             lru_bits_1[refill_index_q] <= 1'b1;
         end else begin
             data_1[refill_index_q] <= (refill_wen ? data_in & ~mask | refill_buffer_data & mask : data_in & mask);
             tags_1[refill_index_q] <= refill_tag_q;
             valid_bits_1[refill_index_q] <= 1'b1;
-            dirty_bits_1[refill_index_q] <= 1'b1;
+            dirty_bits_1[refill_index_q] <= refill_wen;
             lru_bits_1[refill_index_q] <= 1'b0;
             lru_bits_0[refill_index_q] <= 1'b1;
         end
