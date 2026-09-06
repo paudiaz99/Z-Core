@@ -28,7 +28,8 @@ module z_core_write_buffer#(
     output reg [DATA_WIDTH-1:0] load_forward_out,
     output reg load_forward_valid_out,
     output reg [ADDR_WIDTH-1:0] load_forward_addr_out,
-    output reg [3:0] load_forward_strb_out
+    output reg [3:0] load_forward_strb_out,
+    output reg address_pending_out
 
 );
 
@@ -44,7 +45,7 @@ module z_core_write_buffer#(
     wire empty = elem_count == {$clog2(ENTRIES){1'b0}};
     wire full = elem_count == ENTRIES;
 
-    integer i, j, k;
+    integer i, j, k, m;
 
     wire merge_write = write_buffer_address[tail_pointer] == write_back_addr && write_buffer_valid[tail_pointer];
     wire pop = read_enable && !empty;
@@ -85,7 +86,7 @@ module z_core_write_buffer#(
                         write_buffer_address[tail_pointer] <= write_back_addr;
                         write_buffer_valid[tail_pointer]   <= 1'b1;
                         write_pointer                        <= write_pointer;
-                        elem_count                           <= elem_count;
+                        elem_count                           <= pop ? elem_count - 1'b1 : elem_count;
                     end else begin
                         write_buffer_data[write_pointer]    <= ((empty && read_enable) || (full && ~read_enable)) ? write_buffer_data[write_pointer] : write_back_data;
                         write_buffer_address[write_pointer] <= ((empty && read_enable) || (full && ~read_enable)) ? write_buffer_address[write_pointer] : write_back_addr;
@@ -132,6 +133,18 @@ module z_core_write_buffer#(
                 load_forward_strb_out = 4'b1111;
                 load_forward_valid_out = 1'b1;
             end
+        end
+    end
+
+    always @(*) begin
+        address_pending_out = 1'b0;
+        if (load_check) begin
+            for (m = 0; m < ENTRIES; m = m + 1) begin
+                if (write_buffer_valid[m] && write_buffer_address[m] == load_address)
+                    address_pending_out = 1'b1;
+            end
+            if (write_enable && (!full || merge_write) && write_back_addr == load_address)
+                address_pending_out = 1'b1;
         end
     end
 
