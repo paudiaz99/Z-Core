@@ -205,11 +205,11 @@ module z_core_csr_file #(
     };
 
     // --- misa (Machine ISA) ---
-    // RV32IM + Zicsr: MXL=1 (32-bit), Extensions: I(bit 8) + M(bit 12)
+    // RV32IMA + Zicsr: MXL=1 (32-bit), Extensions: A(bit 0) + I(bit 8) + M(bit 12)
     wire [DATA_WIDTH-1:0] misa_val = {
         2'b01,                  // MXL = 1 (XLEN=32)
         4'b0,                   // Bits 29:26 = 0
-        26'b00_0000_0000_0001_0001_0000_0000  // I(bit 8) + M(bit 12)
+        26'b00_0000_0000_0001_0001_0000_0001  // A(bit 0) + I(bit 8) + M(bit 12)
     };
 
     // --- mie (Machine Interrupt Enable) ---

@@ -24,7 +24,7 @@ SOFTWARE.
 
 // ****************************************************
 //                 Z-Core Control Unit
-//     5-Stage Pipelined RISC-V RV32IMZicsr Processor
+//     5-Stage Pipelined RISC-V RV32IMAZicsr Processor
 // ****************************************************
 
 module z_core_control_u #(
@@ -77,6 +77,7 @@ localparam B_INST      = 7'b1100011;
 localparam JAL_INST    = 7'b1101111;
 localparam LUI_INST    = 7'b0110111;
 localparam AUIPC_INST  = 7'b0010111;
+localparam ATOMIC_INST = 7'b0101111;
 
 // System Instructions
 localparam SYSTEM_INST = 7'b1110011;  // ECALL, EBREAK
@@ -178,6 +179,7 @@ reg [4:0]  id_ex_rs2_addr;
 reg [4:0]  id_ex_alu_op;
 reg [2:0]  id_ex_funct3;
 reg        id_ex_is_load, id_ex_is_store, id_ex_is_branch;
+reg        id_ex_is_lr, id_ex_is_sc, id_ex_is_amo;
 reg        id_ex_is_jal, id_ex_is_jalr, id_ex_is_lui, id_ex_is_auipc, id_ex_is_div;
 reg        id_ex_is_i_alu;
 reg        id_ex_reg_write;
@@ -205,6 +207,8 @@ reg [31:0] ex_mem_rs2_data;
 reg [4:0]  ex_mem_rd;
 reg [2:0]  ex_mem_funct3;
 reg        ex_mem_is_load, ex_mem_is_store;
+reg        ex_mem_is_amo, ex_mem_is_rmw;
+reg [3:0]  ex_mem_amo_op;
 reg        ex_mem_reg_write;
 reg        ex_mem_valid;
 reg        ex_mem_retire;
@@ -237,6 +241,11 @@ wire        data_cache_hit_comb;
 reg         trap_enter_r;
 reg         data_cache_hit_q;
 reg  [31:0] mem_load_data;
+reg         reservation_valid;
+reg  [ADDR_WIDTH-3:0] reservation_addr;
+reg         amo_calc;
+reg  [31:0] amo_rd_q;
+wire        amo_stall;
 
 // ##################################################
 //       INSTRUCTION CACHE (uses z_core_instr_cache)
@@ -304,7 +313,7 @@ wire store_buffer_hazard = ex_mem_is_store && buffer_address_pending && !data_ca
 assign data_cache_wen = ex_mem_is_store || load_forward_use;
 assign data_cache_cs = ex_mem_valid && (ex_mem_is_load || ex_mem_is_store)
                        && (!mem_op_pending || mem_op_is_write_buffer_r) && !data_uncacheable_mem;
-assign data_cache_addr = ex_result & ~32'b11;
+assign data_cache_addr = (amo_calc ? ex_mem_alu_result : ex_result) & ~32'b11;
 assign data_cache_refill_complete = mem_op_pending && mem_ready && data_cache_request_refill
                                     && !mem_op_is_write_buffer_r && !mem_op_is_uncached_r;
 
@@ -326,7 +335,7 @@ z_core_data_cache#(
     // the cache never needs a narrowed strobe for reads.
     .strb(load_forward_use ? load_forward_strb_out
                            : (ex_mem_is_store ? data_cache_strb : 4'b1111)),
-    .pipeline_enable((id_ex_valid && (id_ex_is_load || id_ex_is_store) && !ex_stall)),
+    .pipeline_enable((id_ex_valid && (id_ex_is_load || id_ex_is_store) && !ex_stall) || amo_calc),
     .write_buffer_forward(load_forward_use),
     .write_buffer_full(full_out),
     .data_out(data_cache_data_out),
@@ -466,8 +475,15 @@ z_core_alu_ctrl alu_ctrl (
 
 
 // Control signal decode (from current IF/ID instruction)
-wire dec_is_load   = (dec_op == I_LOAD_INST);
-wire dec_is_store  = (dec_op == S_INST);
+wire [4:0] dec_funct5 = dec_funct7[6:2];
+wire dec_op_atomic = (dec_op == ATOMIC_INST) && (dec_funct3 == 3'b010);
+wire dec_is_lr     = dec_op_atomic && (dec_funct5 == 5'b00010) && (dec_rs2 == 5'b0);
+wire dec_is_sc     = dec_op_atomic && (dec_funct5 == 5'b00011);
+wire dec_is_amo    = dec_op_atomic && ((dec_funct5[1:0] == 2'b00) || (dec_funct5 == 5'b00001));
+wire dec_is_atomic = dec_is_lr | dec_is_sc | dec_is_amo;
+
+wire dec_is_load   = (dec_op == I_LOAD_INST) | dec_is_lr;
+wire dec_is_store  = (dec_op == S_INST) | dec_is_sc | dec_is_amo;
 wire dec_is_branch = (dec_op == B_INST);
 wire dec_is_jal    = (dec_op == JAL_INST);
 wire dec_is_jalr   = (dec_op == JALR_INST);
@@ -493,10 +509,11 @@ wire dec_is_iaf = if_id_valid && pma_fetch_dec_access_fault;
 
 wire dec_reg_write = dec_is_r_type | dec_is_i_alu | dec_is_load | 
                      dec_is_jal | dec_is_jalr | dec_is_lui | dec_is_auipc |
-                     dec_is_csr;
+                     dec_is_csr | dec_is_atomic;
 
 // Immediate mux
-wire [31:0] dec_imm = dec_is_i_alu | dec_is_load | dec_is_jalr ? dec_Iimm :
+wire [31:0] dec_imm = dec_is_atomic ? 32'b0 :
+                      dec_is_i_alu | dec_is_load | dec_is_jalr ? dec_Iimm :
                       dec_is_store  ? dec_Simm :
                       dec_is_branch ? dec_Bimm :
                       dec_is_jal    ? dec_Jimm :
@@ -652,7 +669,7 @@ assign fwd_rs2_data =
 // ##################################################
 
 // Load-use hazard: need to stall one cycle
-wire load_use_hazard = id_ex_valid && id_ex_is_load && if_id_valid &&
+wire load_use_hazard = id_ex_valid && (id_ex_is_load || id_ex_is_sc || id_ex_is_amo) && if_id_valid &&
     ((id_ex_rd == dec_rs1 && dec_rs1 != 5'b0) ||
      (id_ex_rd == dec_rs2 && dec_rs2 != 5'b0 && (dec_is_r_type || dec_is_store || dec_is_branch)));
 
@@ -734,7 +751,7 @@ reg  perf_mem_access_counted;
 always @(posedge clk) begin
     if (~rstn)
         perf_mem_access_counted <= 1'b0;
-    else if (!mem_stall && !ex_stall)
+    else if ((!mem_stall && !ex_stall) || amo_calc)
         perf_mem_access_counted <= 1'b0;
     else if (perf_mem_access)
         perf_mem_access_counted <= 1'b1;
@@ -747,13 +764,6 @@ assign mem_uncached_pulse = perf_mem_access_first && data_uncacheable_mem;
 
 
 assign inst_fetch_pulse = fetch_wait && mem_ready && !flush;
-
-
-assign inst_cache_miss_pulse = !flush
-                            && !fetch_wait
-                            && !stall
-                            && cache_miss_q
-                            && inst_fetch_can_issue;
 
 reg instr_cache_cache_hit_r;
 
@@ -815,7 +825,7 @@ assign ex_stall = mem_stall ||
                 (ex_mem_valid && (ex_mem_is_load || ex_mem_is_store) && 
                 (!data_cache_hit_comb && !load_forward_use) &&
                 (!mem_op_pending || mem_busy || mem_op_is_write_buffer_r)) ||
-                div_stall;
+                div_stall || amo_stall;
 
 // Stall the pipeline (note: fetch_wait does NOT stall EX/MEM/WB stages)
 assign stall = load_use_hazard || fence_stall || ex_stall;
@@ -870,6 +880,69 @@ assign jump_target = id_ex_is_jalr ? jalr_target : branch_target;
 
 
 // ##################################################
+//                  ATOMIC UNIT
+// ##################################################
+
+wire ex_kill = id_ex_is_ecall || id_ex_is_ebreak || id_ex_is_illegal || id_ex_is_iaf || trap_enter_r
+            || misalign_load || misalign_store || misalign_branch || misalign_jump
+            || load_access_fault || store_access_fault;
+
+wire ex_commit = id_ex_valid && !ex_kill && !mem_stall && !ex_stall;
+
+wire sc_pass = reservation_valid && (reservation_addr == fwd_rs1_data[ADDR_WIDTH-1:2]);
+
+always @(posedge clk) begin
+    if (~rstn || trap_enter_r)
+        reservation_valid <= 1'b0;
+    else if (ex_commit && (id_ex_is_lr || id_ex_is_sc))
+        reservation_valid <= id_ex_is_lr;
+end
+
+always @(posedge clk) begin
+    if (ex_commit && id_ex_is_lr)
+        reservation_addr <= fwd_rs1_data[ADDR_WIDTH-1:2];
+end
+
+wire amo_load_done = ex_mem_valid && ex_mem_is_amo && ex_mem_is_load
+                  && (data_cache_hit_comb || load_forward_use || cpu_mem_complete);
+
+assign amo_stall = ex_mem_valid && ex_mem_is_amo && !ex_mem_is_store;
+
+wire [31:0] amo_a = data_cache_hit_q ? data_cache_data_out : amo_rd_q;
+wire [31:0] amo_b = ex_mem_rs2_data;
+wire        amo_signed = ~ex_mem_amo_op[1];
+wire        amo_lt = $signed({amo_signed & amo_a[31], amo_a}) < $signed({amo_signed & amo_b[31], amo_b});
+
+reg [31:0] amo_result;
+always @* begin
+    casez (ex_mem_amo_op)
+        4'b1???: amo_result = amo_b;
+        4'b0000: amo_result = amo_a + amo_b;
+        4'b0001: amo_result = amo_a ^ amo_b;
+        4'b0010: amo_result = amo_a | amo_b;
+        4'b0011: amo_result = amo_a & amo_b;
+        default: amo_result = (amo_lt ^ ex_mem_amo_op[0]) ? amo_a : amo_b;
+    endcase
+end
+
+always @(posedge clk) begin
+    if (~rstn)
+        amo_calc <= 1'b0;
+    else
+        amo_calc <= amo_load_done;
+end
+
+always @(posedge clk) begin
+    if (amo_load_done)
+        amo_rd_q <= load_forward_use ? load_forward_out : mem_rdata;
+    else if (amo_calc)
+        amo_rd_q <= amo_a;
+    else if (ex_commit && id_ex_is_sc)
+        amo_rd_q <= {31'b0, !sc_pass};
+end
+
+
+// ##################################################
 //                  WRITE BUFFER
 // ##################################################
 
@@ -903,7 +976,13 @@ wire drain_wb = (div_stall || full_out || drain_prediction || fence_stall || sto
                 && !wb_issue_valid && !mem_busy && !flush;
 wire inst_fetch_can_issue = !mem_busy && !mem_op_pending && !mem_ready
                             && !drain_wb && !wb_out_valid && !wb_issue_valid
-                            && !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store));
+                            && !(ex_mem_valid && (ex_mem_is_load || ex_mem_is_store || ex_mem_is_amo));
+
+assign inst_cache_miss_pulse = !flush
+                            && !fetch_wait
+                            && !stall
+                            && cache_miss_q
+                            && inst_fetch_can_issue;
 
 
 z_core_write_buffer write_buffer_inst(
@@ -1073,6 +1152,9 @@ always @(posedge clk) begin
         id_ex_is_load <= 1'b0;
         id_ex_is_store <= 1'b0;
         id_ex_is_branch <= 1'b0;
+        id_ex_is_lr <= 1'b0;
+        id_ex_is_sc <= 1'b0;
+        id_ex_is_amo <= 1'b0;
         id_ex_is_jal <= 1'b0;
         id_ex_is_jalr <= 1'b0;
         id_ex_is_lui <= 1'b0;
@@ -1104,6 +1186,9 @@ always @(posedge clk) begin
         id_ex_is_load <= 1'b0;
         id_ex_is_store <= 1'b0;
         id_ex_is_branch <= 1'b0;
+        id_ex_is_lr <= 1'b0;
+        id_ex_is_sc <= 1'b0;
+        id_ex_is_amo <= 1'b0;
         id_ex_is_jal <= 1'b0;
         id_ex_is_jalr <= 1'b0;
         id_ex_is_lui <= 1'b0;
@@ -1130,6 +1215,9 @@ always @(posedge clk) begin
         id_ex_is_load <= dec_is_load;
         id_ex_is_store <= dec_is_store;
         id_ex_is_branch <= dec_is_branch;
+        id_ex_is_lr <= dec_is_lr;
+        id_ex_is_sc <= dec_is_sc;
+        id_ex_is_amo <= dec_is_amo;
         id_ex_is_jal <= dec_is_jal;
         id_ex_is_jalr <= dec_is_jalr;
         id_ex_is_lui <= dec_is_lui;
@@ -1178,6 +1266,9 @@ always @(posedge clk) begin
         ex_mem_funct3 <= 3'b0;
         ex_mem_is_load <= 1'b0;
         ex_mem_is_store <= 1'b0;
+        ex_mem_is_amo <= 1'b0;
+        ex_mem_is_rmw <= 1'b0;
+        ex_mem_amo_op <= 4'b0;
         ex_mem_reg_write <= 1'b0;
         ex_mem_retire <= 1'b0;
     end else if (!mem_stall && !ex_stall) begin
@@ -1185,20 +1276,19 @@ always @(posedge clk) begin
         ex_mem_rs2_data <= fwd_rs2_data;
         ex_mem_rd <= id_ex_rd;
         ex_mem_funct3 <= id_ex_funct3;
-        ex_mem_is_load <= id_ex_is_load;
-        ex_mem_is_store <= id_ex_is_store;
-        ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store && !id_ex_is_mret
-                           && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !id_ex_is_iaf && !trap_enter_r
-                           && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
-                           && !load_access_fault && !store_access_fault;
-        ex_mem_valid <= id_ex_valid && !id_ex_is_branch && !id_ex_is_mret
-                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !id_ex_is_iaf && !trap_enter_r
-                        && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
-                        && !load_access_fault && !store_access_fault;
-        ex_mem_retire <= id_ex_valid
-                        && !id_ex_is_ecall && !id_ex_is_ebreak && !id_ex_is_illegal && !id_ex_is_iaf && !trap_enter_r
-                        && !misalign_load && !misalign_store && !misalign_branch && !misalign_jump
-                        && !load_access_fault && !store_access_fault;
+        ex_mem_is_load <= id_ex_is_load || id_ex_is_amo;
+        ex_mem_is_store <= id_ex_is_store && !id_ex_is_amo && (!id_ex_is_sc || sc_pass);
+        ex_mem_is_amo <= id_ex_is_amo;
+        ex_mem_is_rmw <= id_ex_is_amo || id_ex_is_sc;
+        ex_mem_amo_op <= {id_ex_ir[27], id_ex_ir[31:29]};
+        ex_mem_reg_write <= id_ex_reg_write && !id_ex_is_branch && !id_ex_is_store && !id_ex_is_mret && !ex_kill;
+        ex_mem_valid <= id_ex_valid && !id_ex_is_branch && !id_ex_is_mret && !ex_kill;
+        ex_mem_retire <= id_ex_valid && !ex_kill;
+    end else if (amo_calc) begin
+        ex_mem_rs2_data <= amo_result;
+        ex_mem_is_store <= 1'b1;
+    end else if (amo_load_done) begin
+        ex_mem_is_load <= 1'b0;
     end
 end
 
@@ -1344,14 +1434,14 @@ always @(posedge clk) begin
         mem_wb_retire <= 1'b0;
         mem_wb_funct3 <= 3'b0;
         mem_wb_alu_result_lo <= 2'b0;
-    end else if ((!mem_stall && !ex_stall) || cpu_mem_complete || data_cache_hit_comb) begin
+    end else if (((!mem_stall && !ex_stall) || cpu_mem_complete || data_cache_hit_comb) && !amo_stall) begin
         // Advance MEM/WB pipeline register when:
         // 1. No stalls (neither memory nor EX stage stalled), OR
         // 2. A memory operation just completed (even if stalled, we take the result)
         mem_wb_rd <= ex_mem_rd;
-        mem_wb_reg_write <= ex_mem_reg_write && !ex_mem_is_store;
+        mem_wb_reg_write <= (ex_mem_reg_write && !ex_mem_is_store) || ex_mem_is_rmw;
         mem_wb_retire <= ex_mem_retire;
-        mem_wb_valid <= ex_mem_valid && !ex_mem_is_store;
+        mem_wb_valid <= ex_mem_valid && (!ex_mem_is_store || ex_mem_is_rmw);
         mem_wb_funct3 <= ex_mem_funct3;
         mem_wb_alu_result_lo <= ex_mem_alu_result[1:0];
 
@@ -1360,7 +1450,7 @@ always @(posedge clk) begin
         end else if (ex_mem_load_completing) begin
             mem_wb_result <= mem_load_data;
         end else begin
-            mem_wb_result <= ex_mem_alu_result;
+            mem_wb_result <= ex_mem_is_rmw ? amo_rd_q : ex_mem_alu_result;
         end
     end else begin
         // Stalled - insert bubble (don't retire any instruction)

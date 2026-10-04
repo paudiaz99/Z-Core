@@ -341,7 +341,7 @@ Detailed documentation is available in the `doc/` directory:
 - [x] **Data Cache**
 - [x] **Hybrid GShare branch predictor (Similar to Tournament)**
 - [ ] Write Buffer
-- [ ] RISC-V A extension (atomic instructions)
+- [x] RISC-V A extension (atomic instructions)
 - [ ] Boot Linux on Z-Core
 - [ ] RISC-V C extension (compressed instructions)
 - [ ] RISC-V V extension (vector instructions)

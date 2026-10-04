@@ -81,6 +81,9 @@ module z_core_control_u_tb;
     integer fence_marker_wb_count = -1;
     reg     fence_marker_seen = 1'b0;
 
+    // A-extension monitors (Tests 61+)
+    integer amo_store_miss_count = 0;
+
 
     // Interconnect Parameters
     // Interconnect Parameters
@@ -437,7 +440,11 @@ module z_core_control_u_tb;
             fence_stall_cycles <= 0;
             fence_marker_wb_count <= -1;
             fence_marker_seen <= 1'b0;
+            amo_store_miss_count <= 0;
         end else begin
+            if (uut.ex_mem_valid && uut.ex_mem_is_amo && uut.ex_mem_is_store &&
+                uut.data_cache_cs && !uut.data_cache_cache_hit)
+                amo_store_miss_count <= amo_store_miss_count + 1;
             if (uut.fence_stall)
                 fence_stall_cycles <= fence_stall_cycles + 1;
             if (uut.id_ex_valid && uut.id_ex_ir == FENCE_MARKER_IR && !fence_marker_seen) begin
@@ -2664,6 +2671,132 @@ module z_core_control_u_tb;
         check_int(fence_stall_cycles, 0, "FENCE did not stall (single cycle)");
         check_reg(10, 7, "ADDI before FENCE");
         check_reg(11, 10, "ADDI after FENCE (no hang)");
+
+        // ==========================================
+        // Test 61: LR/SC semantics (A extension)
+        // ==========================================
+        load_test61_lr_sc();
+        reset_cpu();
+        #12000;
+
+        $display("\n=== Test 61 Results: LR/SC Semantics ===");
+        check_reg(2, 105, "LR.W + load-use ADDI");
+        check_reg(3, 0, "SC.W with reservation succeeds");
+        check_reg(11, 7, "SC.W result forwarded");
+        check_reg(4, 1, "SC.W after SC fails");
+        check_reg(12, 1, "failed SC.W result forwarded");
+        check_reg(5, 105, "LR.W sees SC data");
+        check_reg(7, 1, "SC.W to other address fails");
+        check_reg(8, 1, "reservation cleared by failed SC");
+        check_reg(9, 105, "LR.W after failed SCs");
+        check_reg(10, 0, "SC.W after fresh LR succeeds");
+        check_reg(14, 200, "LW after SC.W");
+        check_reg(15, 77, "failed SC.W left neighbour intact");
+        check_mem(32'h0480, 200, "SC.W stored value");
+        check_mem(32'h0484, 77, "failed SC.W wrote nothing");
+
+        // ==========================================
+        // Test 62: LR/SC retry loop (branches between LR and SC)
+        // ==========================================
+        load_test62_lr_sc_loop();
+        reset_cpu();
+        #8000;
+
+        $display("\n=== Test 62 Results: LR/SC Increment Loop ===");
+        check_reg(5, 45, "5 atomic increments");
+        check_reg(4, 0, "last SC.W succeeded");
+        check_reg(2, 0, "loop counter exhausted");
+        check_mem(32'h04C0, 45, "counter in memory");
+
+        // ==========================================
+        // Test 63: AMO operations, operand aliasing, back-to-back deps
+        // ==========================================
+        load_test63_amo_ops();
+        reset_cpu();
+        #20000;
+
+        $display("\n=== Test 63 Results: AMO Operations ===");
+        check_int(amo_store_miss_count, 0, "AMO store phase always hits");
+        check_int(uut.reg_file.reg_r9_q - uut.reg_file.reg_r8_q, 4, "AMO retires exactly once");
+        check_reg(3, 10, "AMOADD.W old value");
+        check_reg(4, 11, "AMO result consumer");
+        check_reg(5, 17, "AMOXOR.W old value");
+        check_reg(6, 22, "AMOOR.W old value");
+        check_reg(7, 23, "AMOAND.W old value");
+        check_reg(20, 7, "AMOSWAP.W rd == rs2");
+        check_reg(29, 8, "AMO result load-use");
+        check_reg(26, 99, "AMOADD.W after swap");
+        check_reg(27, 100, "AMOADD.W rs2 from previous AMO");
+        check_reg(21, 199, "LW after AMO chain");
+        check_reg(14, 32'hFFFFFFFB, "AMOMIN.W old value");
+        check_reg(15, 32'hFFFFFFFB, "AMOMAX.W old value");
+        check_reg(16, 3, "AMOMAXU.W old value");
+        check_reg(18, 32'hFFFFFFFF, "AMOMINU.W old value");
+        check_reg(19, 3, "AMOMIN.W signed old value");
+        check_reg(22, 1000, "AMOADD.W rd == rs1");
+        check_reg(23, 6, "AMOADD.W rd = x0 still stores");
+        check_mem(32'h0500, 199, "AMO chain final value");
+        check_mem(32'h0504, 32'hFFFFFFFF, "AMOMIN/MAX final value");
+        check_mem(32'h0508, 1001, "AMOADD.W rd == rs1 store");
+        check_mem(32'h050C, 6, "AMOADD.W rd = x0 store");
+
+        // ==========================================
+        // Test 64: AMO on evicted lines (write buffer / refill) and on a
+        // resident line after a conflict-store fill
+        // ==========================================
+        load_test64_amo_evicted();
+        reset_cpu();
+        reset_wb_monitors();
+        #25000;
+
+        $display("\n=== Test 64 Results: AMO On Evicted Lines ===");
+        check_int(amo_store_miss_count, 0, "AMO store phase always hits");
+        check_reg(9, 1, "AMOADD.W old value of evicted line");
+        check_reg(11, 10, "AMOSWAP.W old value of resident line");
+        check_reg(12, 101, "LW after AMO on evicted line");
+        check_mem(32'h0100, 101, "AMOADD.W on evicted line");
+        check_mem(32'h2500, 100, "AMOSWAP.W on resident line");
+        check_mem(32'h0900, 3, "unrelated conflict store preserved");
+
+        // ==========================================
+        // Test 65: Atomic exceptions, reservation cleared by trap, misa.A
+        // ==========================================
+        load_test65_amo_traps();
+        reset_cpu();
+        #12000;
+
+        $display("\n=== Test 65 Results: Atomic Exceptions ===");
+        check_mem(32'h0600, 6, "misaligned AMO -> store/AMO misaligned");
+        check_mem(32'h0604, 4, "misaligned LR -> load misaligned");
+        check_mem(32'h0608, 2, "AMO .D funct3 -> illegal");
+        check_mem(32'h060C, 2, "LR with rs2 != 0 -> illegal");
+        check_mem(32'h0610, 11, "ECALL between LR and SC");
+        check_reg(27, 32'h0614, "exactly five traps taken");
+        check_reg(4, 0, "trapping AMO wrote no rd");
+        check_reg(5, 0, "trapping LR wrote no rd");
+        check_reg(7, 55, "AMOADD.W after traps");
+        check_reg(9, 1, "SC.W fails after trap");
+        check_mem(32'h0580, 56, "AMOADD.W stored, failed SC did not");
+        check_reg(30, 32'h40001101, "misa reports A, I, M");
+
+        // ==========================================
+        // Test 66: AMOs thrashing one 2-way set from a warm loop: every
+        // access misses, evicts a dirty line and feeds an immediate consumer
+        // ==========================================
+        load_test66_amo_thrash();
+        reset_cpu();
+        #30000;
+
+        $display("\n=== Test 66 Results: AMO Set Thrash ===");
+        check_int(amo_store_miss_count, 0, "AMO store phase always hits");
+        check_reg(5, 0, "loop completed");
+        check_reg(10, 13, "last AMOADD.W old value (A)");
+        check_reg(12, 23, "last AMOADD.W old value (B)");
+        check_reg(13, 33, "last AMOADD.W old value (C)");
+        check_reg(11, 258, "sum of all old values");
+        check_mem(32'h0700, 14, "A after 4 increments");
+        check_mem(32'h0B00, 24, "B after 4 increments");
+        check_mem(32'h0F00, 34, "C after 4 increments");
 
         // ==========================================
         // Final Summary
@@ -5579,6 +5712,206 @@ module z_core_control_u_tb;
             u_axil_ram.mem[1] = 32'h0ff0000f; // FENCE iorw, iorw
             u_axil_ram.mem[2] = 32'h00350593; // ADDI x11, x10, 3
             u_axil_ram.mem[3] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 61: LR/SC success, failure, address mismatch and result forwarding (2nd pass warm)
+    task load_test61_lr_sc;
+        integer i;
+        begin
+            $display("\n--- Loading Test 61: LR/SC semantics ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0]  = 32'h00200f93; // ADDI x31, x0, 2
+            u_axil_ram.mem[1]  = 32'h48000093; // ADDI x1, x0, 0x480
+            u_axil_ram.mem[2]  = 32'h06400813; // ADDI x16, x0, 100
+            u_axil_ram.mem[3]  = 32'h0100a023; // SW x16, 0(x1)
+            u_axil_ram.mem[4]  = 32'h04d00813; // ADDI x16, x0, 77
+            u_axil_ram.mem[5]  = 32'h0100a223; // SW x16, 4(x1)
+            u_axil_ram.mem[6]  = 32'h03700193; // ADDI x3, x0, 55
+            u_axil_ram.mem[7]  = 32'h04200213; // ADDI x4, x0, 66
+            u_axil_ram.mem[8]  = 32'h1000a12f; // LR.W x2, (x1)
+            u_axil_ram.mem[9]  = 32'h00510113; // ADDI x2, x2, 5
+            u_axil_ram.mem[10] = 32'h1820a1af; // SC.W x3, x2, (x1)
+            u_axil_ram.mem[11] = 32'h00718593; // ADDI x11, x3, 7
+            u_axil_ram.mem[12] = 32'h1820a22f; // SC.W x4, x2, (x1)
+            u_axil_ram.mem[13] = 32'h00020613; // ADDI x12, x4, 0
+            u_axil_ram.mem[14] = 32'h1000a2af; // LR.W x5, (x1)
+            u_axil_ram.mem[15] = 32'h00408313; // ADDI x6, x1, 4
+            u_axil_ram.mem[16] = 32'h182323af; // SC.W x7, x2, (x6)
+            u_axil_ram.mem[17] = 32'h1820a42f; // SC.W x8, x2, (x1)
+            u_axil_ram.mem[18] = 32'h1000a4af; // LR.W x9, (x1)
+            u_axil_ram.mem[19] = 32'h0c800693; // ADDI x13, x0, 200
+            u_axil_ram.mem[20] = 32'h18d0a52f; // SC.W x10, x13, (x1)
+            u_axil_ram.mem[21] = 32'h0000a703; // LW x14, 0(x1)
+            u_axil_ram.mem[22] = 32'h0040a783; // LW x15, 4(x1)
+            u_axil_ram.mem[23] = 32'hffff8f93; // ADDI x31, x31, -1
+            u_axil_ram.mem[24] = 32'hfa0f94e3; // BNE x31, x0, -88
+            u_axil_ram.mem[25] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 62: LR/SC retry loop, 5 atomic increments
+    task load_test62_lr_sc_loop;
+        integer i;
+        begin
+            $display("\n--- Loading Test 62: LR/SC increment loop ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0] = 32'h4c000093; // ADDI x1, x0, 0x4C0
+            u_axil_ram.mem[1] = 32'h00500113; // ADDI x2, x0, 5
+            u_axil_ram.mem[2] = 32'h1000a1af; // LR.W x3, (x1)
+            u_axil_ram.mem[3] = 32'h00118193; // ADDI x3, x3, 1
+            u_axil_ram.mem[4] = 32'h1830a22f; // SC.W x4, x3, (x1)
+            u_axil_ram.mem[5] = 32'hfe021ae3; // BNE x4, x0, -12
+            u_axil_ram.mem[6] = 32'hfff10113; // ADDI x2, x2, -1
+            u_axil_ram.mem[7] = 32'hfe0116e3; // BNE x2, x0, -20
+            u_axil_ram.mem[8] = 32'h0000a283; // LW x5, 0(x1)
+            u_axil_ram.mem[9] = 32'h0000006f; // JAL x0, 0
+            u_axil_ram.mem[32'h4C0 >> 2] = 32'd40;
+        end
+    endtask
+
+    // Test 63: every AMO opcode, rd/rs aliasing, AMO -> AMO dependency (2nd pass warm)
+    task load_test63_amo_ops;
+        integer i;
+        begin
+            $display("\n--- Loading Test 63: AMO operations ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0]  = 32'h00200f93; // ADDI x31, x0, 2
+            u_axil_ram.mem[1]  = 32'h50000093; // ADDI x1, x0, 0x500
+            u_axil_ram.mem[2]  = 32'hffff8e13; // ADDI x28, x31, -1
+            u_axil_ram.mem[3]  = 32'h00ae1e13; // SLLI x28, x28, 10
+            u_axil_ram.mem[4]  = 32'h00ae0813; // ADDI x16, x28, 10
+            u_axil_ram.mem[5]  = 32'h0100a023; // SW x16, 0(x1)
+            u_axil_ram.mem[6]  = 32'hffbe0813; // ADDI x16, x28, -5
+            u_axil_ram.mem[7]  = 32'h0100a223; // SW x16, 4(x1)
+            u_axil_ram.mem[8]  = 32'h3e8e0813; // ADDI x16, x28, 1000
+            u_axil_ram.mem[9]  = 32'h0100a423; // SW x16, 8(x1)
+            u_axil_ram.mem[10] = 32'h005e0813; // ADDI x16, x28, 5
+            u_axil_ram.mem[11] = 32'h0100a623; // SW x16, 12(x1)
+            u_axil_ram.mem[12] = 32'h00700113; // ADDI x2, x0, 7
+            u_axil_ram.mem[13] = 32'h00000013; // NOP
+            u_axil_ram.mem[14] = 32'h00000013; // NOP
+            u_axil_ram.mem[15] = 32'hb0202473; // CSRRS x8, minstret, x0
+            u_axil_ram.mem[16] = 32'h0020a1af; // AMOADD.W x3, x2, (x1)
+            u_axil_ram.mem[17] = 32'h00000013; // NOP
+            u_axil_ram.mem[18] = 32'h00000013; // NOP
+            u_axil_ram.mem[19] = 32'hb02024f3; // CSRRS x9, minstret, x0
+            u_axil_ram.mem[20] = 32'h00118213; // ADDI x4, x3, 1
+            u_axil_ram.mem[21] = 32'h2020a2af; // AMOXOR.W x5, x2, (x1)
+            u_axil_ram.mem[22] = 32'h4020a32f; // AMOOR.W x6, x2, (x1)
+            u_axil_ram.mem[23] = 32'h6020a3af; // AMOAND.W x7, x2, (x1)
+            u_axil_ram.mem[24] = 32'h06300a13; // ADDI x20, x0, 99
+            u_axil_ram.mem[25] = 32'h0940aa2f; // AMOSWAP.W x20, x20, (x1)
+            u_axil_ram.mem[26] = 32'h001a0e93; // ADDI x29, x20, 1
+            u_axil_ram.mem[27] = 32'h00100c93; // ADDI x25, x0, 1
+            u_axil_ram.mem[28] = 32'h0190ad2f; // AMOADD.W x26, x25, (x1)
+            u_axil_ram.mem[29] = 32'h01a0adaf; // AMOADD.W x27, x26, (x1)
+            u_axil_ram.mem[30] = 32'h0000aa83; // LW x21, 0(x1)
+            u_axil_ram.mem[31] = 32'h00408613; // ADDI x12, x1, 4
+            u_axil_ram.mem[32] = 32'h00300693; // ADDI x13, x0, 3
+            u_axil_ram.mem[33] = 32'h80d6272f; // AMOMIN.W x14, x13, (x12)
+            u_axil_ram.mem[34] = 32'ha0d627af; // AMOMAX.W x15, x13, (x12)
+            u_axil_ram.mem[35] = 32'hfff00893; // ADDI x17, x0, -1
+            u_axil_ram.mem[36] = 32'he116282f; // AMOMAXU.W x16, x17, (x12)
+            u_axil_ram.mem[37] = 32'hc0d6292f; // AMOMINU.W x18, x13, (x12)
+            u_axil_ram.mem[38] = 32'h811629af; // AMOMIN.W x19, x17, (x12)
+            u_axil_ram.mem[39] = 32'h00808b13; // ADDI x22, x1, 8
+            u_axil_ram.mem[40] = 32'h019b2b2f; // AMOADD.W x22, x25, (x22)
+            u_axil_ram.mem[41] = 32'h00c08c13; // ADDI x24, x1, 12
+            u_axil_ram.mem[42] = 32'h019c202f; // AMOADD.W x0, x25, (x24)
+            u_axil_ram.mem[43] = 32'h000c2b83; // LW x23, 0(x24)
+            u_axil_ram.mem[44] = 32'hffff8f93; // ADDI x31, x31, -1
+            u_axil_ram.mem[45] = 32'hf40f9ae3; // BNE x31, x0, -172
+            u_axil_ram.mem[46] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 64: 10 conflict stores, then AMO on the oldest (evicted) and newest (resident) line
+    task load_test64_amo_evicted;
+        integer next;
+        begin
+            $display("\n--- Loading Test 64: AMO on evicted lines ---");
+            load_conflict_stores(10);
+            next = 2 + 10 * 3;
+            u_axil_ram.mem[next]     = 32'h10000393; // ADDI x7, x0, 0x100
+            u_axil_ram.mem[next + 1] = 32'h06400413; // ADDI x8, x0, 100
+            u_axil_ram.mem[next + 2] = 32'h0083a4af; // AMOADD.W x9, x8, (x7)
+            u_axil_ram.mem[next + 3] = 32'h00002537; // LUI x10, 0x2
+            u_axil_ram.mem[next + 4] = 32'h50050513; // ADDI x10, x10, 0x500
+            u_axil_ram.mem[next + 5] = 32'h088525af; // AMOSWAP.W x11, x8, (x10)
+            u_axil_ram.mem[next + 6] = 32'h0003a603; // LW x12, 0(x7)
+            u_axil_ram.mem[next + 7] = 32'h0000006f; // JAL x0, 0
+        end
+    endtask
+
+    // Test 65: misaligned/illegal atomics trap, trap clears the reservation
+    task load_test65_amo_traps;
+        integer i;
+        begin
+            $display("\n--- Loading Test 65: Atomic exceptions ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0]  = 32'h60000d93; // ADDI x27, x0, 0x600
+            u_axil_ram.mem[1]  = 32'h20000093; // ADDI x1, x0, 0x200
+            u_axil_ram.mem[2]  = 32'h30509073; // CSRRW x0, mtvec, x1
+            u_axil_ram.mem[3]  = 32'h58200113; // ADDI x2, x0, 0x582
+            u_axil_ram.mem[4]  = 32'h00100193; // ADDI x3, x0, 1
+            u_axil_ram.mem[5]  = 32'h0031222f; // AMOADD.W x4, x3, (x2)
+            u_axil_ram.mem[6]  = 32'h100122af; // LR.W x5, (x2)
+            u_axil_ram.mem[7]  = 32'h0031322f; // AMOADD.D x4, x3, (x2)
+            u_axil_ram.mem[8]  = 32'h103122af; // LR.W x5, (x2) with rs2 = x3
+            u_axil_ram.mem[9]  = 32'h58000313; // ADDI x6, x0, 0x580
+            u_axil_ram.mem[10] = 32'h003323af; // AMOADD.W x7, x3, (x6)
+            u_axil_ram.mem[11] = 32'h1003242f; // LR.W x8, (x6)
+            u_axil_ram.mem[12] = 32'h00000073; // ECALL
+            u_axil_ram.mem[13] = 32'h183324af; // SC.W x9, x3, (x6)
+            u_axil_ram.mem[14] = 32'h30102f73; // CSRRS x30, misa, x0
+            u_axil_ram.mem[15] = 32'h0000006f; // JAL x0, 0
+            for (i = 128; i < 140; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[128] = 32'h34202e73; // CSRRS x28, mcause, x0
+            u_axil_ram.mem[129] = 32'h01cda023; // SW x28, 0(x27)
+            u_axil_ram.mem[130] = 32'h004d8d93; // ADDI x27, x27, 4
+            u_axil_ram.mem[131] = 32'h34102ef3; // CSRRS x29, mepc, x0
+            u_axil_ram.mem[132] = 32'h004e8e93; // ADDI x29, x29, 4
+            u_axil_ram.mem[133] = 32'h341e9073; // CSRRW x0, mepc, x29
+            u_axil_ram.mem[134] = 32'h30200073; // MRET
+            u_axil_ram.mem[32'h580 >> 2] = 32'd55;
+            for (i = 0; i < 8; i = i + 1)
+                u_axil_ram.mem[(32'h600 >> 2) + i] = 32'h0;
+        end
+    endtask
+
+    // Test 66: warm-loop AMOs thrashing one 2-way set (miss, eviction, forward)
+    task load_test66_amo_thrash;
+        integer i;
+        begin
+            $display("\n--- Loading Test 66: AMO set thrash ---");
+            for (i = 0; i < 64; i = i + 1)
+                u_axil_ram.mem[i] = 32'h00000013;
+            u_axil_ram.mem[0]  = 32'h70000093; // ADDI x1, x0, 0x700
+            u_axil_ram.mem[1]  = 32'h30000113; // ADDI x2, x0, 0x300
+            u_axil_ram.mem[2]  = 32'h7ff10113; // ADDI x2, x2, 0x7FF
+            u_axil_ram.mem[3]  = 32'h00110113; // ADDI x2, x2, 1
+            u_axil_ram.mem[4]  = 32'h000011b7; // LUI x3, 0x1
+            u_axil_ram.mem[5]  = 32'hf0018193; // ADDI x3, x3, -0x100
+            u_axil_ram.mem[6]  = 32'h00400293; // ADDI x5, x0, 4
+            u_axil_ram.mem[7]  = 32'h00100313; // ADDI x6, x0, 1
+            u_axil_ram.mem[8]  = 32'h0060a52f; // AMOADD.W x10, x6, (x1)
+            u_axil_ram.mem[9]  = 32'h00a585b3; // ADD x11, x11, x10
+            u_axil_ram.mem[10] = 32'h0061262f; // AMOADD.W x12, x6, (x2)
+            u_axil_ram.mem[11] = 32'h00c585b3; // ADD x11, x11, x12
+            u_axil_ram.mem[12] = 32'h0061a6af; // AMOADD.W x13, x6, (x3)
+            u_axil_ram.mem[13] = 32'h00d585b3; // ADD x11, x11, x13
+            u_axil_ram.mem[14] = 32'hfff28293; // ADDI x5, x5, -1
+            u_axil_ram.mem[15] = 32'hfe0292e3; // BNE x5, x0, -28
+            u_axil_ram.mem[16] = 32'h0000006f; // JAL x0, 0
+            u_axil_ram.mem[32'h700 >> 2] = 32'd10;
+            u_axil_ram.mem[32'hB00 >> 2] = 32'd20;
+            u_axil_ram.mem[32'hF00 >> 2] = 32'd30;
         end
     endtask
 
