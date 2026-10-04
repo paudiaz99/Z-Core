@@ -45,6 +45,9 @@ SOFTWARE.
 `include "rtl/priority_encoder.v"
 `include "rtl/z_core_mult_synth.v"
 `include "rtl/z_core_csr_file.v"
+`include "rtl/z_core_data_cache.v"
+`include "rtl/z_core_pma.v"
+`include "rtl/z_core_write_buffer.v"
 
 module z_core_riscof_tb;
 
@@ -54,6 +57,9 @@ module z_core_riscof_tb;
     parameter STRB_WIDTH = (DATA_WIDTH/8);
     parameter N_GPIO     = 64;
     parameter CACHE_DEPTH = 256;
+    parameter DATA_CACHE_DEPTH = 4096;   // Sets per way of the 2-way data cache
+    localparam DCACHE_IDX_W = $clog2(DATA_CACHE_DEPTH);
+    localparam WB_ENTRIES = 8;
 
     // Plusargs for RISCOF
     reg [512*8-1:0] hex_file;
@@ -195,7 +201,8 @@ module z_core_riscof_tb;
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .STRB_WIDTH(STRB_WIDTH),
-        .CACHE_DEPTH(CACHE_DEPTH)
+        .INST_CACHE_DEPTH(CACHE_DEPTH),
+        .DATA_CACHE_DEPTH(DATA_CACHE_DEPTH)
     ) uut (
         .clk(clk),
         .rstn(rstn),
@@ -358,7 +365,7 @@ module z_core_riscof_tb;
         rstn = 1;
 
         // Wait for tohost != 0 (RVMODEL_HALT writes 1 to tohost) or timeout
-        while (u_axil_ram.mem[tohost_addr >> 2] === 32'h0 && cycle_count < timeout_cycles) begin
+        while (coherent_read(tohost_addr) === 32'h0 && cycle_count < timeout_cycles) begin
             @(posedge clk);
             cycle_count = cycle_count + 1;
             if (cycle_count % 100000 == 0)
@@ -371,12 +378,38 @@ module z_core_riscof_tb;
             $display("Test halted after %0d cycles", cycle_count);
         end
 
+        // Let write-buffer drains already on the AXI bus land in RAM
+        repeat(200) @(posedge clk);
+
         // Dump signature
         dump_signature();
 
         $display("RISCOF Test Complete");
         $finish;
     end
+
+    // The data cache is write-back: the newest copy of a word lives in the
+    // data cache, then in the write buffer (newest entry wins), then in RAM.
+    function [31:0] coherent_read(input integer byte_addr);
+        integer idx, tag, n, p;
+        begin
+            idx = (byte_addr >> 2) % DATA_CACHE_DEPTH;
+            tag = byte_addr >> (2 + DCACHE_IDX_W);
+            if (uut.data_cache.valid_bits_0[idx] && uut.data_cache.tags_0[idx] == tag)
+                coherent_read = uut.data_cache.data_0[idx];
+            else if (uut.data_cache.valid_bits_1[idx] && uut.data_cache.tags_1[idx] == tag)
+                coherent_read = uut.data_cache.data_1[idx];
+            else begin
+                coherent_read = u_axil_ram.mem[byte_addr >> 2];
+                for (n = 0; n < uut.write_buffer_inst.elem_count; n = n + 1) begin
+                    p = (uut.write_buffer_inst.read_pointer + n) % WB_ENTRIES;
+                    if (uut.write_buffer_inst.write_buffer_valid[p] &&
+                        uut.write_buffer_inst.write_buffer_address[p] == (byte_addr & ~3))
+                        coherent_read = uut.write_buffer_inst.write_buffer_data[p];
+                end
+            end
+        end
+    endfunction
 
     // Task to dump signature region to file
     task dump_signature;
@@ -391,7 +424,7 @@ module z_core_riscof_tb;
             end
 
             for (addr = sig_begin; addr < sig_end; addr = addr + 4) begin
-                data = u_axil_ram.mem[addr >> 2];
+                data = coherent_read(addr);
                 $fwrite(fd, "%08x\n", data);
             end
 
