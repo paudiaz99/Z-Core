@@ -340,11 +340,18 @@ Detailed documentation is available in the `doc/` directory:
 - [x] **Exception / Trap Handling (Illegal Inst, ECALL, EBREAK)**
 - [x] **Data Cache**
 - [x] **Hybrid GShare branch predictor (Similar to Tournament)**
-- [ ] Write Buffer
-- [x] RISC-V A extension (atomic instructions)
-- [ ] Boot Linux on Z-Core
+- [x] **Write Buffer**
+- [x] **RISC-V A extension (atomic instructions)**
+- [x] **Boot Linux on Z-Core**
+- [ ] Return Address Stack
+- [ ] Write coalescing in the write buffer
+- [ ] RISC-V C extension (compressed instructions)
+- [ ] Migration from AXI4-Lite to AXI4 bus
+- [ ] Non-blocking data cache
+- [ ] Simple stride prefetcher
 - [ ] RISC-V C extension (compressed instructions)
 - [ ] RISC-V V extension (vector instructions)
+- [ ] Dual Issue superscalar
 - [ ] Tightly coupled MMU for AI acceleration
 - [ ] RISC-V F extension (single-precision floating-point instructions)
 - [ ] RISC-V D extension (double-precision floating-point instructions)
